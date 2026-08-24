@@ -1,16 +1,17 @@
 // Ageez Hotels — Prisma schema
 //
-// M0 SCOPE NOTE: This file intentionally contains ONLY the datasource and
-// generator configuration. The full multi-tenant data model (Hotel, Room,
-// RoomType, Reservation, Guest, StaffUser, MaintenanceIssue, ServiceRequest,
-// AiKnowledgeDocument, etc.) is Milestone M1 scope and requires its own
-// approval pass — see docs/DATABASE.md for the planned design.
+// M1: full multi-tenant data model. Every tenant-owned model carries a
+// `hotelId` field referencing Hotel, indexed, and is only ever queried
+// through the centralized tenant-aware data-access layer in
+// src/lib/tenant/ — no ad hoc `where: { hotelId }` filtering scattered
+// through route handlers or components (see docs/SECURITY.md).
 //
-// Architectural invariant (see docs/SECURITY.md): every tenant-owned model
-// introduced in M1 MUST include a `hotelId` field referencing Hotel, and all
-// queries against tenant-owned models MUST go through the centralized
-// tenant-aware data-access layer in src/lib/tenant/ — no ad hoc filtering
-// scattered through route handlers or components.
+// Hotel business data (Ageez Grand Hotel's own rooms/prices/policies) is
+// NOT in this file — it is seeded as DB rows by prisma/seed/index.ts from
+// fixtures under src/config/defaults/seed/. This file defines shape only.
+//
+// See docs/DATABASE.md for the design rationale and docs/DECISIONS.md for
+// the specific naming/scope decisions made when this schema was finalized.
 
 generator client {
   provider = "prisma-client-js"
@@ -21,4 +22,291 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// --- M1 will add models here ---
+// ─────────────────────────────────────────────────────────────────────────
+// Tenant root
+// ─────────────────────────────────────────────────────────────────────────
+
+/// The tenant root. In v0.1 exactly one row exists (Ageez Grand Hotel), but
+/// nothing in the schema assumes a single tenant.
+model Hotel {
+  id   String @id @default(cuid())
+  name String
+  slug String @unique
+
+  city    String
+  country String
+
+  contactEmail String?
+  contactPhone String?
+
+  checkInTime  String // e.g. "14:00" — display string, not a DB-enforced time
+  checkOutTime String // e.g. "11:00"
+  currency     String // ISO-ish code as used in UI, e.g. "ETB"
+
+  /// Which v0.1 modules are turned on for this hotel (Dashboard, Reservations,
+  /// Rooms, Guests, Housekeeping, Maintenance, Services, Reports, ...).
+  /// Dev/platform default lives in src/config/defaults; per-hotel override is
+  /// this column.
+  enabledModules String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  roomTypes          RoomType[]
+  rooms              Room[]
+  guests             Guest[]
+  reservations       Reservation[]
+  serviceRequests    ServiceRequest[]
+  maintenanceIssues  MaintenanceIssue[]
+  staffUsers         StaffUser[]
+  aiKnowledgeDocs    AiKnowledgeDocument[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Inventory
+// ─────────────────────────────────────────────────────────────────────────
+
+model RoomType {
+  id     String @id @default(cuid())
+  hotel  Hotel  @relation(fields: [hotelId], references: [id])
+  hotelId String
+
+  name        String
+  description String
+  capacity    Int
+  basePrice   Decimal @db.Decimal(10, 2)
+  currency    String
+
+  rooms Room[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([hotelId, name])
+  @@index([hotelId])
+}
+
+enum RoomStatus {
+  AVAILABLE
+  RESERVED
+  OCCUPIED
+  CLEANING
+  MAINTENANCE
+  OUT_OF_SERVICE
+}
+
+model Room {
+  id     String @id @default(cuid())
+  hotel  Hotel  @relation(fields: [hotelId], references: [id])
+  hotelId String
+
+  roomType   RoomType @relation(fields: [roomTypeId], references: [id])
+  roomTypeId String
+
+  roomNumber String
+  floor      Int
+  status     RoomStatus @default(AVAILABLE)
+
+  reservations      Reservation[]
+  maintenanceIssues MaintenanceIssue[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([hotelId, roomNumber])
+  @@index([hotelId])
+  @@index([hotelId, status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Guests + reservations (no rows seeded in M1 — created live in the M3 demo)
+// ─────────────────────────────────────────────────────────────────────────
+
+model Guest {
+  id     String @id @default(cuid())
+  hotel  Hotel  @relation(fields: [hotelId], references: [id])
+  hotelId String
+
+  name        String
+  email       String?
+  phone       String?
+  nationality String?
+
+  reservations    Reservation[]
+  serviceRequests ServiceRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([hotelId])
+}
+
+enum ReservationStatus {
+  CREATED
+  CONFIRMED
+  CHECKED_IN
+  CHECKED_OUT
+  CANCELLED
+}
+
+enum PaymentMethod {
+  PAY_AT_HOTEL
+}
+
+model Reservation {
+  id     String @id @default(cuid())
+  hotel  Hotel  @relation(fields: [hotelId], references: [id])
+  hotelId String
+
+  guest   Guest  @relation(fields: [guestId], references: [id])
+  guestId String
+
+  room   Room   @relation(fields: [roomId], references: [id])
+  roomId String
+
+  checkIn  DateTime
+  checkOut DateTime
+
+  status          ReservationStatus @default(CREATED)
+  totalPrice      Decimal           @db.Decimal(10, 2)
+  paymentMethod   PaymentMethod     @default(PAY_AT_HOTEL)
+  specialRequests String?
+
+  serviceRequests ServiceRequest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([hotelId])
+  @@index([hotelId, status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Service + maintenance operations (no rows seeded in M1)
+// ─────────────────────────────────────────────────────────────────────────
+
+enum ServiceRequestType {
+  AIRPORT_TRANSFER
+  LAUNDRY
+  ROOM_SERVICE
+  RESTAURANT
+  OTHER
+}
+
+enum ServiceRequestStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model ServiceRequest {
+  id     String @id @default(cuid())
+  hotel  Hotel  @relation(fields: [hotelId], references: [id])
+  hotelId String
+
+  reservation   Reservation? @relation(fields: [reservationId], references: [id])
+  reservationId String?
+
+  guest   Guest?  @relation(fields: [guestId], references: [id])
+  guestId String?
+
+  type   ServiceRequestType
+  status ServiceRequestStatus @default(PENDING)
+  notes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([hotelId])
+  @@index([hotelId, status])
+}
+
+enum MaintenancePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum MaintenanceStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+model MaintenanceIssue {
+  id     String @id @default(cuid())
+  hotel  Hotel  @relation(fields: [hotelId], references: [id])
+  hotelId String
+
+  room   Room   @relation(fields: [roomId], references: [id])
+  roomId String
+
+  description String
+  priority    MaintenancePriority @default(MEDIUM)
+  status      MaintenanceStatus  @default(OPEN)
+
+  assignedTo   StaffUser? @relation(fields: [assignedToId], references: [id])
+  assignedToId String?
+
+  resolutionNotes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([hotelId])
+  @@index([hotelId, status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Staff (auth wiring deferred to M4 — seeded here without password/session
+// fields; adding those later is an additive migration, not a redesign)
+// ─────────────────────────────────────────────────────────────────────────
+
+enum StaffRole {
+  OWNER_ADMIN
+  MANAGER
+  FRONT_DESK
+  HOUSEKEEPING
+  MAINTENANCE
+}
+
+model StaffUser {
+  id     String @id @default(cuid())
+  hotel  Hotel  @relation(fields: [hotelId], references: [id])
+  hotelId String
+
+  name  String
+  email String @unique
+  role  StaffRole
+
+  assignedMaintenanceIssues MaintenanceIssue[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([hotelId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// AI knowledge (grounds the M6 concierge / M7 management assistant per
+// docs/AI_SPEC.md — never source for fabricated facts, always DB data)
+// ─────────────────────────────────────────────────────────────────────────
+
+model AiKnowledgeDocument {
+  id     String @id @default(cuid())
+  hotel  Hotel  @relation(fields: [hotelId], references: [id])
+  hotelId String
+
+  category String // e.g. "policies", "amenities", "services", "dining"
+  content  String
+  version  Int    @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([hotelId, category])
+  @@index([hotelId])
+}

@@ -1,5 +1,37 @@
 # Changelog
 
+## M1 — Database + Fictional Hotel Data (2026-08-24)
+- Finalized `prisma/schema.prisma`: 9 models (`Hotel`, `RoomType`, `Room`,
+  `Guest`, `Reservation`, `ServiceRequest`, `MaintenanceIssue`,
+  `StaffUser`, `AiKnowledgeDocument`) and 8 enums, every tenant-owned model
+  carrying an indexed `hotelId`. See `docs/DATABASE.md` for the full field
+  list and `docs/DECISIONS.md` for naming/scope decisions made in this
+  pass.
+- Generated the baseline migration at
+  `prisma/migrations/20260824000000_init/migration.sql` via `prisma migrate
+  diff --from-empty` (no live Postgres was reachable to run `migrate dev`).
+  **Not applied to any database.**
+- Added seed fixture data (`src/config/defaults/seed/ageez-grand-hotel.ts`)
+  and the seed script (`prisma/seed/index.ts`, idempotent upserts) that
+  together create Ageez Grand Hotel — 1 hotel, 5 room types, 52 rooms, 5
+  staff (one per role), 5 AI knowledge documents — as DB rows. All facts
+  transcribed from the already-approved `docs/PRODUCT_VISION.md`; nothing
+  invented ad hoc. **Not executed against a live database.**
+- Added the data-access foundation: `src/lib/db/client.ts` (PrismaClient
+  singleton) and `src/lib/tenant/index.ts` (`withTenant()` /
+  `resolveTenantContext()` — the centralized tenant-scoping pattern
+  required from M1 onward). Scoped to the models with seeded data
+  (RoomType, Room) only; later milestones extend this as their own
+  features need it.
+- Verified: `npx prisma validate`, `npx prisma generate`, `npm run
+  typecheck`, `npm run lint` all pass. `prisma migrate dev`, `npm run
+  db:seed`, and any live query against real data were **not run** — no
+  Postgres reachable in this environment. Whoever has a real
+  `DATABASE_URL` should run `npx prisma migrate deploy` then `npm run
+  db:seed` and confirm 52 rooms / 5 room types / 1 hotel before this is
+  treated as production-verified.
+- Updated `docs/DATABASE.md`, `docs/DECISIONS.md`, `docs/V0.1_SCOPE.md`.
+
 ## M0 cleanup — dependencies installed, lint config added (2026-08-24)
 - Added `package-lock.json` (dependencies installed and locked; the M0 note
   about no network access in the Claude sandbox no longer applies — `npm

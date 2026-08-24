@@ -4,6 +4,67 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-24 — M1 schema finalized: enum naming, unique keys, StaffUser without auth fields
+**Status:** Approved
+**Decision:** The full M1 model set (`docs/DATABASE.md`) is finalized with:
+enum names not previously specified anywhere (`RoomStatus`,
+`ReservationStatus`, `PaymentMethod`, `ServiceRequestType`,
+`ServiceRequestStatus`, `MaintenancePriority`, `MaintenanceStatus`,
+`StaffRole`); compound unique constraints added beyond the M0 design sketch
+— `RoomType(hotelId, name)`, `Room(hotelId, roomNumber)`,
+`AiKnowledgeDocument(hotelId, category)` — so the seed script can upsert
+idempotently instead of duplicating rows on re-run; and `StaffUser` seeded
+in M1 with no password/session/adapter fields, since Auth.js wiring is M4
+scope — adding those fields later is an additive migration, not a
+redesign.
+**Rationale:** `docs/DATABASE.md` explicitly deferred these specifics to
+"the M1 review pass." Keeping StaffUser auth-field-free until M4 avoids
+guessing at an Auth.js adapter shape before that milestone's own approval
+pass designs it.
+
+---
+
+## 2026-08-24 — AiKnowledgeDocument used for amenity/policy facts instead of a new model
+**Status:** Approved
+**Decision:** The check-in/out times, breakfast hours, restaurant/lounge
+names, conference hall count, and service list from
+`docs/PRODUCT_VISION.md`'s "Demo hotel facts" are seeded as
+`AiKnowledgeDocument` rows (categories: policies, dining, facilities,
+services, payment), not as new bespoke `Hotel` columns or a new model.
+**Rationale:** `docs/AI_SPEC.md` already designs `src/lib/ai/knowledge` as
+the home for exactly this kind of structured, per-tenant, versioned
+grounding content. Reusing the model that M6/M7 already depend on avoids a
+second, competing source of truth for the same facts.
+
+---
+
+## 2026-08-24 — 52-room seed distribution: one contiguous floor per room type
+**Status:** Approved
+**Decision:** The 52 rooms required by `docs/PRODUCT_VISION.md` are split
+as Standard King 18 (floor 1), Deluxe Twin 16 (floor 2), Executive Room 10
+(floor 3), Family Suite 6 (floor 4), Presidential Suite 2 (floor 5), with
+room numbers generated as `{floor}{01..N}` (e.g. 101-118).
+**Rationale:** `docs/DATABASE.md` left the exact mix to "M1 seed time."
+Weighting toward lower-priced types reflects a plausible real hotel mix;
+one type per floor keeps generated room numbers legible for the demo and
+management UI (M2/M4).
+
+---
+
+## 2026-08-24 — M1 shipped as schema + generated migration SQL, not applied
+**Status:** Approved (Product Owner decision when M1 was scoped)
+**Decision:** No Postgres/Docker is reachable in the Claude sandbox. M1
+delivers `prisma/schema.prisma`, a baseline migration generated via `prisma
+migrate diff --from-empty` (not `migrate dev`, which requires a live DB),
+and a typechecked seed script — but does not execute a migration or seed
+against a real database.
+**Rationale:** Matches the CLAUDE.md-recorded sandbox network constraint.
+Avoids claiming DB-verified work that wasn't actually run; the Product
+Owner (or a future session with a real `DATABASE_URL`) applies and
+verifies the migration/seed before it's treated as production-verified.
+
+---
+
 ## 2026-08-24 — Prisma schema left as stub in M0
 **Status:** Approved (implicit in M0 scope instructions)
 **Decision:** `prisma/schema.prisma` contains only datasource/generator
