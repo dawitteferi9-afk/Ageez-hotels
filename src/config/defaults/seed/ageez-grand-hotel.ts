@@ -10,7 +10,9 @@
  * Every fact below is transcribed from the already-approved
  * `docs/PRODUCT_VISION.md` "Demo hotel facts" section — nothing here is
  * invented ad hoc. Room count distribution and staff/knowledge fixtures are
- * new M1 decisions, recorded in docs/DECISIONS.md.
+ * M1 decisions, recorded in docs/DECISIONS.md. The `overview` knowledge
+ * document is an M2 addition (guest homepage/About copy) — descriptive
+ * text only, no new facts beyond what PRODUCT_VISION.md already states.
  */
 
 export const hotelFixture = {
@@ -121,6 +123,13 @@ export const staffFixtures = [
  * a fact that isn't backed by a row like these.
  */
 export const aiKnowledgeFixtures = [
+  {
+    category: "overview",
+    content:
+      "Ageez Grand Hotel is a premium hotel in Addis Ababa, Ethiopia, offering " +
+      "well-appointed rooms and suites, dedicated conference facilities, and " +
+      "attentive service for both leisure and business travelers.",
+  },
   {
     category: "policies",
     content:

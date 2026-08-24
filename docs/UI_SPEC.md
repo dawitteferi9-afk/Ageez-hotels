@@ -30,11 +30,20 @@ brand color/logo could override defaults at runtime from DB data, without
 a rebuild.
 
 ## Component strategy
-shadcn/ui as the primitive layer (`src/components/ui`), composed into
+shadcn/ui-*style* primitives in `src/components/ui` (cva + `clsx` +
+`tailwind-merge`, matching shadcn's own composition pattern), composed into
 guest-specific and management-specific components. Avoid one-off styled
 components that duplicate what a shared primitive should do.
 
+**M2 note:** primitives are hand-written rather than generated via the
+`shadcn` CLI — that CLI needs npm registry + Radix package installs, which
+this sandbox cannot reach (see CLAUDE.md environment constraint). No Radix
+dependency was added. Structurally these match what the CLI would scaffold
+(`buttonVariants` cva export, `Card`/`CardHeader`/... composition), so
+swapping in real shadcn-generated primitives later — e.g. to add Radix's
+`asChild`/Slot support — is a drop-in replacement, not a redesign.
+
 ## Scope
-No pages/components are implemented in M0. This doc exists so M2 (guest
-site) and M4 (dashboard) have an agreed visual foundation before UI work
-starts.
+No pages/components were implemented in M0. M2 (guest site) built the first
+real pages/components against this foundation; M4 (dashboard) is next to
+use it.

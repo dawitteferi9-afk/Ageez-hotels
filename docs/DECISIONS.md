@@ -4,6 +4,100 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-24 — Local PostgreSQL 17 installed in the Claude sandbox for M2 verification
+**Status:** Approved (explicit Product Owner request/confirmation)
+**Decision:** PostgreSQL 17 was installed locally in this sandbox (via a
+directly-downloaded EnterpriseDB installer, run by the Product Owner as
+Administrator after `winget`'s own download hit a transient 403 and a
+non-elevated silent install failed) to unblock M2's live-database
+verification. Connection details live only in `.env.local` (gitignored,
+never committed): `postgresql://postgres:***@localhost:5432/ageez_hotels`.
+**Rationale:** Supersedes the M0/M1-recorded "no DB reachable in this
+sandbox" constraint *for this machine going forward* — it was a
+sandbox-provisioning gap, not an architectural one. `docs/CHANGELOG.md`'s
+M1 entry (migration/seed authored but unapplied) and M2's original
+build-only verification predate this; both were re-verified against this
+real database the same day (see M2 entry addendum). CLAUDE.md's environment
+constraint note should be treated as historical for this machine, though
+the underlying rule (never claim DB-verified work without actually running
+it) still stands for any *other* environment this project runs in.
+
+---
+
+## 2026-08-24 — M2 guest-site tenant resolution: single oldest Hotel row
+**Status:** Approved
+**Decision:** `getCurrentTenantHotel()` (`src/lib/tenant`) resolves "the"
+hotel the guest site renders as `prisma.hotel.findFirst({ orderBy: {
+createdAt: "asc" } })` — not by subdomain/domain/header. Wrapped in React
+`cache()` so one request shares one DB round trip across layout metadata,
+layout body, and page body.
+**Rationale:** v0.1 has exactly one live tenant and no domain-based
+tenant-routing infrastructure exists yet (that's a Hotel Generator-era
+concern, explicitly deferred per `docs/ARCHITECTURE.md`). Building that
+routing now would be premature; this keeps a single, obvious seam
+(`getCurrentTenantHotel()`'s body) to change later without touching call
+sites, consistent with how `withTenant()` already isolates the `hotelId`
+scoping seam.
+
+---
+
+## 2026-08-24 — Guest pages are entirely tenant-data-driven; force-dynamic rendering
+**Status:** Approved
+**Decision:** Every guest page reads its content (hotel identity, room
+types/prices, room counts, dining/services/facilities/policies copy) from
+the M1 schema/seed via `src/lib/tenant` — none of it is hardcoded in
+`src/app/(guest)` or `src/components/guest`. `src/app/(guest)/layout.tsx`
+sets `export const dynamic = "force-dynamic"`, so Next.js never attempts
+to statically render guest pages at build time (which would require a
+reachable `DATABASE_URL` during `next build`).
+**Rationale:** Directly required by CLAUDE.md rule 3 (hotel business data
+is DB data, not source code) and this session's explicit instruction.
+`force-dynamic` was also the key that let `npm run build` succeed with
+*no* `DATABASE_URL` at all in this sandbox — confirmed by an actual build
+run (see `docs/CHANGELOG.md` M2 entry) — versus M1's migration/seed, which
+couldn't be executed without a live DB.
+
+---
+
+## 2026-08-24 — RoomType detail page keyed by Prisma `id`, no new `slug` field
+**Status:** Approved
+**Decision:** `/rooms/[id]` uses `RoomType.id` (the existing cuid primary
+key) as the route param, rather than adding a `slug` column to `RoomType`.
+**Rationale:** Avoids a second M1 schema migration mid-M2 for a
+cosmetic-URL concern; cuid-based URLs are a normal, common pattern. A slug
+field can be added later as an additive migration if pretty URLs become a
+priority (e.g. for M9 polish or SEO), without changing the page structure.
+
+---
+
+## 2026-08-24 — Availability Search and Booking excluded from M2
+**Status:** Approved
+**Decision:** M2 ships Homepage, Rooms & Suites (listing + detail),
+Restaurant, Services, About, Contact only. No date-based availability
+computation, no "Book Now" CTA, no Reservation writes.
+**Rationale:** `src/app/(guest)/README.md` (M0) and `docs/V0.1_SCOPE.md`'s
+booking-flow definition (Dates → Guests → Availability → Select Room →
+...) both place Availability Search inside M3 (Booking Engine), not M2.
+Showing a "Book Now" button with no working destination would be a dead
+end; room type/count is shown as static inventory info, not live
+availability, to avoid implying a capability that doesn't exist yet.
+
+---
+
+## 2026-08-24 — Homepage/About hero copy sourced from a new `overview` AiKnowledgeDocument category, not hardcoded or a new Hotel column
+**Status:** Approved
+**Decision:** A short descriptive paragraph about Ageez Grand Hotel (used
+on the homepage hero and About page) is seeded as an `AiKnowledgeDocument`
+row with `category: "overview"`, following the same model M1 already used
+for dining/services/facilities/policies content — not a new `Hotel.tagline`
+column, and not a string literal in page/component code.
+**Rationale:** Consistent with the M1 decision to route descriptive,
+per-tenant content through `AiKnowledgeDocument` rather than growing the
+`Hotel` model per new piece of copy. Also means this same paragraph is
+available to the M6 AI concierge without duplication.
+
+---
+
 ## 2026-08-24 — M1 schema finalized: enum naming, unique keys, StaffUser without auth fields
 **Status:** Approved
 **Decision:** The full M1 model set (`docs/DATABASE.md`) is finalized with:
