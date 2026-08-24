@@ -1,5 +1,14 @@
 # Changelog
 
+## M0 cleanup — dependencies installed, lint config added (2026-08-24)
+- Added `package-lock.json` (dependencies installed and locked; the M0 note
+  about no network access in the Claude sandbox no longer applies — `npm
+  install` completed successfully in this environment).
+- Added `eslint.config.mjs` (standard `next/core-web-vitals` +
+  `next/typescript` flat config, no project-specific rule overrides).
+- Verified: `npm run lint` (no warnings or errors) and `npm run typecheck`
+  (clean) both pass against the installed dependencies.
+
 ## M0 — Repository + Architecture (2026-08-24)
 - Initialized repository (git) and Next.js/TypeScript/Tailwind project
   scaffold (config files only — dependencies not yet installed; see M0
