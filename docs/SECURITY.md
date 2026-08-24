@@ -18,6 +18,53 @@ itself is deferred, not the architecture that would support it.
 - Not implemented in M0 — reserved for M4 (management dashboard needs auth
   to exist meaningfully). CLAUDE.md and this doc exist so the design is
   agreed before that implementation begins.
+- **Mechanism (approved 2026-08-25, see docs/DECISIONS.md):** Auth.js v5,
+  Credentials provider (email + bcrypt-hashed password), JWT session
+  strategy — no Prisma DB adapter/session tables. `StaffUser.passwordHash`
+  is an additive migration column, not a redesign of the M1 schema.
+
+## RBAC (approved 2026-08-25, see docs/DECISIONS.md)
+Permission matrix for M4's modules:
+
+| Module | OWNER_ADMIN | MANAGER | FRONT_DESK | HOUSEKEEPING | MAINTENANCE |
+|---|---|---|---|---|---|
+| Dashboard | View | View | View | View | View |
+| Reservations (incl. check-in) | View + Mutate | View + Mutate | View + Mutate | View | View |
+| Rooms | View | View | View | View | View |
+| Guests | View + Mutate | View + Mutate | View + Mutate | View | View |
+| Services (ServiceRequest) | View + Mutate | View + Mutate | View + Mutate | View | View |
+| Reports | View | View | View | View | View |
+| Staff accounts | View + Mutate | View | View | View | View |
+
+No role gets a generic/standalone Room-mutation permission, including
+FRONT_DESK. Room state changes happen only as the side effect of an
+authorized operational workflow (e.g. check-in), enforced server-side —
+never a direct "set room status" control reachable by any role in M4.
+Housekeeping/Maintenance write access to Rooms is added with their own
+modules in M5, not M4.
+
+## RBAC is not a substitute for tenant isolation
+A role check alone is never sufficient. Every M4 protected read and
+mutation must verify **both**: (a) the authenticated `StaffUser`'s role
+permits the action, and (b) the authenticated `StaffUser.hotelId` matches
+the tenant of the record being accessed or mutated, via `src/lib/tenant`.
+A valid role at Hotel A must never grant access to Hotel B's data — this is
+the same invariant stated above ("Hotel A must never be able to retrieve
+Hotel B's private records"), restated here because M4 is the first
+milestone where per-staff authenticated identity, rather than a single
+tenant resolved per request (as in the guest site), makes this a live risk
+to check explicitly at every route/Server Action, not assume from role
+alone.
+
+## State-transition integrity
+`ServiceRequest`, `Reservation`, and `Room` status transitions (e.g.
+check-in, service-request status changes) must be validated in the
+server/business layer (`src/lib/domain`, Server Actions) — never enforced
+only by which UI controls are rendered for a given role. An invalid
+transition (e.g. checking in a `CANCELLED` reservation, or an out-of-order
+status change) must be rejected server-side regardless of what the client
+sends, both for data integrity and because UI-only gating is not a real
+authorization boundary.
 
 ## Hotel-level admin vs. platform-level admin
 A hotel's OWNER/ADMIN role manages that hotel only. A future Ageez

@@ -4,6 +4,101 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-25 — M4 pre-implementation design decisions (auth, check-in boundary, Services, Reports, RBAC)
+**Status:** Approved (Product Owner decision, with three amendments — see
+Amendments below)
+**Decision:** Before starting M4 (Management Dashboard), five previously
+unresolved items were reviewed and approved:
+
+1. **Staff authentication mechanism.** Auth.js v5, **Credentials provider**,
+   bcrypt-hashed password, **JWT session strategy** (no Prisma DB
+   adapter/session tables). One additive migration adds
+   `StaffUser.passwordHash`. Seed script sets a documented, clearly-labeled
+   demo password per seeded staff fixture (fictional data, not a real
+   secret). Rejected alternatives: magic-link/OAuth (require external
+   infra this sandbox cannot provision or test — see CLAUDE.md environment
+   constraint); no real auth (contradicts docs/SECURITY.md's existing
+   M4-scoped RBAC requirement).
+2. **Check-in/check-out M4↔M5 boundary.** M4 ends with **check-in only**:
+   `Reservation.status → CHECKED_IN`, `Room.status → OCCUPIED`. Check-out
+   (`CHECKED_IN → CHECKED_OUT`, `Room → CLEANING → AVAILABLE`) is deferred
+   to M5, since the post-stay cleaning handoff is housekeeping's workflow,
+   not front-desk's. This resolves the ambiguity between `V0.1_SCOPE.md`'s
+   milestone table (check-in reads as M4/Reservations) and
+   `docs/DEMO_SCRIPT.md`'s stale "M5 (check-in/maintenance half)"
+   re-validation note; that note will be corrected when M4 actually lands
+   check-in.
+3. **ServiceRequest is in M4 scope**, staff-initiated only: staff can view,
+   create (on a guest's behalf), and update the status of `ServiceRequest`
+   rows. No guest self-service creation UI exists in v0.1 (no guest
+   accounts) — staff creation is the only entry point for this data.
+4. **Reports (M4) is a minimal, live, read-only snapshot** — no charts, no
+   export, no historical/date-range filtering:
+   - Occupancy: room counts by `RoomStatus`, overall and by `RoomType`
+   - Reservations: counts by `ReservationStatus`; today's arrivals/departures
+   - Guests: total count
+   Built as `src/lib/tenant` aggregation functions so M7's AI Management
+   Assistant can reuse them as whitelisted tool functions instead of
+   duplicating aggregation logic.
+5. **RBAC permission matrix** (5 roles × M4 modules) — see the amended
+   matrix below, which supersedes the first-draft matrix proposed during
+   review.
+
+**Amendments (Product Owner, same day):**
+- **A. No generic Room mutation path.** FRONT_DESK (and no other role) gets
+  an unrestricted "set room status" control. Room-state changes may occur
+  only as the side effect of an authorized operational workflow (e.g.
+  check-in setting `Room → OCCUPIED`). This removes "Rooms: Mutate" for
+  FRONT_DESK from the matrix as a standalone permission.
+- **B. Server-side state-transition enforcement.** `ServiceRequest`,
+  `Reservation`, and `Room` status transitions must be validated in the
+  business/server layer (`src/lib/domain`, Server Actions), not only
+  gated by which UI controls are rendered. Invalid transitions (e.g.
+  checking in a `CANCELLED` reservation, or an out-of-order
+  `ServiceRequest` status change) must be rejected server-side regardless
+  of what the client sends.
+- **C. RBAC does not substitute for tenant isolation.** Every M4 protected
+  read and mutation must verify both (a) the authenticated `StaffUser`'s
+  role permits the action, AND (b) the authenticated `StaffUser.hotelId`
+  matches the tenant of the record being accessed, via `src/lib/tenant`.
+  A valid role at Hotel A must never grant access to Hotel B's data — this
+  is the existing architectural invariant in `docs/SECURITY.md`, restated
+  here because M4 is the first milestone where per-staff authenticated
+  identity (rather than a single resolved tenant per request) makes this
+  a live risk.
+
+**RBAC permission matrix (amended, M4 modules only):**
+
+| Module | OWNER_ADMIN | MANAGER | FRONT_DESK | HOUSEKEEPING | MAINTENANCE |
+|---|---|---|---|---|---|
+| Dashboard | View | View | View | View | View |
+| Reservations (incl. check-in) | View + Mutate | View + Mutate | View + Mutate | View | View |
+| Rooms | View | View | View | View | View |
+| Guests | View + Mutate | View + Mutate | View + Mutate | View | View |
+| Services (ServiceRequest) | View + Mutate | View + Mutate | View + Mutate | View | View |
+| Reports | View | View | View | View | View |
+| Staff accounts | View + Mutate | View | View | View | View |
+
+Room state changes happen only via authorized workflows (currently:
+check-in, itself gated by the Reservations row above) — there is no
+standalone "Rooms: Mutate" permission in M4. Housekeeping/Maintenance
+write access to Rooms arrives with their own modules in M5.
+
+**Rationale:** See the M4 design-review conversation (2026-08-24/25) for
+full alternatives-considered/tradeoffs analysis per item. Summary
+rationale: v0.1 favors the smallest mechanism this sandbox can actually
+build and verify end-to-end (Priority Rule, CLAUDE.md environment
+constraint) over more "production-realistic" options that add untestable
+external dependencies (OAuth/email) or premature abstraction (configurable
+per-action ACLs) that CLAUDE.md rule 5 warns against for a single 5-person
+demo hotel. The three amendments close specific authorization-bypass and
+tenant-isolation gaps the first draft left open, consistent with
+`docs/SECURITY.md`'s invariant that a valid role must never imply
+cross-tenant access, and with CLAUDE.md rule 2 (tenant isolation is
+architectural, not optional).
+
+---
+
 ## 2026-08-24 — M3 booking flow implemented as single-form checkout, not the six-step Dates→Guests→Availability→Select Room→Guest Details→Extras flow
 **Status:** Approved (Product Owner decision, same day, after being flagged
 per CLAUDE.md rule 8 — see Resolution below)
