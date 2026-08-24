@@ -10,10 +10,11 @@ import type { Prisma } from "@prisma/client";
  *
  * M1 wired up the tenant-owned models that had seeded data (RoomType,
  * Room). M2 adds AiKnowledgeDocument read access (guest site content) and
- * `getCurrentTenantHotel()` (guest site tenant resolution). Later
- * milestones keep extending the object `withTenant()` returns with their
- * own model namespaces (guests, reservations, ...) as those features are
- * built — this file establishes the pattern, not every feature query.
+ * `getCurrentTenantHotel()` (guest site tenant resolution). M3 adds
+ * `guests`/`reservations` namespaces and `findAvailableRoom()` (the M3
+ * booking flow). Later milestones keep extending the object `withTenant()`
+ * returns with their own model namespaces as those features are built —
+ * this file establishes the pattern, not every feature query.
  */
 
 export class TenantNotResolvedError extends Error {
@@ -82,6 +83,52 @@ type ScopedAiKnowledgeDocumentArgs = Omit<Prisma.AiKnowledgeDocumentFindManyArgs
   where?: Omit<Prisma.AiKnowledgeDocumentWhereInput, "hotelId">;
 };
 
+/** Reservation statuses that hold a room for its date range (docs/DECISIONS.md, M3). */
+const BLOCKING_RESERVATION_STATUSES: Prisma.ReservationWhereInput["status"] = {
+  in: ["CONFIRMED", "CHECKED_IN"],
+};
+
+/**
+ * Find a Room of `roomTypeId` with no blocking reservation overlapping
+ * [checkIn, checkOut). Takes a Prisma client OR an active transaction
+ * client (`Prisma.TransactionClient`) — the M3 booking action calls this
+ * inside a Serializable transaction alongside the reservation `create`, so
+ * the availability check and the write are atomic and race-safe. Two
+ * queries regardless of room count (fetch candidate rooms, fetch their
+ * overlapping reservations), not one query per room.
+ *
+ * Room.status (AVAILABLE/OCCUPIED/...) is deliberately NOT consulted here
+ * — it reflects current front-desk operational state (set at check-in/
+ * check-out, M4/M5 scope), not date-range booking availability, which can
+ * only be derived from actual Reservation rows.
+ */
+export async function findAvailableRoom(
+  client: Prisma.TransactionClient | typeof prisma,
+  hotelId: string,
+  roomTypeId: string,
+  checkIn: Date,
+  checkOut: Date
+) {
+  const rooms = await client.room.findMany({
+    where: { hotelId, roomTypeId },
+    orderBy: { roomNumber: "asc" },
+  });
+  if (rooms.length === 0) return null;
+
+  const overlapping = await client.reservation.findMany({
+    where: {
+      hotelId,
+      roomId: { in: rooms.map((r) => r.id) },
+      status: BLOCKING_RESERVATION_STATUSES,
+      checkIn: { lt: checkOut },
+      checkOut: { gt: checkIn },
+    },
+    select: { roomId: true },
+  });
+  const bookedRoomIds = new Set(overlapping.map((r) => r.roomId));
+  return rooms.find((r) => !bookedRoomIds.has(r.id)) ?? null;
+}
+
 /**
  * Bind `hotelId` once and return query helpers that always apply it — the
  * hotelId filter is structurally impossible to omit or override from a
@@ -119,6 +166,22 @@ export function withTenant(hotelId: string) {
       findByCategory: (category: string) =>
         prisma.aiKnowledgeDocument.findUnique({
           where: { hotelId_category: { hotelId, category } },
+        }),
+    },
+
+    guests: {
+      /** No dedup by email — v0.1 is guest checkout only, no guest accounts (docs/DECISIONS.md). */
+      create: (data: Omit<Prisma.GuestUncheckedCreateInput, "hotelId">) =>
+        prisma.guest.create({ data: { ...data, hotelId } }),
+    },
+
+    reservations: {
+      create: (data: Omit<Prisma.ReservationUncheckedCreateInput, "hotelId">) =>
+        prisma.reservation.create({ data: { ...data, hotelId } }),
+      findById: (id: string) =>
+        prisma.reservation.findFirst({
+          where: { id, hotelId },
+          include: { guest: true, room: { include: { roomType: true } } },
         }),
     },
   };

@@ -4,6 +4,44 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-24 — M3 booking flow implemented as single-form checkout, not the six-step Dates→Guests→Availability→Select Room→Guest Details→Extras flow
+**Status:** Deviation — flagged for Product Owner / ChatGPT review, not
+independently approved by Claude (CLAUDE.md rule 8)
+**Decision:** The M3 code found already in progress at the start of this
+session (and completed/tested in this session) implements booking as:
+browse Rooms & Suites listing → pick a room type → one form on
+`/rooms/[id]/book` collecting check-in/check-out dates, guest count, and
+guest details together → submit → server-side availability check
+(`findAvailableRoom()`) and reservation write happen atomically → redirect
+to `/booking/confirmation/[reservationId]`. This differs from
+`docs/V0.1_SCOPE.md`'s literal flow order (Dates → Guests → Availability →
+**Select Room** → Guest Details → Extras → Confirmation) in two ways: (1)
+room type is chosen *before* dates/guests rather than after an availability
+search narrows the choice, and (2) there is no dedicated Availability
+Search results screen and no "Extras" (add-on services) step at all —
+availability is checked at submit time for the one already-chosen room
+type, not browsed in advance across types/dates.
+**Rationale for flagging rather than silently proceeding:** This wiring was
+already committed to working code (booking form, Server Action, e2e test)
+by the time this session inspected the repository; the session's mandate
+was to continue/finish/test/commit M3, not redesign it. But the flow order
+and the missing "Extras" step are a real, user-visible deviation from an
+already-approved spec, and CLAUDE.md rule 8 requires flagging that rather
+than treating it as tacitly approved. The Primary Demonstration Test in
+`docs/DEMO_SCRIPT.md` (browse → search → book Executive Room → confirm) is
+satisfied by the implemented flow and is verified end-to-end by
+`tests/e2e/booking.spec.ts`, so the core demo journey works either way.
+**Needs Product Owner decision:** (a) accept "pick room type first, then
+dates" as the v0.1 flow (arguably more natural for a single-hotel site with
+only 5 room types), or require a literal dates-first availability-search
+step before room selection; (b) whether "Extras" (add-on services chosen
+during booking) is in scope for v0.1 at all, or was already effectively
+superseded by the M4/M5-scope `ServiceRequest` model (guests/staff can
+request services after a reservation exists) — if so, V0.1_SCOPE.md's
+flow list should be corrected rather than the code changed.
+
+---
+
 ## 2026-08-24 — Local PostgreSQL 17 installed in the Claude sandbox for M2 verification
 **Status:** Approved (explicit Product Owner request/confirmation)
 **Decision:** PostgreSQL 17 was installed locally in this sandbox (via a

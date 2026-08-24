@@ -4,7 +4,8 @@ import { notFound } from "next/navigation";
 import { Users, ArrowLeft } from "lucide-react";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
-import { formatCurrency } from "@/lib/utils";
+import { buttonVariants } from "@/components/ui/button";
+import { cn, formatCurrency } from "@/lib/utils";
 
 interface RoomDetailPageProps {
   params: Promise<{ id: string }>;
@@ -58,6 +59,10 @@ export default async function RoomDetailPage({ params }: RoomDetailPageProps) {
         </p>
 
         <p className="text-lg leading-relaxed text-basalt-800">{roomType.description}</p>
+
+        <Link href={`/rooms/${roomType.id}/book`} className={cn(buttonVariants({ size: "lg" }), "self-start")}>
+          Book This Room
+        </Link>
       </Container>
     </section>
   );

@@ -23,10 +23,14 @@ tenant root.
   Fictional-only, no real PII. No rows seeded in M1 — created live in the
   M3 booking demo.
 - **Reservation** — `hotelId`, `guestId`, `roomId`, `checkIn`/`checkOut`,
-  `status` (enum `ReservationStatus`: CREATED, CONFIRMED, CHECKED_IN,
-  CHECKED_OUT, CANCELLED), `totalPrice`, `paymentMethod` (enum
-  `PaymentMethod`: PAY_AT_HOTEL — only value in v0.1), `specialRequests?`.
-  No rows seeded in M1.
+  `guestCount` (added in M3, migration `20260824181030_add_reservation_
+  guest_count`), `status` (enum `ReservationStatus`: CREATED, CONFIRMED,
+  CHECKED_IN, CHECKED_OUT, CANCELLED — M3 booking creates rows directly as
+  CONFIRMED, guest checkout has no pending/abandoned-cart state),
+  `totalPrice`, `paymentMethod` (enum `PaymentMethod`: PAY_AT_HOTEL — only
+  value in v0.1), `specialRequests?`. No rows seeded in M1; created live by
+  the M3 booking flow. Indexed on `(roomId, checkIn, checkOut)` for the
+  availability-overlap query in `src/lib/tenant` (`findAvailableRoom()`).
 - **ServiceRequest** — `hotelId`, `reservationId?`, `guestId?`, `type`
   (enum `ServiceRequestType`: AIRPORT_TRANSFER, LAUNDRY, ROOM_SERVICE,
   RESTAURANT, OTHER), `status` (enum `ServiceRequestStatus`: PENDING,

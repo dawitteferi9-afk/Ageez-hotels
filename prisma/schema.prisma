@@ -164,8 +164,9 @@ model Reservation {
   room   Room   @relation(fields: [roomId], references: [id])
   roomId String
 
-  checkIn  DateTime
-  checkOut DateTime
+  checkIn    DateTime
+  checkOut   DateTime
+  guestCount Int
 
   status          ReservationStatus @default(CREATED)
   totalPrice      Decimal           @db.Decimal(10, 2)
@@ -179,6 +180,7 @@ model Reservation {
 
   @@index([hotelId])
   @@index([hotelId, status])
+  @@index([roomId, checkIn, checkOut])
 }
 
 // ─────────────────────────────────────────────────────────────────────────

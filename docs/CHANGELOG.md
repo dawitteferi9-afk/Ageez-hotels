@@ -1,5 +1,60 @@
 # Changelog
 
+## M3 — Booking Engine (2026-08-24)
+- Added the guest booking flow: `/rooms/[id]/book` (`BookingForm` +
+  `createBookingAction` Server Action) and
+  `/booking/confirmation/[reservationId]`. Guest checkout only (no
+  accounts, per `docs/V0.1_SCOPE.md`). A "Book This Room" CTA was added to
+  the M2 room detail page.
+- Added `src/lib/domain/booking.ts` — framework-agnostic date validation,
+  night/price calculation, date-range overlap detection, and booking
+  reference formatting, independently unit-tested
+  (`tests/unit/booking.test.ts`, 13 tests).
+- Extended `src/lib/tenant`: `guests`/`reservations` namespaces on
+  `withTenant()`, and `findAvailableRoom()` — checks real `Reservation`
+  rows (not `Room.status`, which is front-desk operational state, M4/M5
+  scope) for overlap, callable inside a transaction. The booking action
+  runs the availability check and the reservation `create` inside one
+  Prisma Serializable transaction so two guests racing for the last room of
+  a type can't both succeed (`P2034` write-conflict surfaces as a clear
+  "try again" message, not an auto-retry).
+- Schema: added `Reservation.guestCount` and a `(roomId, checkIn,
+  checkOut)` index (migration
+  `20260824181030_add_reservation_guest_count`).
+- Added shared form UI primitives (`src/components/ui`: input, label,
+  textarea) and a guest-route-group `error.tsx` boundary.
+- Added `vitest.config.ts` (scopes Vitest to `tests/unit/**` — without it,
+  Vitest's default glob also tried to load `tests/e2e/*.spec.ts`, which
+  throws under Vitest's runner since Playwright's `test()` requires its own
+  runner).
+- Added `playwright.config.ts` and the first Playwright suite,
+  `tests/e2e/booking.spec.ts`: existing M2 pages still return 200, the full
+  browse→book Executive Room→confirm journey for a fictional Daniel
+  Tesfaye (status CONFIRMED, correct room/dates/price), an invalid
+  date-range rejection, and a room-type inventory exhaustion case
+  (Presidential Suite's 2 seeded rooms — 2 successful bookings then a
+  correctly rejected 3rd for overlapping dates).
+- **Flagged, not silently resolved:** the implemented booking flow (pick
+  room type from the listing, then one form for dates/guests/details, with
+  availability checked at submit) differs from `docs/V0.1_SCOPE.md`'s
+  literal Dates→Guests→Availability→Select Room→Guest Details→Extras
+  order — no separate availability-search screen, no "Extras" step. See
+  the flagged decision in `docs/DECISIONS.md` for what needs Product Owner
+  sign-off; the Primary Demonstration Test's booking portion is satisfied
+  either way (see `docs/DEMO_SCRIPT.md`).
+- **Verified against a live database:** `npx prisma validate`, `npm run
+  typecheck`, `npm run lint`, `npm run build` (production build succeeds
+  with no `DATABASE_URL`), `npm run test` (13/13 unit tests), and `npm run
+  test:e2e` (4/4 Playwright tests, run against `npm run dev` backed by the
+  same local PostgreSQL 17 instance from M1/M2 — see `docs/DECISIONS.md`)
+  all pass. `prisma migrate status` confirmed the new migration was already
+  applied. Test-created guests/reservations (matching the e2e suite's
+  `@example.com` addresses) were deleted after the run; the database was
+  independently re-confirmed back at exactly the M1 seed counts (1 Hotel, 5
+  RoomType, 52 Room, 0 Guest, 0 Reservation) before committing.
+- Updated `docs/DECISIONS.md`, `docs/DATABASE.md`, `docs/DEMO_SCRIPT.md`,
+  `docs/V0.1_SCOPE.md`, `src/app/(guest)/README.md`.
+
 ## M2 — Public Hotel Website (2026-08-24)
 - Built the guest site route group (`src/app/(guest)`): Homepage, Rooms &
   Suites (listing + `/rooms/[id]` detail), Restaurant, Services, About,

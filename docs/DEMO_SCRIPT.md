@@ -21,7 +21,19 @@ to end. It matters more than raw feature count (see Priority Rule in
     — answer must come from live system data.
 
 ## Status
-Not yet achievable — no product features exist yet (M0). This script will
-be re-validated (and actually run, not just described) at the end of M3
-(booking half), M5 (check-in/maintenance half), M7 (AI half), and again in
+**Steps 1–6 (booking half) achieved and verified as of M3** — run end to
+end against a live, seeded database by `tests/e2e/booking.spec.ts`
+("guest can browse, book the Executive Room, and see a correct
+confirmation"): homepage -> Rooms & Suites -> Executive Room -> booking
+form -> a real booking for Daniel Tesfaye -> confirmation page showing
+correct room, dates, price, and "Pay at Hotel". Step 3 ("search room
+availability for a date range") is implemented as availability computed at
+booking-submit time against real `Reservation` rows (`findAvailableRoom()`
+in `src/lib/tenant`), not a separate search-results step — no dedicated
+availability-search page/results list exists in v0.1 (see
+`docs/DECISIONS.md`).
+
+Steps 7–13 (management dashboard, check-in, AI assistant) remain
+unachievable — M4/M5/M7 not started. This script will be re-validated
+again at the end of M5 (check-in/maintenance half), M7 (AI half), and in
 full at M9.
