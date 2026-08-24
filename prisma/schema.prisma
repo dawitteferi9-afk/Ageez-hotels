@@ -1,0 +1,24 @@
+// Ageez Hotels — Prisma schema
+//
+// M0 SCOPE NOTE: This file intentionally contains ONLY the datasource and
+// generator configuration. The full multi-tenant data model (Hotel, Room,
+// RoomType, Reservation, Guest, StaffUser, MaintenanceIssue, ServiceRequest,
+// AiKnowledgeDocument, etc.) is Milestone M1 scope and requires its own
+// approval pass — see docs/DATABASE.md for the planned design.
+//
+// Architectural invariant (see docs/SECURITY.md): every tenant-owned model
+// introduced in M1 MUST include a `hotelId` field referencing Hotel, and all
+// queries against tenant-owned models MUST go through the centralized
+// tenant-aware data-access layer in src/lib/tenant/ — no ad hoc filtering
+// scattered through route handlers or components.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- M1 will add models here ---

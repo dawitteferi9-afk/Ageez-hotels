@@ -1,0 +1,23 @@
+/**
+ * Ageez Hotels — Design Tokens (platform defaults)
+ *
+ * These CSS custom properties are DEFAULTS for the demo tenant and for
+ * development. A future tenant onboarding system may override a subset
+ * (brand color, logo, accent) at runtime per-hotel without code changes.
+ * See docs/UI_SPEC.md.
+ */
+:root {
+  /* Color: Axumite/Ge'ez-inspired neutral + accent palette */
+  --color-basalt-950: #15130f;
+  --color-basalt-900: #1f1c16;
+  --color-parchment-50: #faf7f0;
+  --color-parchment-100: #f3ecdc;
+  --color-ochre-500: #b8862f;
+
+  /* Typography */
+  --font-display: "Fraunces", "Georgia", serif;
+  --font-body: "Inter", system-ui, sans-serif;
+
+  /* Spacing / radius scale kept in Tailwind config; tokens.css reserved for
+     runtime-overridable brand values only. */
+}
