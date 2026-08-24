@@ -5,8 +5,8 @@ Format: date, decision, status, rationale. Newest first.
 ---
 
 ## 2026-08-24 — M3 booking flow implemented as single-form checkout, not the six-step Dates→Guests→Availability→Select Room→Guest Details→Extras flow
-**Status:** Deviation — flagged for Product Owner / ChatGPT review, not
-independently approved by Claude (CLAUDE.md rule 8)
+**Status:** Approved (Product Owner decision, same day, after being flagged
+per CLAUDE.md rule 8 — see Resolution below)
 **Decision:** The M3 code found already in progress at the start of this
 session (and completed/tested in this session) implements booking as:
 browse Rooms & Suites listing → pick a room type → one form on
@@ -31,14 +31,27 @@ than treating it as tacitly approved. The Primary Demonstration Test in
 `docs/DEMO_SCRIPT.md` (browse → search → book Executive Room → confirm) is
 satisfied by the implemented flow and is verified end-to-end by
 `tests/e2e/booking.spec.ts`, so the core demo journey works either way.
-**Needs Product Owner decision:** (a) accept "pick room type first, then
-dates" as the v0.1 flow (arguably more natural for a single-hotel site with
-only 5 room types), or require a literal dates-first availability-search
-step before room selection; (b) whether "Extras" (add-on services chosen
-during booking) is in scope for v0.1 at all, or was already effectively
-superseded by the M4/M5-scope `ServiceRequest` model (guests/staff can
-request services after a reservation exists) — if so, V0.1_SCOPE.md's
-flow list should be corrected rather than the code changed.
+**Needs Product Owner decision (resolved — see below):** (a) accept "pick
+room type first, then dates" as the v0.1 flow (arguably more natural for a
+single-hotel site with only 5 room types), or require a literal
+dates-first availability-search step before room selection; (b) whether
+"Extras" (add-on services chosen during booking) is in scope for v0.1 at
+all, or was already effectively superseded by the M4/M5-scope
+`ServiceRequest` model (guests/staff can request services after a
+reservation exists) — if so, V0.1_SCOPE.md's flow list should be corrected
+rather than the code changed.
+**Resolution (2026-08-24, Product Owner):** Accepted as the v0.1 booking
+flow, on both points. (a) Select-room-first stays — a dedicated
+dates-first, cross-room-type availability-search results screen is not
+built for v0.1; the per-room-type submit-time availability check
+(`findAvailableRoom()`) is sufficient given only 5 room types and the
+demo's priority on the connected booking→management→AI journey over
+search-UX sophistication. (b) "Extras" is out of scope for v0.1 checkout;
+add-on services are covered post-booking by the existing `ServiceRequest`
+model (M4/M5 scope), not a new booking-time mechanism.
+`docs/V0.1_SCOPE.md`'s flow description was corrected to match the
+implementation (not the other way around) in the same pass as this
+resolution.
 
 ---
 

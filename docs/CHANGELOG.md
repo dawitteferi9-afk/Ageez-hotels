@@ -34,14 +34,14 @@
   date-range rejection, and a room-type inventory exhaustion case
   (Presidential Suite's 2 seeded rooms — 2 successful bookings then a
   correctly rejected 3rd for overlapping dates).
-- **Flagged, not silently resolved:** the implemented booking flow (pick
-  room type from the listing, then one form for dates/guests/details, with
-  availability checked at submit) differs from `docs/V0.1_SCOPE.md`'s
-  literal Dates→Guests→Availability→Select Room→Guest Details→Extras
-  order — no separate availability-search screen, no "Extras" step. See
-  the flagged decision in `docs/DECISIONS.md` for what needs Product Owner
-  sign-off; the Primary Demonstration Test's booking portion is satisfied
-  either way (see `docs/DEMO_SCRIPT.md`).
+- **Flagged, not silently resolved (see same-day addendum below):** the
+  implemented booking flow (pick room type from the listing, then one form
+  for dates/guests/details, with availability checked at submit) differs
+  from `docs/V0.1_SCOPE.md`'s literal Dates→Guests→Availability→Select
+  Room→Guest Details→Extras order — no separate availability-search
+  screen, no "Extras" step. See the flagged decision in `docs/DECISIONS.md`
+  for what needed Product Owner sign-off; the Primary Demonstration Test's
+  booking portion is satisfied either way (see `docs/DEMO_SCRIPT.md`).
 - **Verified against a live database:** `npx prisma validate`, `npm run
   typecheck`, `npm run lint`, `npm run build` (production build succeeds
   with no `DATABASE_URL`), `npm run test` (13/13 unit tests), and `npm run
@@ -54,6 +54,19 @@
   RoomType, 52 Room, 0 Guest, 0 Reservation) before committing.
 - Updated `docs/DECISIONS.md`, `docs/DATABASE.md`, `docs/DEMO_SCRIPT.md`,
   `docs/V0.1_SCOPE.md`, `src/app/(guest)/README.md`.
+- **Resolved (same-day addendum):** Product Owner reviewed the flagged
+  flow-order decision and **approved the implemented flow as-is** —
+  select-room-first with submit-time availability checking, and "Extras"
+  out of scope for v0.1 checkout (covered post-booking by the existing
+  `ServiceRequest` model instead). `docs/V0.1_SCOPE.md`'s booking-flow
+  description and `docs/DEMO_SCRIPT.md`'s numbered steps were corrected to
+  match the implementation; `docs/DECISIONS.md`'s entry was updated in
+  place with the resolution rather than left open. Full verification
+  (`prisma validate`, typecheck, lint, build, `npm run test`, `npm run
+  test:e2e`) re-run after the doc changes — all still pass, no code
+  changed in this pass. Test data cleaned up again; database reconfirmed
+  at exact M1 seed counts before the follow-up commit. M3 is now fully
+  closed against the (corrected) specification.
 
 ## M2 — Public Hotel Website (2026-08-24)
 - Built the guest site route group (`src/app/(guest)`): Homepage, Rooms &
