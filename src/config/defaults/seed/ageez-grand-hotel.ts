@@ -105,8 +105,7 @@ if (totalRoomCount !== 52) {
 
 /**
  * One fictional staff row per approved v0.1 role, so M4 (management
- * dashboard + auth) has real StaffUser rows to attach login to. No
- * password/session fields — that wiring is an M4 decision.
+ * dashboard + auth) has real StaffUser rows to attach login to.
  */
 export const staffFixtures = [
   { name: "Amanuel Girma", email: "amanuel.girma@ageezgrandhotel.example", role: "OWNER_ADMIN" },
@@ -115,6 +114,16 @@ export const staffFixtures = [
   { name: "Hiwot Tadesse", email: "hiwot.tadesse@ageezgrandhotel.example", role: "HOUSEKEEPING" },
   { name: "Dawit Mekonnen", email: "dawit.mekonnen@ageezgrandhotel.example", role: "MAINTENANCE" },
 ] as const;
+
+/**
+ * Demo-only login password shared by all five seeded staff fixtures above.
+ * This is fictional demo/dev credential material, not a real secret — it
+ * exists so M4 Phase 2+ has a known password to log in with against the
+ * seeded database. `prisma/seed/index.ts` bcrypt-hashes this at seed time;
+ * only the hash is ever written to `StaffUser.passwordHash`, never this
+ * plaintext value. Must never be reused for a real deployment.
+ */
+export const DEMO_STAFF_PASSWORD = "AgeezDemo2026!";
 
 /**
  * Grounding documents for the AI concierge/management assistant

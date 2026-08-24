@@ -12,12 +12,16 @@
  * upserts by the unique keys defined in prisma/schema.prisma.
  */
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
 import {
   hotelFixture,
   roomTypeFixtures,
   staffFixtures,
+  DEMO_STAFF_PASSWORD,
   aiKnowledgeFixtures,
 } from "../../src/config/defaults/seed/ageez-grand-hotel";
+
+const BCRYPT_SALT_ROUNDS = 10;
 
 const prisma = new PrismaClient();
 
@@ -67,11 +71,20 @@ async function main() {
   }
   console.log(`Rooms upserted: ${roomsCreated}`);
 
+  // Each staff row gets its own bcrypt hash (independently salted) of the
+  // same demo password — never store or compare the plaintext directly.
   for (const staff of staffFixtures) {
+    const passwordHash = await bcrypt.hash(DEMO_STAFF_PASSWORD, BCRYPT_SALT_ROUNDS);
     await prisma.staffUser.upsert({
       where: { email: staff.email },
-      update: { name: staff.name, role: staff.role, hotelId: hotel.id },
-      create: { hotelId: hotel.id, name: staff.name, email: staff.email, role: staff.role },
+      update: { name: staff.name, role: staff.role, hotelId: hotel.id, passwordHash },
+      create: {
+        hotelId: hotel.id,
+        name: staff.name,
+        email: staff.email,
+        role: staff.role,
+        passwordHash,
+      },
     });
   }
   console.log(`Staff upserted: ${staffFixtures.length}`);

@@ -263,8 +263,9 @@ model MaintenanceIssue {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Staff (auth wiring deferred to M4 — seeded here without password/session
-// fields; adding those later is an additive migration, not a redesign)
+// Staff (auth wiring — M4 Phase 1: additive passwordHash column for
+// Auth.js Credentials + bcrypt, per docs/DECISIONS.md 2026-08-25 entry.
+// Session/adapter tables are not needed — Auth.js uses JWT sessions.)
 // ─────────────────────────────────────────────────────────────────────────
 
 enum StaffRole {
@@ -280,9 +281,10 @@ model StaffUser {
   hotel  Hotel  @relation(fields: [hotelId], references: [id])
   hotelId String
 
-  name  String
-  email String @unique
-  role  StaffRole
+  name         String
+  email        String @unique
+  role         StaffRole
+  passwordHash String // bcrypt hash; never the plaintext password
 
   assignedMaintenanceIssues MaintenanceIssue[]
 
