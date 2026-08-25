@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { hasPermission, type Module, type Action, type StaffRole } from "@/lib/auth/rbac";
 import { validateCheckIn, type ReservationStatus } from "@/lib/domain/reservationTransitions";
+import { validateStayDates, nightsBetween, calculateTotalPrice } from "@/lib/domain/booking";
 import {
   validateServiceRequestTransition,
   type ServiceRequestStatus,
@@ -65,6 +66,38 @@ export class InvalidTransitionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvalidTransitionError";
+  }
+}
+
+/** M4 Phase 4.5a — `reservations.createForStaff()`'s check-in-date validation failed (`validateStayDates()`, same rule the M3 guest flow uses). */
+export class InvalidStayDatesError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidStayDatesError";
+  }
+}
+
+/** M4 Phase 4.5a — the requested `guestCount` exceeds the selected `RoomType.capacity`. */
+export class CapacityExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CapacityExceededError";
+  }
+}
+
+/** M4 Phase 4.5a — no `Room` of the requested `RoomType` is free for the requested dates (same rule `findAvailableRoom()` enforces for the M3 guest flow). */
+export class NoRoomAvailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NoRoomAvailableError";
+  }
+}
+
+/** M4 Phase 4.5a — caller supplied both `existingGuestId` and `newGuest`, or neither, to `reservations.createForStaff()`. A caller bug, not a user-facing validation error. */
+export class InvalidGuestSelectionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidGuestSelectionError";
   }
 }
 
@@ -380,8 +413,6 @@ export function withTenant(hotelId: string) {
     },
 
     reservations: {
-      create: (data: Omit<Prisma.ReservationUncheckedCreateInput, "hotelId">) =>
-        prisma.reservation.create({ data: { ...data, hotelId } }),
       /** Generic over `T` — see `rooms.findMany`'s comment for why (preserves `include`/`select`, e.g. M4 Phase 4's `{ guest: true, room: { include: { roomType: true } } }`). */
       findMany: <T extends ScopedReservationArgs>(args?: T) =>
         prisma.reservation.findMany({
@@ -449,6 +480,150 @@ export function withTenant(hotelId: string) {
           },
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
         ),
+
+      /**
+       * M4 Phase 4.5a — the ONLY approved staff-facing reservation-creation
+       * mutation (docs/DECISIONS.md 2026-08-25 "Staff-initiated reservation
+       * creation deferred..." entry). Replaces the unused, availability-unsafe
+       * legacy `reservations.create()` that used to sit here (deleted this
+       * phase — it had zero callers and skipped availability checking
+       * entirely). Structurally mirrors the M3 guest booking flow
+       * (`src/app/(guest)/rooms/[id]/book/actions.ts`) — same
+       * `validateStayDates()`/`findAvailableRoom()`/price-calculation
+       * primitives — but adds staff-specific concerns that flow never
+       * needed: explicit existing-guest reuse (never auto-matched by
+       * email/phone/name — only an explicit `existingGuestId` the caller
+       * selected), and tenant/capacity verification against server-loaded
+       * data.
+       *
+       * Every value that must not be attacker/staff-controlled is derived
+       * here, never taken from `input`: `hotelId` (bound via the enclosing
+       * `withTenant(hotelId)` closure — never a parameter), the assigned
+       * `roomId` (from `findAvailableRoom`, not requested), `totalPrice`
+       * (computed from the server-loaded `RoomType.basePrice`, never
+       * accepted as input), `status` (always `"CONFIRMED"` — this never
+       * creates a `CHECKED_IN` reservation; that stays exclusively
+       * `checkIn()`'s job, so there is still only one code path that ever
+       * writes `Room.status → OCCUPIED`), and `paymentMethod` (always
+       * `"PAY_AT_HOTEL"`, the schema's only value in v0.1 anyway). The only
+       * staff-supplied business inputs are `roomTypeId`, `checkIn`,
+       * `checkOut`, `guestCount`, `specialRequests`, and exactly one of
+       * `existingGuestId` or `newGuest`.
+       *
+       * `validateStayDates()` and the "exactly one guest selector" check
+       * run first, outside the transaction (pure, no DB needed — same
+       * ordering the M3 action uses). Everything else runs inside one
+       * Serializable transaction, so a failure at any step (room type not
+       * found, capacity exceeded, guest not found, no room available)
+       * leaves zero rows behind — in particular, a `newGuest` create is
+       * never left orphaned if room assignment subsequently fails, because
+       * both writes are the same transaction:
+       *   1. Load `RoomType` scoped to `{ id: roomTypeId, hotelId }` —
+       *      cross-tenant or nonexistent id throws `RecordNotFoundError`
+       *      (no existence leak, same convention as every other scoped
+       *      lookup in this file).
+       *   2. Reject `guestCount > roomType.capacity` with
+       *      `CapacityExceededError`.
+       *   3. Resolve the guest: an `existingGuestId` is re-verified scoped
+       *      to `{ id, hotelId }` inside THIS transaction (cross-tenant or
+       *      nonexistent throws `RecordNotFoundError` — never trusts that
+       *      the caller already checked); a `newGuest` is created scoped
+       *      to `hotelId`. Never auto-matched/merged by email/phone/name —
+       *      reuse only happens via an explicit `existingGuestId`.
+       *   4. `findAvailableRoom(tx, hotelId, roomTypeId, checkIn, checkOut)`
+       *      — the exact same overlap-prevention query the M3 guest flow
+       *      uses — throws `NoRoomAvailableError` if nothing is free.
+       *   5. `totalPrice` computed from `roomType.basePrice` (server data)
+       *      via `calculateTotalPrice()`/`nightsBetween()` — never from
+       *      client input.
+       *   6. Creates the `Reservation` (`status: "CONFIRMED"`,
+       *      `paymentMethod: "PAY_AT_HOTEL"`).
+       *
+       * Callers must obtain `hotelId` from `requireStaffAccess("reservations","mutate")`,
+       * never from client input, exactly like `checkIn()`.
+       */
+      createForStaff: async (input: {
+        roomTypeId: string;
+        checkIn: Date;
+        checkOut: Date;
+        guestCount: number;
+        specialRequests?: string | null;
+        existingGuestId?: string;
+        newGuest?: {
+          name: string;
+          email?: string | null;
+          phone?: string | null;
+          nationality?: string | null;
+        };
+      }) => {
+        if (Boolean(input.existingGuestId) === Boolean(input.newGuest)) {
+          throw new InvalidGuestSelectionError(
+            "Provide exactly one of an existing guest id or new guest details."
+          );
+        }
+
+        const dateCheck = validateStayDates(input.checkIn, input.checkOut);
+        if (!dateCheck.valid) {
+          throw new InvalidStayDatesError(dateCheck.error!);
+        }
+
+        return prisma.$transaction(
+          async (tx) => {
+            const roomType = await tx.roomType.findFirst({
+              where: { id: input.roomTypeId, hotelId },
+            });
+            if (!roomType) {
+              throw new RecordNotFoundError(`No room type ${input.roomTypeId} found for this hotel.`);
+            }
+
+            if (input.guestCount > roomType.capacity) {
+              throw new CapacityExceededError(`${roomType.name} sleeps up to ${roomType.capacity} guests.`);
+            }
+
+            const guest = input.existingGuestId
+              ? await tx.guest.findFirst({ where: { id: input.existingGuestId, hotelId } })
+              : await tx.guest.create({
+                  data: {
+                    hotelId,
+                    name: input.newGuest!.name,
+                    email: input.newGuest!.email ?? null,
+                    phone: input.newGuest!.phone ?? null,
+                    nationality: input.newGuest!.nationality ?? null,
+                  },
+                });
+            if (!guest) {
+              throw new RecordNotFoundError(`No guest ${input.existingGuestId} found for this hotel.`);
+            }
+
+            const room = await findAvailableRoom(tx, hotelId, roomType.id, input.checkIn, input.checkOut);
+            if (!room) {
+              throw new NoRoomAvailableError(
+                `No ${roomType.name} is available for the selected dates.`
+              );
+            }
+
+            const nights = nightsBetween(input.checkIn, input.checkOut);
+            const totalPrice = calculateTotalPrice(roomType.basePrice, nights);
+
+            return tx.reservation.create({
+              data: {
+                hotelId,
+                guestId: guest.id,
+                roomId: room.id,
+                checkIn: input.checkIn,
+                checkOut: input.checkOut,
+                guestCount: input.guestCount,
+                status: "CONFIRMED",
+                totalPrice,
+                paymentMethod: "PAY_AT_HOTEL",
+                specialRequests: input.specialRequests || null,
+              },
+              include: { guest: true, room: { include: { roomType: true } } },
+            });
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        );
+      },
     },
 
     serviceRequests: {

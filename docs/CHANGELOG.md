@@ -1,5 +1,57 @@
 # Changelog
 
+## M4 — Management Dashboard, Phase 4.5a (2026-08-25)
+Backend-only checkpoint (design approved in `docs/DECISIONS.md`'s "Staff-initiated
+reservation creation deferred..." entry; decisions A-F confirmed by the
+Product Owner before this checkpoint started). No UI — Phase 4.5b.
+- Added `withTenant().reservations.createForStaff()`
+  (`src/lib/tenant/index.ts`) — the only approved staff-facing
+  reservation-creation mutation. One Serializable transaction: verifies
+  the `RoomType` belongs to the caller's `hotelId`; rejects
+  `guestCount > capacity`; resolves the guest (an explicit
+  `existingGuestId` re-verified scoped to this hotel inside the
+  transaction, or a `newGuest` created scoped to this hotel — never
+  auto-matched/merged by email/phone/name); calls the same
+  `findAvailableRoom()` the M3 guest flow uses for overlap-safe room
+  assignment; computes `totalPrice` from the server-loaded
+  `RoomType.basePrice` via `calculateTotalPrice()`/`nightsBetween()`.
+  `status` is always `"CONFIRMED"` and `paymentMethod` always
+  `"PAY_AT_HOTEL"` — server-defined, not accepted as input; the function's
+  input type has no `roomId`/`totalPrice`/`status`/`hotelId` fields at
+  all, so none of those can be client-supplied even in principle. Reuses
+  `validateStayDates()` for date validation (run before the transaction,
+  same ordering the M3 action uses). New error classes:
+  `InvalidStayDatesError`, `CapacityExceededError`, `NoRoomAvailableError`,
+  `InvalidGuestSelectionError` (thrown when a caller supplies both or
+  neither of `existingGuestId`/`newGuest`).
+- **Deleted** the unused, availability-unsafe legacy
+  `withTenant().reservations.create()` — confirmed zero callers anywhere
+  in `src/` or `tests/` before removal (it skipped `findAvailableRoom()`
+  entirely and was never wrapped in a transaction).
+- Does not check the guest in — `status` is always `CONFIRMED`;
+  `reservations.checkIn()` remains the only code path that ever writes
+  `CHECKED_IN`/`Room.status → OCCUPIED`.
+- **Tests added:** `tests/integration/reservationCreate.test.ts` (17
+  tests) — authorized creation for OWNER_ADMIN/MANAGER/FRONT_DESK;
+  HOUSEKEEPING/MAINTENANCE denied via `requireStaffAccess` before
+  `createForStaff` is ever reached; existing-guest reuse within tenant;
+  cross-tenant `existingGuestId` rejected; new guest created in the
+  correct tenant; both/neither guest-selector rejected; invalid dates;
+  capacity exceeded; wrong-tenant room type rejected; overlap prevention
+  (second request for the same single-room type/dates rejected);
+  transaction rollback proof (a `newGuest` is not persisted when the
+  subsequent availability check fails); server-computed
+  price/status/paymentMethod proven to ignore forged client-supplied
+  overrides; auto-assigned room confirmed to be a real room belonging to
+  the correct hotel/room type.
+- **Verified:** `prisma validate`, `npm run typecheck`, `npm run lint` (0
+  warnings), `npm run test` (40/40, unchanged), `npm run test:integration`
+  (43/43 — 26 existing + 17 new), `npm run build` (route table unchanged —
+  no `/management/reservations/new`, confirming no Phase 4.5b UI was
+  added), `tests/e2e/auth.spec.ts` (5/5), `tests/e2e/booking.spec.ts`
+  (4/4), `tests/e2e/management.spec.ts` (5/5) — all pass, all regressions
+  green.
+
 ## M4 — Management Dashboard, Phases 1-4 (2026-08-25)
 **Note:** Phases 1 and 2 were implemented and committed (`70a0a6f`,
 `2afeb70`) without a CHANGELOG entry at the time — a gap against CLAUDE.md
