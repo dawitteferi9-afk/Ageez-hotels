@@ -1,6 +1,6 @@
 # Changelog
 
-## M4 — Management Dashboard, Phases 1-3 (2026-08-25)
+## M4 — Management Dashboard, Phases 1-4 (2026-08-25)
 **Note:** Phases 1 and 2 were implemented and committed (`70a0a6f`,
 `2afeb70`) without a CHANGELOG entry at the time — a gap against CLAUDE.md
 rule 7. Summarized here retroactively alongside Phase 3, which does follow
@@ -91,6 +91,97 @@ the rule.
     housekeeping/maintenance workflows) implemented — backend-only per
     scope.
   - Updated `docs/DECISIONS.md`, `docs/SECURITY.md`.
+- **Phase 4 — Reservations/Rooms/Guests management UI:**
+  - **Management shell:** `ManagementNav` (`src/components/management/nav.tsx`)
+    adds Dashboard/Reservations/Rooms/Guests navigation to the
+    `(protected)` layout; Services/Reports/Staff are listed but disabled
+    (not yet implemented, per this phase's scope boundary). Dashboard
+    (`/management`) gained quick-link cards into the three new modules.
+    Added `not-found.tsx`/`error.tsx` for the `(protected)` segment
+    (generic messaging for a cross-tenant/nonexistent id or an
+    unauthorized-role error, matching the guest site's existing pattern).
+  - **Reservations** (`/management/reservations`, `/management/reservations/[id]`):
+    tenant-scoped list (status filter, guest/email/room-number search) and
+    detail view (guest, room/room-type, dates, price, status). Check-in is
+    exposed via a `CheckInButton` client island calling a new Server
+    Action (`reservations/[id]/actions.ts`) that does nothing but call
+    `requireStaffAccess("reservations","mutate")` then the existing Phase 3
+    `withTenant().reservations.checkIn()` — no new authorization or
+    Room-mutation logic was added. The button/route only renders for a
+    role with "mutate" permission and only when the reservation is
+    actually `CONFIRMED`; an ineligible status shows `validateCheckIn()`'s
+    own rejection message instead of a control. No check-out.
+  - **Rooms** (`/management/rooms`): tenant-scoped list with a per-status
+    count summary and room-type/status filters, entirely read-only — no
+    status-editing control exists anywhere on this page, and
+    `withTenant().rooms` still has no `updateStatus()` method for any page
+    to call (Amendment A holds structurally). All 52 rooms are fetched
+    once and filtered/summarized in memory (scale-appropriate at this
+    seed size, not a correctness shortcut).
+  - **Guests** (`/management/guests`, `/management/guests/[id]`):
+    tenant-scoped list (name/email/phone search) and detail view showing
+    stay history (reservations scoped by `hotelId` *and* `guestId`) plus
+    an edit form for contact fields, gated on `hasPermission(role,"guests","mutate")`.
+    Added `withTenant().guests.update()` (`src/lib/tenant/index.ts`) — the
+    only new tenant-scoped mutation this phase — following the exact
+    find-scoped-then-write / `RecordNotFoundError` pattern Phase 3 already
+    established for `checkIn()`/`updateStatus()`. No standalone "create
+    guest" flow (guests are created via the existing booking flow or, in
+    future, by staff on a reservation's behalf — out of this phase's
+    scope, not silently dropped).
+  - **Supporting fixes to the existing tenant layer, not new architecture:**
+    `roomTypes`/`rooms`/`guests`/`reservations`'s `findMany` wrappers made
+    generic over their `args` type (`Prisma.*GetPayload<T>`) — a
+    pre-existing gap where an `include`/`select` passed at a call site was
+    silently dropped from the inferred return type; runtime behavior is
+    unchanged, only the TypeScript types were wrong. Added
+    `getHotelById()` alongside the existing `getHotelBySlug()` (same
+    tenant-root-by-own-id exception, needed so pages can display the
+    authenticated staff member's own hotel name/currency). Extended
+    `Badge` with `success`/`warning`/`danger`/`neutral` variants for
+    status badges (`src/components/management/status-badge.tsx` maps each
+    `ReservationStatus`/`RoomStatus` value to one, in one place). Added an
+    `argsIgnorePattern: "^_"` ESLint override for `@typescript-eslint/no-unused-vars`
+    — `useActionState` mandates a `(prevState, formData)` action signature
+    positionally even when an action (like check-in) needs neither value;
+    this convention already existed in the M3 booking action but was never
+    actually configured, just never triggered before.
+  - **Scope gaps flagged, not invented (CLAUDE.md rule 8):** the schema has
+    no reservation "source" field and no v0.1 write path sets one, so it
+    is omitted from the detail view rather than fabricated; there is no
+    stored "booking reference" column (`formatBookingReference` derives a
+    display string from the reservation id), so reservation search matches
+    guest name/email/room number instead. No separate Room detail
+    page/route was built — the list view's filters plus each reservation's
+    own Room field cover the same information, and Rooms has no mutation
+    surface that would justify a dedicated per-room screen in this phase.
+  - **Tests added:** `tests/integration/guestsUpdate.test.ts` (3 tests —
+    authorized update, cross-tenant `RecordNotFoundError` + untouched
+    record, nonexistent id) and `tests/e2e/management.spec.ts` (5 tests,
+    against the real seeded Ageez Grand Hotel with a disposable
+    `@example.com` guest/reservation fixture, cleaned up in `afterAll`):
+    OWNER_ADMIN views all three modules; HOUSEKEEPING (view-only) sees no
+    Check In control; FRONT_DESK checks in through the UI and the Rooms
+    list shows the room OCCUPIED; reloading the now-checked-in reservation
+    shows the invalid-transition message instead of a control; a
+    nonexistent reservation/guest id renders Not Found. RBAC-denial and
+    cross-tenant-`findById`/`findMany` isolation for the exact data-access
+    calls these pages use were already proven by Phase 3's
+    `tests/unit/rbac.test.ts`, `tests/integration/requireStaffAccess.test.ts`,
+    and `tests/integration/tenantIsolation.test.ts` — not re-tested here.
+  - **Verified against a live database:** `npm run typecheck`, `npm run
+    lint` (0 warnings after the ESLint fix above), `npm run test` (40/40
+    unit, unchanged), `npm run test:integration` (26/26 — 23 existing +
+    3 new), `npm run build` (all expected routes present, no Phase 5+
+    routes), `tests/e2e/management.spec.ts` (5/5), `tests/e2e/auth.spec.ts`
+    (5/5, regression), `tests/e2e/booking.spec.ts` (4/4, regression) all
+    pass. Seeded Ageez Grand Hotel row counts confirmed back at the M1
+    baseline (0 Guest/Reservation, all Rooms `AVAILABLE`) after every e2e
+    run via each suite's own cleanup.
+  - No Services/Reports/Staff-administration UI, no check-out/housekeeping/
+    maintenance/payments, no M5+ functionality, no new auth architecture
+    or RBAC policy — implemented and verified strictly within this
+    phase's approved scope boundary.
 
 ## M3 — Booking Engine (2026-08-24)
 - Added the guest booking flow: `/rooms/[id]/book` (`BookingForm` +

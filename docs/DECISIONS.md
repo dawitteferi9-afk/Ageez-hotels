@@ -4,6 +4,60 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-25 — M4 Phase 4 implementation decisions (reservation source/booking reference gaps, no Room detail page, no guest-create flow, `findMany` generic-inference fix)
+**Status:** Approved-by-continuation (small, load-bearing gaps this phase's
+implementation surfaced, flagged per CLAUDE.md rule 8 rather than silently
+resolved; none change approved architecture or RBAC policy)
+**Decision:**
+1. **No "reservation source" field exists in the schema**
+   (`prisma/schema.prisma`'s `Reservation` model has no such column, and no
+   v0.1 write path — the M3 guest booking flow — sets one). The
+   Reservations UI (`docs/DECISIONS.md`/the M4 Phase 4 task's "reservation
+   source if available" requirement) omits it rather than inventing a
+   fabricated value, per CLAUDE.md rule 3.
+2. **No stored "booking reference" column either** — `formatBookingReference()`
+   (`src/lib/domain/booking.ts`) derives a display string from the
+   reservation id at render time. Reservations search therefore matches
+   guest name/email or room number, not a booking reference, since there
+   is no indexed column to query against (matching on the derived string
+   would require fetching every reservation in the hotel and filtering in
+   application code — not worth the complexity at this scale/priority).
+3. **No separate Room detail page/route.** Rooms has no mutation surface
+   in M4 (Amendment A) and no additional per-room information beyond what
+   the list view's columns and each Reservation's own Room field already
+   show, so a dedicated detail screen would be a placeholder with nothing
+   new to show. The list view's room-type/status filters cover the
+   "appropriate management view" the Phase 4 task allowed as an
+   alternative to a detail route.
+4. **No standalone "create guest" flow.** Guests are created today only as
+   a side effect of the existing M3 booking flow
+   (`withTenant().guests.create()`); Phase 4 adds `guests.update()` (edit
+   contact fields) but not a walk-in-guest creation form. A staff-initiated
+   "create guest independent of a booking" flow is deferred as a future
+   decision rather than added unilaterally, since it wasn't clearly
+   required by the Primary Demonstration Test and the task's own wording
+   ("only support create/edit if... safely supports it") left it optional.
+5. **`withTenant()`'s `findMany` wrappers for `rooms`/`guests`/`reservations`
+   made generic over their `args` type**, returning
+   `Prisma.<Model>GetPayload<T>[]` instead of the fixed base-model shape.
+   This is a type-correctness fix, not a behavior change: the previous
+   non-generic signature silently dropped any `include`/`select` passed at
+   a call site from the *inferred TypeScript return type* (though the
+   runtime query was always correct) — a latent gap that surfaced only
+   once Phase 4 needed `include`d relations (`guest`, `room.roomType`,
+   `_count`) for the first time. `roomTypes`/`aiKnowledgeDocuments`/
+   `serviceRequests`/`staffUsers`'s `findMany` were left as-is (unused with
+   `include` by any current call site) to keep this fix minimal.
+**Rationale:** All five are the kind of small gap the 2026-08-25 M4 Phase 3
+decision entry describes — "load-bearing gaps... that weren't already
+pinned down" — none redesign approved architecture, expand RBAC, or touch
+tenant isolation. (1)-(4) are flagged-not-invented per CLAUDE.md rule 8;
+(5) is a strict type-safety fix (the SQL/Prisma call was already correct)
+required for the new UI code to typecheck honestly against what it
+actually receives, not a functional or architectural change.
+
+---
+
 ## 2026-08-25 — M4 Phase 3 implementation decisions (check-in source state, ServiceRequest lifecycle reading, RBAC/domain module layout, integration-test strategy)
 **Status:** Approved (implemented per the 2026-08-25 M4 pre-implementation
 decisions below; these are the concrete choices Phase 3's implementation

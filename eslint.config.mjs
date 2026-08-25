@@ -28,6 +28,19 @@ const eslintConfig = [
       "next-env.d.ts",
     ],
   },
+  {
+    // M4 Phase 4: React's `useActionState` mandates a `(prevState, formData)`
+    // action signature positionally, even for actions (like check-in) that
+    // need neither argument's value. A leading underscore is this
+    // codebase's existing convention for "intentionally unused" (already
+    // used by the M3 booking action), but the default `no-unused-vars`
+    // config never actually recognized it — that gap was latent until now
+    // because the one prior example happened to have a later *used*
+    // parameter, which the default "after-used" mode doesn't flag.
+    rules: {
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
+    },
+  },
 ];
 
 export default eslintConfig;

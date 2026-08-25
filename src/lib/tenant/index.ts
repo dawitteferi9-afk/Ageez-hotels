@@ -154,6 +154,19 @@ export async function getHotelBySlug(slug: string) {
   return prisma.hotel.findUnique({ where: { slug } });
 }
 
+/**
+ * Resolve the tenant root by its own id — used by the M4 Phase 4 management
+ * UI to load the authenticated staff member's own hotel (name/currency for
+ * display) after `requireStaffAccess()` returns `staff.hotelId`. Reading a
+ * row by its own primary key can't leak across tenants (the id itself only
+ * ever came from that same staff member's DB-loaded `hotelId`), so this is
+ * the tenant-root exception to "no ad hoc `where: { hotelId }`" the same way
+ * `getHotelBySlug` already is — not a new pattern.
+ */
+export async function getHotelById(hotelId: string) {
+  return prisma.hotel.findUnique({ where: { id: hotelId } });
+}
+
 export interface TenantContext {
   hotelId: string;
 }
@@ -305,8 +318,20 @@ export function withTenant(hotelId: string) {
     },
 
     rooms: {
-      findMany: (args?: ScopedRoomArgs) =>
-        prisma.room.findMany({ ...args, where: { ...args?.where, hotelId } }),
+      /**
+       * Generic over `T` (not just `ScopedRoomArgs`) so an `include`/`select`
+       * passed at the call site (e.g. M4 Phase 4's `{ include: { roomType: true } }`)
+       * is preserved in the return type. Spreading a generic-typed `args`
+       * into a fresh object literal defeats Prisma's own call-site
+       * inference (it needs the literal shape, not a synthesized spread
+       * type), so the return type is asserted explicitly via
+       * `Prisma.RoomGetPayload<T>` instead — the runtime call is identical
+       * to a plain `findMany`, this only fixes what TypeScript sees.
+       */
+      findMany: <T extends ScopedRoomArgs>(args?: T) =>
+        prisma.room.findMany({ ...args, where: { ...args?.where, hotelId } } as Prisma.RoomFindManyArgs) as unknown as Promise<
+          Array<Prisma.RoomGetPayload<T>>
+        >,
       count: (where?: ScopedRoomArgs["where"]) =>
         prisma.room.count({ where: { ...where, hotelId } }),
       findUnique: (roomId: string) => prisma.room.findFirst({ where: { id: roomId, hotelId } }),
@@ -326,17 +351,43 @@ export function withTenant(hotelId: string) {
       /** No dedup by email — v0.1 is guest checkout only, no guest accounts (docs/DECISIONS.md). */
       create: (data: Omit<Prisma.GuestUncheckedCreateInput, "hotelId">) =>
         prisma.guest.create({ data: { ...data, hotelId } }),
-      findMany: (args?: ScopedGuestArgs) =>
-        prisma.guest.findMany({ ...args, where: { ...args?.where, hotelId } }),
+      /** Generic over `T` — see `rooms.findMany`'s comment for why (preserves `include`/`select`, e.g. M4 Phase 4's `_count`). */
+      findMany: <T extends ScopedGuestArgs>(args?: T) =>
+        prisma.guest.findMany({ ...args, where: { ...args?.where, hotelId } } as Prisma.GuestFindManyArgs) as unknown as Promise<
+          Array<Prisma.GuestGetPayload<T>>
+        >,
       /** Cross-tenant id returns `null`, identical to "doesn't exist" — no existence leak. */
       findById: (guestId: string) => prisma.guest.findFirst({ where: { id: guestId, hotelId } }),
+
+      /**
+       * M4 Phase 4: edit a guest's own contact fields (no state machine —
+       * plain field update, so no transaction/domain validator needed,
+       * unlike `reservations.checkIn()`/`serviceRequests.updateStatus()`).
+       * Same find-scoped-then-write shape as those, for the same reason:
+       * a cross-tenant or nonexistent id throws `RecordNotFoundError`
+       * instead of silently updating nothing or leaking existence.
+       */
+      update: async (
+        guestId: string,
+        data: Pick<Prisma.GuestUncheckedUpdateInput, "name" | "email" | "phone" | "nationality">
+      ) => {
+        const guest = await prisma.guest.findFirst({ where: { id: guestId, hotelId } });
+        if (!guest) {
+          throw new RecordNotFoundError(`No guest ${guestId} found for this hotel.`);
+        }
+        return prisma.guest.update({ where: { id: guestId }, data });
+      },
     },
 
     reservations: {
       create: (data: Omit<Prisma.ReservationUncheckedCreateInput, "hotelId">) =>
         prisma.reservation.create({ data: { ...data, hotelId } }),
-      findMany: (args?: ScopedReservationArgs) =>
-        prisma.reservation.findMany({ ...args, where: { ...args?.where, hotelId } }),
+      /** Generic over `T` — see `rooms.findMany`'s comment for why (preserves `include`/`select`, e.g. M4 Phase 4's `{ guest: true, room: { include: { roomType: true } } }`). */
+      findMany: <T extends ScopedReservationArgs>(args?: T) =>
+        prisma.reservation.findMany({
+          ...args,
+          where: { ...args?.where, hotelId },
+        } as Prisma.ReservationFindManyArgs) as unknown as Promise<Array<Prisma.ReservationGetPayload<T>>>,
       findById: (id: string) =>
         prisma.reservation.findFirst({
           where: { id, hotelId },

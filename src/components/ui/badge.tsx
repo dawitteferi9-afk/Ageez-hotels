@@ -9,6 +9,10 @@ const badgeVariants = cva(
       variant: {
         default: "bg-ochre-500/15 text-ochre-600",
         outline: "border border-basalt-700/30 text-basalt-700",
+        success: "bg-green-100 text-green-800",
+        warning: "bg-amber-100 text-amber-800",
+        danger: "bg-red-100 text-red-800",
+        neutral: "bg-basalt-700/10 text-basalt-700",
       },
     },
     defaultVariants: { variant: "default" },
