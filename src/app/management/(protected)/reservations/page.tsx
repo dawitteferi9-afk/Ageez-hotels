@@ -1,12 +1,13 @@
 import Link from "next/link";
 import type { Prisma, ReservationStatus } from "@prisma/client";
 import { requireStaffAccess, withTenant, getHotelById } from "@/lib/tenant";
+import { hasPermission } from "@/lib/auth/rbac";
 import { formatBookingReference } from "@/lib/domain/booking";
 import { formatCurrency } from "@/lib/utils";
 import { ReservationStatusBadge } from "@/components/management/status-badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
 
@@ -57,9 +58,16 @@ export default async function ReservationsListPage({
 
   return (
     <section className="flex flex-col gap-6">
-      <div>
-        <h1 className="font-display text-2xl text-basalt-950">Reservations</h1>
-        <p className="mt-1 text-sm text-basalt-700">{reservations.length} reservation(s)</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl text-basalt-950">Reservations</h1>
+          <p className="mt-1 text-sm text-basalt-700">{reservations.length} reservation(s)</p>
+        </div>
+        {hasPermission(staff.role, "reservations", "mutate") && (
+          <Link href="/management/reservations/new" className={buttonVariants()}>
+            New Reservation
+          </Link>
+        )}
       </div>
 
       <form className="flex flex-wrap items-end gap-4 rounded-lg border border-basalt-700/15 bg-parchment-50 p-4">

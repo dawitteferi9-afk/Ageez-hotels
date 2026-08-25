@@ -33,7 +33,25 @@ already picked — there is no separate dates-first, cross-room-type
 availability-search screen; this is the approved v0.1 booking flow (see
 `docs/DECISIONS.md`).
 
-Steps 6–12 (management dashboard, check-in, AI assistant) remain
-unachievable — M4/M5/M7 not started. This script will be re-validated
-again at the end of M5 (check-in/maintenance half), M7 (AI half), and in
-full at M9.
+Steps 6–8 (open the management dashboard, find Daniel's reservation, check
+Daniel in) and step 9 (observe the room become Occupied) are now achieved
+and verified as of M4 Phase 4/4.5, run end to end against a live, seeded
+database by `tests/e2e/management.spec.ts`: staff sign-in, the
+Reservations list/detail views, the authorized check-in action, and the
+Rooms list correctly showing the room Occupied afterward. Steps 10–12 (AI
+assistant, maintenance issue) remain unachievable — M7 not started.
+
+**Additional capability beyond this script (M4 Phase 4.5):** staff can now
+also create a reservation directly from the management UI
+(`/management/reservations/new`) for a walk-in or phone booking — not part
+of the script above (which specifically exercises the *public* booking
+flow into management), but a real, separately demonstrable capability:
+staff search for or add a guest, pick a room type and dates, and the
+system auto-assigns an available room and confirms the reservation
+(`tests/e2e/managementReservationCreate.spec.ts`), which can then be
+checked in via the same step 8 workflow. Whether to fold a walk-in
+creation into this script's own steps is a Product Owner call, not made
+here.
+
+This script will be re-validated again at the end of M5
+(check-in/maintenance half), M7 (AI half), and in full at M9.

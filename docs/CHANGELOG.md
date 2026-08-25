@@ -1,5 +1,63 @@
 # Changelog
 
+## M4 — Management Dashboard, Phase 4.5b (2026-08-25)
+UI checkpoint on top of Phase 4.5a's backend — the first complete
+staff-initiated / walk-in reservation creation flow.
+- **Route:** `/management/reservations/new`, gated by
+  `requireStaffAccess("reservations","mutate")` in the page itself (not
+  just UI visibility) — HOUSEKEEPING/MAINTENANCE hitting the URL directly
+  get the generic `(protected)/error.tsx` boundary, same as any other
+  `ForbiddenError`. A "New Reservation" link on `/management/reservations`
+  is shown only when `hasPermission(staff.role,"reservations","mutate")`.
+- **Guest selection:** explicit existing-guest search/select or new-guest
+  entry, never auto-matched. Search is entirely server round-trip (GET) —
+  no client-side fetch/typeahead was added. The "Search" and each result's
+  "Select" button are ordinary submit buttons inside the same `<form>`
+  using `formMethod="get"` + `formAction` to override just that click into
+  a plain browser GET navigation, which resubmits every currently-filled
+  field (room type, dates, guest count, special requests, new-guest
+  fields) as query params — preserving in-progress input with zero
+  JavaScript state. Once a guest is selected, the new-guest fields aren't
+  rendered at all (and vice versa), so "existing guest OR new guest, never
+  both" is a structural property of the DOM, not just a validation rule.
+- **Form → `createReservationAction`** (`reservations/new/actions.ts`) —
+  re-verifies `requireStaffAccess("reservations","mutate")`, zod-validates
+  shape, then calls `createForStaff()` with exactly the allowed fields.
+  Maps `InvalidStayDatesError`/`CapacityExceededError`/`NoRoomAvailableError`/
+  `InvalidGuestSelectionError`/`RecordNotFoundError`/P2034 to user-facing
+  field/form errors (generic wording for the tenant/existence cases — never
+  confirms/denies which id was invalid). On success, redirects to the new
+  reservation's detail page.
+- Staff choose **room type only** — the server auto-assigns the physical
+  room via `createForStaff()`'s existing transactional availability logic;
+  no room picker was added. Reservations are always created `CONFIRMED`
+  with `paymentMethod: "PAY_AT_HOTEL"` (shown as read-only, not a form
+  field) — there is no "create already checked-in" option; the existing,
+  separate check-in workflow is unchanged and still the only path that
+  writes `CHECKED_IN`/`Room.status → OCCUPIED`. No check-out.
+- Same-day check-in dates are permitted (`validateStayDates()`, unchanged)
+  — a walk-in reservation is still create-`CONFIRMED`-then-separately-check-in,
+  not a combined action.
+- **Tests added:** `tests/e2e/managementReservationCreate.spec.ts` (9
+  tests) — role access (OWNER_ADMIN/MANAGER/FRONT_DESK reach the form,
+  HOUSEKEEPING/MAINTENANCE cannot via the list button or a direct URL);
+  same-day walk-in creation for a new guest (CONFIRMED, Pay at Hotel,
+  auto-assigned room, correct server-calculated total); existing-guest
+  search-and-select creation; empty search state; capacity-violation field
+  error; no-availability form error (against two Prisma-seeded blocking
+  reservations on the real Presidential Suite inventory); a
+  nonexistent/foreign `existingGuestId` in the URL falling back gracefully
+  to the picker (no crash); and a reservation created through this flow
+  appearing in the list and successfully going through the existing
+  Check In action afterward.
+- **Verified:** `npm run typecheck`, `npm run lint` (0 warnings), `npm run
+  test` (40/40, unchanged), `npm run test:integration` (43/43, unchanged —
+  no backend changes this checkpoint), `npm run build` (route table adds
+  only `/management/reservations/new`), the new e2e suite (9/9),
+  `tests/e2e/auth.spec.ts` (5/5), `tests/e2e/booking.spec.ts` (4/4),
+  `tests/e2e/management.spec.ts` (5/5) — all pass, all regressions green.
+- M4 Phase 4.5 (backend + UI) is now complete.
+
 ## M4 — Management Dashboard, Phase 4.5a (2026-08-25)
 Backend-only checkpoint (design approved in `docs/DECISIONS.md`'s "Staff-initiated
 reservation creation deferred..." entry; decisions A-F confirmed by the
