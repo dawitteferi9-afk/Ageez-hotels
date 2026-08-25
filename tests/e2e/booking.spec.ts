@@ -61,7 +61,7 @@ test("guest can browse, book the Executive Room, and see a correct confirmation"
   await page.getByRole("button", { name: /Confirm Booking/ }).click();
 
   await expect(page).toHaveURL(/\/booking\/confirmation\//);
-  await expect(page.getByText("Booking Confirmed")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Booking Confirmed" })).toBeVisible();
   await expect(page.getByText("Executive Room", { exact: false }).first()).toBeVisible();
   await expect(page.getByText("Daniel Tesfaye")).toBeVisible();
   await expect(page.getByText("daniel.tesfaye@example.com")).toBeVisible();
