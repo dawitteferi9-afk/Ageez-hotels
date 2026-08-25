@@ -28,10 +28,22 @@ const HOUSEKEEPING = "hiwot.tadesse@ageezgrandhotel.example";
 const MAINTENANCE = "dawit.mekonnen@ageezgrandhotel.example";
 const DEMO_PASSWORD = "AgeezDemo2026!";
 
+/**
+ * Local calendar date (YYYY-MM-DD), NOT `toISOString().slice(0,10)` — that
+ * converts to UTC first, which silently shifts to the previous calendar day
+ * for `daysFromNow: 0` during the hours after local midnight but before UTC
+ * midnight (any positive-UTC-offset timezone, e.g. UTC+3 here, has such a
+ * window every day). The app itself (`validateStayDates()`'s `startOfDay()`,
+ * and the browser's own `<input type="date">`) both operate on local
+ * calendar dates, so the test fixture must match that, not UTC.
+ */
 function isoDate(daysFromNow: number): string {
   const d = new Date();
   d.setDate(d.getDate() + daysFromNow);
-  return d.toISOString().slice(0, 10);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 /**
@@ -167,7 +179,7 @@ test("FRONT_DESK creates a same-day walk-in reservation for a new guest — CONF
   await page.fill('input[name="newGuestEmail"]', "phase45b-walkin@example.com");
   await page.getByRole("button", { name: "Create Reservation" }).click();
 
-  await expect(page).toHaveURL(/\/management\/reservations\/[a-z0-9]+$/);
+  await expect(page).toHaveURL(/\/management\/reservations\/(?!new)[a-z0-9]+$/);
   await expect(page.getByText("Phase45b Walkin Guest")).toBeVisible();
   await expect(page.getByText("CONFIRMED", { exact: true })).toBeVisible();
   await expect(page.getByText("PAY AT HOTEL", { exact: false })).toBeVisible();
@@ -198,7 +210,7 @@ test("FRONT_DESK searches for and explicitly selects an existing guest, then cre
   await page.fill('input[name="guestCount"]', "1");
   await page.getByRole("button", { name: "Create Reservation" }).click();
 
-  await expect(page).toHaveURL(/\/management\/reservations\/[a-z0-9]+$/);
+  await expect(page).toHaveURL(/\/management\/reservations\/(?!new)[a-z0-9]+$/);
   await expect(page.getByText(existingGuestName)).toBeVisible();
 });
 
@@ -267,14 +279,14 @@ test("a reservation created through this flow appears in the list and can be che
   await page.fill('input[name="guestCount"]', "1");
   await page.fill('input[name="newGuestName"]', "Phase45b Checkin Guest");
   await page.getByRole("button", { name: "Create Reservation" }).click();
-  await expect(page).toHaveURL(/\/management\/reservations\/[a-z0-9]+$/);
+  await expect(page).toHaveURL(/\/management\/reservations\/(?!new)[a-z0-9]+$/);
 
   await page.goto("/management/reservations");
   const row = page.locator("tr", { hasText: "Phase45b Checkin Guest" });
   await expect(row).toBeVisible();
 
   await row.getByRole("link", { name: "View" }).click();
-  await expect(page).toHaveURL(/\/management\/reservations\/[a-z0-9]+$/);
+  await expect(page).toHaveURL(/\/management\/reservations\/(?!new)[a-z0-9]+$/);
   await page.getByRole("button", { name: "Check In" }).click();
   await expect(page.getByText("CHECKED IN", { exact: true })).toBeVisible();
 });

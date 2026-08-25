@@ -46,6 +46,9 @@ async function cleanupBySlug(slug: string): Promise<void> {
   await prisma.serviceRequest.deleteMany({ where: { hotelId: hotel.id } });
   await prisma.reservation.deleteMany({ where: { hotelId: hotel.id } });
   await prisma.guest.deleteMany({ where: { hotelId: hotel.id } });
+  // M5a: MaintenanceIssue references both Room and (optionally) StaffUser —
+  // must be cleared before either.
+  await prisma.maintenanceIssue.deleteMany({ where: { hotelId: hotel.id } });
   await prisma.room.deleteMany({ where: { hotelId: hotel.id } });
   await prisma.roomType.deleteMany({ where: { hotelId: hotel.id } });
   await prisma.staffUser.deleteMany({ where: { hotelId: hotel.id } });

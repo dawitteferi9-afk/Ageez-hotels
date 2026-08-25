@@ -1,5 +1,62 @@
 # Changelog
 
+## M5 — Housekeeping + Maintenance, Phase a (2026-08-26)
+Check-out workflow + check-in hardening only (backend + UI). No housekeeping
+or maintenance report/manage APIs or UI yet — those are M5b/M5c. Design
+approved via the corrected M5 design proposal (decisions 1-12 plus the two
+final amendments: administrative maintenance close, and hardening
+`completeCleaning()` against concurrency — the latter applies starting M5b).
+- Added `validateCheckOut()` (`src/lib/domain/reservationTransitions.ts`) —
+  only `CHECKED_IN` is a valid source state.
+- Added `withTenant().reservations.checkOut()` — one Serializable
+  transaction: validates the transition, queries for any unresolved
+  *blocking* (`HIGH`/`URGENT`, `OPEN`/`IN_PROGRESS`) `MaintenanceIssue` on
+  the room, then atomically writes `Reservation.status → CHECKED_OUT` and
+  `Room.status → MAINTENANCE` (blocker exists) or `→ CLEANING` (no
+  blocker) — never `AVAILABLE` directly. Queries `MaintenanceIssue`
+  directly (the table has existed since M1; M5a ships before M5c's
+  `report()`/`manage()` API, so nothing new to migrate).
+- **Hardened `withTenant().reservations.checkIn()`**: now also requires
+  the assigned `Room.status === "AVAILABLE"` (new
+  `RoomNotReadyForCheckInError`) before allowing `CONFIRMED → CHECKED_IN`
+  — an added precondition, not a relaxed one. Necessary now that
+  `CLEANING`/`MAINTENANCE` are reachable Room states a same-day turnover
+  reservation must not be checked into.
+- **UI:** added a "Check Out" button/card to the reservation detail page
+  (`check-out-button.tsx` + `checkOutReservationAction`), exact mirror of
+  the existing Check In control. No new routes.
+- **Tests:** `tests/unit/reservationTransitions.test.ts` (+6, `validateCheckOut`);
+  `tests/integration/reservationCheckOut.test.ts` (new, 11 tests — valid/invalid
+  transitions, atomicity, blocking-vs-non-blocking priority, RESOLVED/CLOSED
+  issues don't count, cross-tenant rejection, RBAC); extended
+  `tests/integration/reservationCheckIn.test.ts` (+3, the new room-readiness
+  guard: rejects CLEANING, rejects MAINTENANCE, still succeeds for
+  AVAILABLE); extended `tests/e2e/management.spec.ts` with a real
+  browser-driven check-in→check-out→Room-shows-Cleaning test.
+  `tests/integration/fixtures.ts`'s cleanup order fixed to delete
+  `MaintenanceIssue` rows before `Room`/`StaffUser` (new FK dependency
+  these tests introduced).
+- **Verified:** `prisma validate`, `npm run typecheck`, `npm run lint` (0
+  warnings), `npm run test` (46/46 — 40 existing + 6 new), `npm run
+  test:integration` (57/57 — 40 existing + 17 new), `npm run build` (route
+  table unchanged — no `/management/housekeeping` or `/management/maintenance`
+  yet), `tests/e2e/management.spec.ts` (6/6), `tests/e2e/auth.spec.ts`
+  (5/5), `tests/e2e/booking.spec.ts` (4/4),
+  `tests/e2e/managementReservationCreate.spec.ts` (9/9) — all pass, all
+  regressions green.
+- **Unrelated pre-existing bug found and fixed while verifying:**
+  `managementReservationCreate.spec.ts`'s `isoDate()` test helper computed
+  "today" via `toISOString()` (UTC), while the app's own
+  `validateStayDates()`/`<input type="date">` operate on local calendar
+  dates — during the few hours each day where local time (this machine:
+  UTC+3) has crossed into the next calendar day but UTC hasn't, `isoDate(0)`
+  silently meant "yesterday" locally, tripping "Check-in date cannot be in
+  the past." Not an M5a regression (no M5a change touches date handling or
+  that test file); fixed the helper to use local date components. Also
+  tightened that file's post-creation `toHaveURL` assertions, which had
+  incidentally also matched the literal `/reservations/new` path (`"new"`
+  satisfies `[a-z0-9]+`), masking a would-be redirect failure.
+
 ## M4 — Management Dashboard, Phase 4.5b (2026-08-25)
 UI checkpoint on top of Phase 4.5a's backend — the first complete
 staff-initiated / walk-in reservation creation flow.

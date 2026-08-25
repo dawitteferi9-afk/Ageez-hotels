@@ -2,7 +2,7 @@ import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { hasPermission, type Module, type Action, type StaffRole } from "@/lib/auth/rbac";
-import { validateCheckIn, type ReservationStatus } from "@/lib/domain/reservationTransitions";
+import { validateCheckIn, validateCheckOut, type ReservationStatus } from "@/lib/domain/reservationTransitions";
 import { validateStayDates, nightsBetween, calculateTotalPrice } from "@/lib/domain/booking";
 import {
   validateServiceRequestTransition,
@@ -66,6 +66,23 @@ export class InvalidTransitionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvalidTransitionError";
+  }
+}
+
+/**
+ * M5a — the reservation's own status is a valid check-in source
+ * (`CONFIRMED`), but the assigned `Room` itself is not currently
+ * `AVAILABLE` (e.g. still `CLEANING` from a same-day prior checkout, or
+ * `MAINTENANCE`). Deliberately a distinct error from `InvalidTransitionError`
+ * — that one is about the Reservation's own status; this one is about the
+ * physical room's readiness, a precondition that only became reachable
+ * once M5 introduced `CLEANING`/`MAINTENANCE` as real states check-in
+ * could otherwise ignore.
+ */
+export class RoomNotReadyForCheckInError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RoomNotReadyForCheckInError";
   }
 }
 
@@ -426,14 +443,14 @@ export function withTenant(hotelId: string) {
         }),
 
       /**
-       * The one authorized Room-state-changing workflow (docs/DECISIONS.md
-       * Amendment A — there is no generic `rooms.updateStatus()`). Runs
-       * entirely inside one Serializable transaction, re-reading the
-       * reservation's current status from the database (never trusting a
-       * caller-supplied status) so two concurrent check-in attempts on the
-       * same reservation can't both succeed and a `CANCELLED` or
-       * already-`CHECKED_IN` reservation is rejected regardless of what the
-       * caller sends:
+       * The one authorized OCCUPIED-side Room-state-changing workflow
+       * (docs/DECISIONS.md Amendment A — there is no generic
+       * `rooms.updateStatus()`). Runs entirely inside one Serializable
+       * transaction, re-reading the reservation's current status from the
+       * database (never trusting a caller-supplied status) so two
+       * concurrent check-in attempts on the same reservation can't both
+       * succeed and a `CANCELLED` or already-`CHECKED_IN` reservation is
+       * rejected regardless of what the caller sends:
        *   1. Load the reservation scoped to `hotelId` — a cross-tenant or
        *      nonexistent id throws `RecordNotFoundError` (no existence
        *      leak; a valid role at another hotel gets the identical error
@@ -443,7 +460,17 @@ export function withTenant(hotelId: string) {
        *      `src/lib/domain/reservationTransitions.ts`) — throws
        *      `InvalidTransitionError` for `CANCELLED`/`CHECKED_IN`/
        *      `CHECKED_OUT`.
-       *   3. Atomically sets `Reservation.status → CHECKED_IN` and
+       *   3. **M5a:** load the assigned `Room` (still scoped to `hotelId`)
+       *      and require `status === "AVAILABLE"` — throws
+       *      `RoomNotReadyForCheckInError` otherwise. Before M5, `AVAILABLE`
+       *      and `OCCUPIED` were the only reachable `Room.status` values, so
+       *      this check was unnecessary; now that check-out can leave a
+       *      room `CLEANING` or `MAINTENANCE`, a same-day turnover
+       *      reservation must not be checked into a room that isn't
+       *      actually ready. This is an added precondition, not a relaxed
+       *      one — `CONFIRMED` remains the only accepted Reservation source
+       *      state.
+       *   4. Atomically sets `Reservation.status → CHECKED_IN` and
        *      `Room.status → OCCUPIED` — both succeed or both roll back,
        *      so Reservation/Room can never end up inconsistent.
        *
@@ -466,6 +493,15 @@ export function withTenant(hotelId: string) {
               throw new InvalidTransitionError(check.error!);
             }
 
+            const room = await tx.room.findFirst({
+              where: { id: reservation.roomId, hotelId },
+            });
+            if (!room || room.status !== "AVAILABLE") {
+              throw new RoomNotReadyForCheckInError(
+                `This room is not ready for check-in (status: ${room?.status ?? "unknown"}).`
+              );
+            }
+
             const [updatedReservation] = await Promise.all([
               tx.reservation.update({
                 where: { id: reservationId },
@@ -474,6 +510,73 @@ export function withTenant(hotelId: string) {
               tx.room.update({
                 where: { id: reservation.roomId },
                 data: { status: "OCCUPIED" },
+              }),
+            ]);
+            return updatedReservation;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+
+      /**
+       * M5a — the OCCUPIED-side counterpart to `checkIn()`. Checkout
+       * atomically sets `Reservation.status → CHECKED_OUT` and derives the
+       * room's next state from whether an unresolved *blocking*
+       * `MaintenanceIssue` exists for it (docs/DECISIONS.md M5 design —
+       * "checkout chooses CLEANING vs MAINTENANCE based on unresolved
+       * blockers"). Blocking = `priority` `HIGH`/`URGENT` **and** `status`
+       * `OPEN`/`IN_PROGRESS` — a `RESOLVED`/`CLOSED` issue, or a
+       * `LOW`/`MEDIUM` one, never counts, matching the M5c-to-be
+       * `maintenanceIssues` module's own definition of "blocking" (queried
+       * directly against `MaintenanceIssue` here since M5a ships before
+       * M5c's report/manage API does — the table and its columns already
+       * exist from M1, nothing new to migrate).
+       *   1. Load the reservation scoped to `hotelId` — `RecordNotFoundError`
+       *      if missing/cross-tenant (identical to `checkIn()`).
+       *   2. Validate the transition (`validateCheckOut`) — throws
+       *      `InvalidTransitionError` for anything other than `CHECKED_IN`.
+       *   3. Query for any `OPEN`/`IN_PROGRESS` `HIGH`/`URGENT`
+       *      `MaintenanceIssue` on `reservation.roomId`.
+       *   4. Atomically sets `Reservation.status → CHECKED_OUT` and
+       *      `Room.status → MAINTENANCE` (blocker exists) or `→ CLEANING`
+       *      (no blocker) — one transaction, one commit. Never writes
+       *      `AVAILABLE` directly.
+       *
+       * Same caller contract as `checkIn()`: `hotelId` from
+       * `requireStaffAccess()`, "reservations"/"mutate" already verified.
+       */
+      checkOut: (reservationId: string) =>
+        prisma.$transaction(
+          async (tx) => {
+            const reservation = await tx.reservation.findFirst({
+              where: { id: reservationId, hotelId },
+            });
+            if (!reservation) {
+              throw new RecordNotFoundError(`No reservation ${reservationId} found for this hotel.`);
+            }
+
+            const check = validateCheckOut(reservation.status as ReservationStatus);
+            if (!check.valid) {
+              throw new InvalidTransitionError(check.error!);
+            }
+
+            const blockingIssue = await tx.maintenanceIssue.findFirst({
+              where: {
+                hotelId,
+                roomId: reservation.roomId,
+                priority: { in: ["HIGH", "URGENT"] },
+                status: { in: ["OPEN", "IN_PROGRESS"] },
+              },
+            });
+            const nextRoomStatus = blockingIssue ? "MAINTENANCE" : "CLEANING";
+
+            const [updatedReservation] = await Promise.all([
+              tx.reservation.update({
+                where: { id: reservationId },
+                data: { status: "CHECKED_OUT" },
+              }),
+              tx.room.update({
+                where: { id: reservation.roomId },
+                data: { status: nextRoomStatus },
               }),
             ]);
             return updatedReservation;

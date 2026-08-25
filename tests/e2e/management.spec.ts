@@ -89,8 +89,8 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await prisma.reservation.deleteMany({ where: { id: reservationId } });
   await prisma.guest.deleteMany({ where: { id: guestId } });
-  // Reset the room in case a test left it CHECKED_IN/OCCUPIED — this suite
-  // must not permanently alter seeded inventory state for later runs.
+  // Reset the room in case a test left it OCCUPIED/CLEANING (M5a) — this
+  // suite must not permanently alter seeded inventory state for later runs.
   await prisma.room.update({ where: { id: roomId }, data: { status: "AVAILABLE" } });
   await prisma.$disconnect();
 });
@@ -150,6 +150,30 @@ test("reloading the now-checked-in reservation shows the invalid-transition mess
 
   await expect(page.getByRole("button", { name: "Check In" })).toHaveCount(0);
   await expect(page.getByText("This reservation is already checked in.")).toBeVisible();
+});
+
+test("M5a: FRONT_DESK checks the same reservation out through the management UI, and the room shows Cleaning", async ({
+  page,
+}) => {
+  await login(page, FRONT_DESK.email);
+  // The reservation is still CHECKED_IN from the earlier check-in test —
+  // this test proves the new Check Out control against that same real
+  // state, not a freshly-fixtured one.
+  await page.goto(`/management/reservations/${reservationId}`);
+  await expect(page.getByRole("button", { name: "Check Out" })).toBeVisible();
+  await page.getByRole("button", { name: "Check Out" }).click();
+
+  // Settled state after the server action + revalidatePath: status flips
+  // to CHECKED OUT and the Check Out button is gone. Both the Check-in and
+  // Check-out cards legitimately show "already been checked out" text for
+  // this status (validateCheckIn/validateCheckOut both return that exact
+  // message), so this only asserts the button/badge, not that shared text.
+  await expect(page.getByText("CHECKED OUT", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Check Out" })).toHaveCount(0);
+
+  await page.goto("/management/rooms");
+  const roomRow = page.locator("tr", { hasText: roomNumber });
+  await expect(roomRow.getByText("CLEANING", { exact: true })).toBeVisible();
 });
 
 test("direct URL to a nonexistent reservation or guest id shows Not Found, not a crash or leaked data", async ({

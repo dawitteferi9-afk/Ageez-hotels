@@ -2,12 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireStaffAccess, withTenant, getHotelById } from "@/lib/tenant";
 import { hasPermission } from "@/lib/auth/rbac";
-import { validateCheckIn } from "@/lib/domain/reservationTransitions";
+import { validateCheckIn, validateCheckOut } from "@/lib/domain/reservationTransitions";
 import { formatBookingReference, nightsBetween } from "@/lib/domain/booking";
 import { formatCurrency } from "@/lib/utils";
 import { ReservationStatusBadge, RoomStatusBadge } from "@/components/management/status-badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CheckInButton } from "./check-in-button";
+import { CheckOutButton } from "./check-out-button";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,7 @@ export default async function ReservationDetailPage({ params }: { params: Promis
   const hotel = await getHotelById(staff.hotelId);
   const canMutate = hasPermission(staff.role, "reservations", "mutate");
   const checkInEligibility = validateCheckIn(reservation.status);
+  const checkOutEligibility = validateCheckOut(reservation.status);
   const nights = nightsBetween(reservation.checkIn, reservation.checkOut);
   const reference = hotel
     ? formatBookingReference(hotel.name, reservation.id)
@@ -114,6 +116,25 @@ export default async function ReservationDetailPage({ params }: { params: Promis
                 )
               ) : (
                 <p className="text-sm text-basalt-700">{checkInEligibility.error}</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Check-out</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {checkOutEligibility.valid ? (
+                canMutate ? (
+                  <CheckOutButton reservationId={reservation.id} />
+                ) : (
+                  <p className="text-sm text-basalt-700">
+                    Your role can view this reservation but cannot check guests out.
+                  </p>
+                )
+              ) : (
+                <p className="text-sm text-basalt-700">{checkOutEligibility.error}</p>
               )}
             </CardContent>
           </Card>
