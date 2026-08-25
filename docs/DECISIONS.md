@@ -4,6 +4,56 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-25 — Staff-initiated reservation creation deferred to a new M4 Phase 4.5; legacy `reservations.create()` must not be exposed to the management UI as-is
+**Status:** Approved (Product Owner clarification, follow-up to the M4
+Phase 4 implementation decisions below)
+**Decision:**
+1. **No staff-initiated ("walk-in") reservation-creation UI or mutation
+   was built in Phase 4**, and this is a distinct gap from the
+   already-recorded "no standalone create-guest flow" decision below —
+   that one only covered editing/creating a `Guest` row in isolation, not
+   creating a new `Reservation`.
+2. **The reason:** `withTenant().reservations.create()`
+   (`src/lib/tenant/index.ts`) is unused M3 scaffolding, not a safe or
+   approved management mutation. It is a bare `hotelId`-scoped wrapper
+   around `prisma.reservation.create()` with **no availability/overlap
+   checking and no transaction** — unlike the real M3 guest booking flow
+   (`src/app/(guest)/rooms/[id]/book/actions.ts`), which never actually
+   calls this wrapper and instead does its own `prisma.$transaction` +
+   `findAvailableRoom()` + `tx.reservation.create()` together. No Phase 3
+   test exercises `reservations.create()`, and no prior decision entry
+   reviewed or approved it for staff use.
+3. **`withTenant().reservations.create()` MUST NOT be called directly from
+   any management UI or Server Action as-is** — doing so could double-book
+   a room, since it skips the exact availability check every other
+   reservation-creating code path relies on. It stays in place only
+   because it is not currently called from anywhere; it is not itself the
+   Phase 4.5 solution.
+4. **A new follow-up phase is recorded: M4 Phase 4.5 — Staff-Initiated /
+   Walk-In Reservation Creation.** Scope (to be designed when that phase
+   actually starts, not now): an RBAC-protected (`reservations`/`mutate`,
+   matching the existing matrix), tenant-scoped, availability-checked,
+   atomic reservation-creation workflow for authorized hotel staff —
+   functionally the management-side equivalent of the guest booking flow's
+   `findAvailableRoom()` + transactional create, reachable from
+   `/management/reservations`. Phase 4.5 has explicitly **not** been
+   implemented as part of this decision — this entry only records the
+   scope gap and where it will be addressed.
+**Rationale:** Directly answers a Product Owner clarification question
+about whether Phase 3 already provided a safe management-side
+reservation-create mutation Phase 4 could have reused (it did not — see
+above). Recording this as its own decision, rather than only the narrower
+guest-creation note already in the Phase 4 entry below, closes a real
+documentation gap: the earlier entry did not separately flag that
+reservation creation itself (not just guest-record creation) was omitted.
+CLAUDE.md rule 8 (flag rather than silently omit or silently build) and
+rule 2 (tenant isolation / correctness of tenant-scoped mutations is
+architectural, not optional) both apply — an availability-unsafe mutation
+must not be wired into a UI just because a same-shaped method already
+exists in the tenant layer.
+
+---
+
 ## 2026-08-25 — M4 Phase 4 implementation decisions (reservation source/booking reference gaps, no Room detail page, no guest-create flow, `findMany` generic-inference fix)
 **Status:** Approved-by-continuation (small, load-bearing gaps this phase's
 implementation surfaced, flagged per CLAUDE.md rule 8 rather than silently
