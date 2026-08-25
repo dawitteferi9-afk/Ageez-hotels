@@ -1,5 +1,97 @@
 # Changelog
 
+## M4 — Management Dashboard, Phases 1-3 (2026-08-25)
+**Note:** Phases 1 and 2 were implemented and committed (`70a0a6f`,
+`2afeb70`) without a CHANGELOG entry at the time — a gap against CLAUDE.md
+rule 7. Summarized here retroactively alongside Phase 3, which does follow
+the rule.
+
+- **Phase 1 (`70a0a6f`) — schema + seed:** Additive migration
+  `20260824221224_add_staffuser_password_hash` adds
+  `StaffUser.passwordHash` (bcrypt hash). Seed script bcrypt-hashes a
+  documented demo password (`DEMO_STAFF_PASSWORD`,
+  `src/config/defaults/seed/ageez-grand-hotel.ts`) independently per
+  seeded staff row.
+- **Phase 2 (`2afeb70`) — Auth.js login + route protection:** Real
+  `/management/...` route segment (`src/app/management/login` public,
+  `src/app/management/(protected)` session-gated). Auth.js v5 split into
+  an edge-safe base config (`src/lib/auth/config.ts`), an Edge middleware
+  instance (`src/lib/auth/edge.ts`), and the full Node instance with the
+  Credentials provider (`src/lib/auth/index.ts`) — required because
+  Prisma/bcryptjs can't run on the Edge runtime `middleware.ts` uses. JWT
+  session carries only `id` (no `role`/`hotelId` — Phase 3 re-loads those
+  from the database rather than trusting a token claim).
+  `tests/e2e/auth.spec.ts` covers login success/failure/unknown-account/
+  logout. Explicitly a navigation skeleton only, no RBAC/tenant
+  enforcement yet.
+- **Phase 3 — RBAC + tenant-scoped data access + server-side
+  state-transition rules:**
+  - Added `src/lib/auth/rbac.ts` (pure permission matrix — the
+    docs/SECURITY.md table as code) and `requireStaffAccess()`
+    (`src/lib/tenant/index.ts`) — the single gate every protected
+    read/mutation calls first, re-loading the StaffUser's role/hotelId
+    fresh from the database on every call rather than trusting the JWT.
+  - Added `src/lib/domain/reservationTransitions.ts` (`validateCheckIn` —
+    only `CONFIRMED` may check in) and
+    `src/lib/domain/serviceRequestTransitions.ts`
+    (`validateServiceRequestTransition` — enforces the approved
+    `PENDING → IN_PROGRESS → COMPLETED or CANCELLED` chain literally).
+  - Extended `withTenant()`: scoped `findById`/`findMany` for `guests`,
+    `reservations`, and new `serviceRequests`/`staffUsers` namespaces
+    (the latter never selects `passwordHash`); the one authorized
+    Room-mutating workflow, `reservations.checkIn()` (re-reads current
+    status, validates the transition, and updates `Reservation`+`Room`
+    together in one Serializable transaction); and
+    `serviceRequests.updateStatus()` (same re-read-then-validate pattern).
+    Deliberately still no `rooms.updateStatus()` anywhere — no role gets a
+    generic Room-mutation permission (docs/DECISIONS.md Amendment A);
+    FRONT_DESK's only path to changing Room state is the authorized
+    check-in workflow.
+  - Cross-tenant reads return `null`/no-match identically to a
+    nonexistent id (no existence leak); cross-tenant mutations throw
+    `RecordNotFoundError`.
+  - **New test tier:** `tests/integration/**`
+    (`vitest.integration.config.ts`, `npm run test:integration`) — calls
+    `src/lib/tenant` directly against the real local PostgreSQL instance
+    using two disposable fixture hotels per test file (never the real
+    seeded Ageez Grand Hotel), since Phase 3 has no UI yet for Playwright
+    to drive but tenant isolation/transaction atomicity need a real
+    database to prove anything. `requireStaffAccess()` takes an
+    injectable `getSession` (defaulting to a dynamic import of the real
+    `auth()`) so it stays importable from Vitest.
+  - Added 40 pure unit tests (`tests/unit/rbac.test.ts`,
+    `reservationTransitions.test.ts`, `serviceRequestTransitions.test.ts`)
+    and 23 integration tests (`tests/integration/*.test.ts`): full RBAC
+    matrix (5 roles × 7 modules × 2 actions), reservation/service-request
+    transition validation, cross-tenant read/mutate denial for
+    guests/reservations/rooms/service-requests/staff-users by direct id,
+    the authorized check-in transaction (success, already-checked-in
+    rejection, cancelled-reservation rejection, atomicity), and
+    confirmation that no role/permission path reaches a Room-mutation
+    method.
+  - **Verified against a live database:** `npm run typecheck`, `npm run
+    lint`, `npm run test` (40/40 unit), `npm run test:integration` (23/23,
+    against the local PostgreSQL 17 instance — confirmed the seeded Ageez
+    Grand Hotel's row counts were unchanged before/after: 1 Hotel, 5
+    RoomType, 52 Room, 5 StaffUser, 0 Guest/Reservation/ServiceRequest),
+    and `npm run build` all pass. `npm run test:e2e` (Phase 1/2 + M3
+    regression, 9 Playwright tests) initially showed 2 different flaky
+    failures on two separate runs under the default multi-worker
+    config — re-run serially (`--workers=1`) on a database cleaned of
+    leftover `@example.com` fixture rows (the exact pre-existing
+    leftover-data gotcha already recorded in project memory), all 9/9
+    passed twice in a row. Root cause confirmed as parallel-worker
+    contention on cold dev-server route compiles plus leftover data from
+    a previous run, not a Phase 3 regression — Phase 3 touched no
+    guest-site or Phase 1/2 auth file. Test-created `@example.com` guests/
+    reservations were deleted after each run; the database was
+    re-confirmed back at exactly the M1 seed counts before committing.
+  - No Phase 4+ UI (Reservations/Rooms/Guests/Services pages, Dashboard,
+    Reports, Staff-management UI), no M5 functionality (check-out,
+    housekeeping/maintenance workflows) implemented — backend-only per
+    scope.
+  - Updated `docs/DECISIONS.md`, `docs/SECURITY.md`.
+
 ## M3 — Booking Engine (2026-08-24)
 - Added the guest booking flow: `/rooms/[id]/book` (`BookingForm` +
   `createBookingAction` Server Action) and

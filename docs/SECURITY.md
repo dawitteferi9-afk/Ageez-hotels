@@ -56,6 +56,19 @@ tenant resolved per request (as in the guest site), makes this a live risk
 to check explicitly at every route/Server Action, not assume from role
 alone.
 
+**Implemented (M4 Phase 3):** `requireStaffAccess(module, action)`
+(`src/lib/tenant/index.ts`) is the single gate for both checks. It
+re-loads the `StaffUser` row fresh from the database by the session's id
+on every call — never trusting `role`/`hotelId` from the JWT, which
+carries only `id` — checks the freshly-loaded role against
+`hasPermission()` (`src/lib/auth/rbac.ts`, the matrix above as code), and
+returns the record's own `hotelId` for the caller to scope every
+subsequent `withTenant(hotelId)` call with. A client-supplied `hotelId` is
+never accepted as authorization context. `withTenant()`'s `guests`/
+`reservations`/`serviceRequests`/`staffUsers` `findById` methods return
+`null` for a cross-tenant id — identical to a nonexistent id, so no
+response ever leaks whether a foreign-hotel record exists.
+
 ## State-transition integrity
 `ServiceRequest`, `Reservation`, and `Room` status transitions (e.g.
 check-in, service-request status changes) must be validated in the
@@ -65,6 +78,20 @@ transition (e.g. checking in a `CANCELLED` reservation, or an out-of-order
 status change) must be rejected server-side regardless of what the client
 sends, both for data integrity and because UI-only gating is not a real
 authorization boundary.
+
+**Implemented (M4 Phase 3):** `src/lib/domain/reservationTransitions.ts`
+(`validateCheckIn`) and `src/lib/domain/serviceRequestTransitions.ts`
+(`validateServiceRequestTransition`) are pure validators consulted by
+`withTenant().reservations.checkIn()` and
+`withTenant().serviceRequests.updateStatus()`, both of which re-read the
+row's *current* status from the database inside a Serializable
+transaction before validating — never trusting a caller-claimed "current
+status". `checkIn()` updates `Reservation.status` and `Room.status`
+together in that one transaction, so the two can never end up
+inconsistent. There is still no `rooms.updateStatus()` (or any other
+generic Room-mutation method) anywhere in `src/lib/tenant` — check-in
+remains the only path that changes `Room.status` (docs/DECISIONS.md
+Amendment A).
 
 ## Hotel-level admin vs. platform-level admin
 A hotel's OWNER/ADMIN role manages that hotel only. A future Ageez

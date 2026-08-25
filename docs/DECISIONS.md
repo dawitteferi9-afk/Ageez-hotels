@@ -4,6 +4,70 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-25 — M4 Phase 3 implementation decisions (check-in source state, ServiceRequest lifecycle reading, RBAC/domain module layout, integration-test strategy)
+**Status:** Approved (implemented per the 2026-08-25 M4 pre-implementation
+decisions below; these are the concrete choices Phase 3's implementation
+required that weren't already pinned down)
+**Decision:**
+1. **Valid check-in source state is `CONFIRMED` only.** The M3 guest
+   booking flow (`src/app/(guest)/rooms/[id]/book/actions.ts`) always
+   writes a new reservation as `CONFIRMED`; `CREATED` is the schema's
+   default value but no v0.1 write path ever produces it. Rather than
+   guessing whether `CREATED` should also be checkable-in,
+   `validateCheckIn()` (`src/lib/domain/reservationTransitions.ts`)
+   accepts only `CONFIRMED` and rejects everything else, including
+   `CREATED`, `CHECKED_IN`, `CHECKED_OUT`, and `CANCELLED`.
+2. **ServiceRequest lifecycle read as a strict linear chain.** The approved
+   text "PENDING → IN_PROGRESS → COMPLETED or CANCELLED" is implemented
+   literally: `PENDING`'s only forward transition is `IN_PROGRESS`;
+   `IN_PROGRESS`'s only forward transitions are `COMPLETED` or
+   `CANCELLED`. A `PENDING` request cannot be cancelled directly — it must
+   move to `IN_PROGRESS` first. If direct `PENDING → CANCELLED` turns out
+   to be needed in practice, that's a Product Owner call to add, not one
+   inferred here (CLAUDE.md rule 8).
+3. **New module layout:** `src/lib/auth/rbac.ts` (pure role/module/action
+   permission matrix, mirrors the docs/SECURITY.md table exactly),
+   `src/lib/domain/reservationTransitions.ts` and
+   `src/lib/domain/serviceRequestTransitions.ts` (pure state-transition
+   validators, same framework-agnostic pattern as
+   `src/lib/domain/booking.ts`), and `requireStaffAccess()` added to
+   `src/lib/tenant/index.ts` (re-loads the StaffUser fresh from the
+   database on every call, then checks `hasPermission()` — the single
+   authorization gate every protected read/mutation must call first).
+   `withTenant()` gained `guests`/`reservations`/`serviceRequests`/
+   `staffUsers` read methods and the one authorized Room-mutating
+   workflow, `reservations.checkIn()` — there is still no
+   `rooms.updateStatus()` anywhere in the codebase (Amendment A).
+4. **Testing split: unit (pure) vs. new integration (real Postgres) vs.
+   e2e (Playwright/browser).** RBAC matrix and transition-validator logic
+   are pure and DB-free, tested in `tests/unit/**` alongside
+   `booking.test.ts`. Tenant isolation, `requireStaffAccess()`, and the
+   check-in/service-request-transition workflows need a real database to
+   prove anything meaningful (docs/SECURITY.md's invariant is about actual
+   Postgres rows, not a mock) but have no UI yet for Playwright to drive —
+   so a new `tests/integration/**` suite (`vitest.integration.config.ts`,
+   `npm run test:integration`) calls `src/lib/tenant` functions directly
+   against the same local PostgreSQL instance used for `npm run dev`,
+   using two disposable fixture hotels created/torn down per test file
+   (never the real seeded Ageez Grand Hotel). `requireStaffAccess()`
+   accepts an injectable `getSession` (defaulting to a **dynamic** import
+   of the real Auth.js `auth()`, not a static one) specifically so this
+   file stays importable from Vitest at all — a static top-level
+   `next-auth` import pulls in `next/server`, which only resolves inside
+   Next.js's own module graph and fails under plain Vitest.
+**Rationale:** All four choices are small, load-bearing gaps the
+2026-08-25 M4 design-review pass didn't spell out to this level of detail;
+recording them here (rather than leaving them implicit in code) means a
+future session doesn't have to reverse-engineer *why* `CREATED` is
+rejected or why `PENDING → CANCELLED` isn't allowed. The integration-test
+split is a new testing tier for this project (previously just unit vs.
+e2e) — justified because Phase 3 is backend-only (no Phase 4 UI yet) but
+its correctness genuinely depends on real Postgres behavior (transaction
+atomicity, unique constraints, `hotelId` scoping), which a pure mock
+wouldn't actually prove.
+
+---
+
 ## 2026-08-25 — M4 pre-implementation design decisions (auth, check-in boundary, Services, Reports, RBAC)
 **Status:** Approved (Product Owner decision, with three amendments — see
 Amendments below)

@@ -1,0 +1,72 @@
+import { describe, it, expect } from "vitest";
+import { hasPermission, STAFF_ROLES, MODULES, type Module, type Action } from "../../src/lib/auth/rbac";
+
+/**
+ * Full RBAC matrix coverage — every (role, module, action) combination is
+ * asserted, not just a sample, so a future edit to `MATRIX` in
+ * `src/lib/auth/rbac.ts` that silently drifts from docs/SECURITY.md's
+ * approved table fails a test immediately.
+ */
+
+const FRONT_OFFICE = ["OWNER_ADMIN", "MANAGER", "FRONT_DESK"];
+
+// Expected "mutate" allow-list per module, per the approved M4 matrix
+// (docs/DECISIONS.md 2026-08-25, docs/SECURITY.md). A module with no entry
+// here means NO role may mutate it (currently only "rooms" — Amendment A).
+const EXPECTED_MUTATE: Partial<Record<Module, string[]>> = {
+  reservations: FRONT_OFFICE,
+  guests: FRONT_OFFICE,
+  services: FRONT_OFFICE,
+  staff: ["OWNER_ADMIN"],
+};
+
+describe("hasPermission — view", () => {
+  it("grants every role view access to every module", () => {
+    for (const role of STAFF_ROLES) {
+      for (const module of MODULES) {
+        expect(hasPermission(role, module, "view")).toBe(true);
+      }
+    }
+  });
+});
+
+describe("hasPermission — mutate", () => {
+  for (const module of MODULES) {
+    const allowed = EXPECTED_MUTATE[module] ?? [];
+    it(`module "${module}" allows mutate for exactly [${allowed.join(", ") || "no role"}]`, () => {
+      for (const role of STAFF_ROLES) {
+        expect(hasPermission(role, module, "mutate" as Action)).toBe(allowed.includes(role));
+      }
+    });
+  }
+
+  it("rooms has no mutate permission for any role (docs/DECISIONS.md Amendment A)", () => {
+    for (const role of STAFF_ROLES) {
+      expect(hasPermission(role, "rooms", "mutate" as Action)).toBe(false);
+    }
+  });
+
+  it("only OWNER_ADMIN may mutate staff accounts", () => {
+    expect(hasPermission("OWNER_ADMIN", "staff", "mutate")).toBe(true);
+    for (const role of STAFF_ROLES) {
+      if (role === "OWNER_ADMIN") continue;
+      expect(hasPermission(role, "staff", "mutate")).toBe(false);
+    }
+  });
+
+  it("HOUSEKEEPING and MAINTENANCE cannot mutate reservations, guests, or services", () => {
+    for (const role of ["HOUSEKEEPING", "MAINTENANCE"] as const) {
+      expect(hasPermission(role, "reservations", "mutate")).toBe(false);
+      expect(hasPermission(role, "guests", "mutate")).toBe(false);
+      expect(hasPermission(role, "services", "mutate")).toBe(false);
+    }
+  });
+
+  it("FRONT_DESK may mutate reservations/guests/services but not rooms or staff", () => {
+    expect(hasPermission("FRONT_DESK", "reservations", "mutate")).toBe(true);
+    expect(hasPermission("FRONT_DESK", "guests", "mutate")).toBe(true);
+    expect(hasPermission("FRONT_DESK", "services", "mutate")).toBe(true);
+    expect(hasPermission("FRONT_DESK", "rooms", "mutate")).toBe(false);
+    expect(hasPermission("FRONT_DESK", "staff", "mutate")).toBe(false);
+  });
+});
