@@ -52,6 +52,13 @@ async function cleanupBySlug(slug: string): Promise<void> {
   await prisma.room.deleteMany({ where: { hotelId: hotel.id } });
   await prisma.roomType.deleteMany({ where: { hotelId: hotel.id } });
   await prisma.staffUser.deleteMany({ where: { hotelId: hotel.id } });
+  // M6a: AiKnowledgeDocument references Hotel — must be cleared before the
+  // Hotel row itself, same reasoning as every other child model above. No
+  // integration test created these against a fixture hotel before M6a's
+  // tests/integration/aiKnowledgeTools.test.ts, so this was a latent gap
+  // until that test actually exercised it (same category of fix M5a's own
+  // MaintenanceIssue line above already made once for this file).
+  await prisma.aiKnowledgeDocument.deleteMany({ where: { hotelId: hotel.id } });
   await prisma.hotel.delete({ where: { id: hotel.id } });
 }
 
