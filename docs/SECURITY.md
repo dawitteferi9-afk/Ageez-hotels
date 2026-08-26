@@ -23,25 +23,38 @@ itself is deferred, not the architecture that would support it.
   strategy — no Prisma DB adapter/session tables. `StaffUser.passwordHash`
   is an additive migration column, not a redesign of the M1 schema.
 
-## RBAC (approved 2026-08-25, see docs/DECISIONS.md)
-Permission matrix for M4's modules:
+## RBAC (approved 2026-08-25 for M4; extended 2026-08-26 for M5 — see docs/DECISIONS.md)
+Final permission matrix (M4 + M5 modules):
 
 | Module | OWNER_ADMIN | MANAGER | FRONT_DESK | HOUSEKEEPING | MAINTENANCE |
 |---|---|---|---|---|---|
 | Dashboard | View | View | View | View | View |
-| Reservations (incl. check-in) | View + Mutate | View + Mutate | View + Mutate | View | View |
+| Reservations (incl. check-in/check-out) | View + Mutate | View + Mutate | View + Mutate | View | View |
 | Rooms | View | View | View | View | View |
 | Guests | View + Mutate | View + Mutate | View + Mutate | View | View |
 | Services (ServiceRequest) | View + Mutate | View + Mutate | View + Mutate | View | View |
 | Reports | View | View | View | View | View |
 | Staff accounts | View + Mutate | View | View | View | View |
+| Housekeeping (complete cleaning) | View + Mutate | View + Mutate | View | View + Mutate | View |
+| Maintenance | View + Report + Mutate | View + Report + Mutate | View + Report | View + Report | View + Report + Mutate |
 
 No role gets a generic/standalone Room-mutation permission, including
 FRONT_DESK. Room state changes happen only as the side effect of an
-authorized operational workflow (e.g. check-in), enforced server-side —
-never a direct "set room status" control reachable by any role in M4.
-Housekeeping/Maintenance write access to Rooms is added with their own
-modules in M5, not M4.
+authorized operational workflow (check-in/check-out — `reservations`
+module; completing a cleaning — `housekeeping` module; reporting/managing
+an issue — `maintenance` module), enforced server-side — never a direct
+"set room status" control reachable by any role. There is still no
+`rooms.updateStatus()` (or any other generic Room-mutation method)
+anywhere in `src/lib/tenant`.
+
+**`maintenance`'s `report` action is a narrower authority than `mutate`,
+not a synonym for it.** All five roles may report a problem — anyone can
+discover or be told about one — but only OWNER_ADMIN/MANAGER/MAINTENANCE
+may manage its lifecycle (assign, change status, add resolution/closure
+notes). FRONT_DESK and HOUSEKEEPING can create an issue and view the list/
+detail, but cannot manage — enforced both by this matrix and structurally,
+since the report-only entry point (`maintenanceIssues.report()`) has no
+assign/status parameters at all to misuse even if RBAC were misconfigured.
 
 ## RBAC is not a substitute for tenant isolation
 A role check alone is never sufficient. Every M4 protected read and
@@ -79,19 +92,26 @@ status change) must be rejected server-side regardless of what the client
 sends, both for data integrity and because UI-only gating is not a real
 authorization boundary.
 
-**Implemented (M4 Phase 3):** `src/lib/domain/reservationTransitions.ts`
-(`validateCheckIn`) and `src/lib/domain/serviceRequestTransitions.ts`
-(`validateServiceRequestTransition`) are pure validators consulted by
-`withTenant().reservations.checkIn()` and
-`withTenant().serviceRequests.updateStatus()`, both of which re-read the
-row's *current* status from the database inside a Serializable
-transaction before validating — never trusting a caller-claimed "current
-status". `checkIn()` updates `Reservation.status` and `Room.status`
-together in that one transaction, so the two can never end up
-inconsistent. There is still no `rooms.updateStatus()` (or any other
-generic Room-mutation method) anywhere in `src/lib/tenant` — check-in
-remains the only path that changes `Room.status` (docs/DECISIONS.md
-Amendment A).
+**Implemented (M4 Phase 3, extended M5):** `src/lib/domain/reservationTransitions.ts`
+(`validateCheckIn`/`validateCheckOut`), `src/lib/domain/serviceRequestTransitions.ts`
+(`validateServiceRequestTransition`), and `src/lib/domain/maintenanceTransitions.ts`
+(`validateMaintenanceTransition`) are pure validators consulted by
+`withTenant().reservations.{checkIn,checkOut}()`,
+`withTenant().serviceRequests.updateStatus()`, and
+`withTenant().maintenanceIssues.manage()` respectively — all of which
+re-read the row's *current* status from the database inside a Serializable
+transaction before validating, never trusting a caller-claimed "current
+status". `checkIn()`/`checkOut()` update `Reservation.status` and
+`Room.status` together in that one transaction, so the two can never end
+up inconsistent; `rooms.completeCleaning()` and `maintenanceIssues.report()`/
+`manage()` re-verify the room's live status (and, for `completeCleaning()`
+and the room-recalculation step of `manage()`, re-query for any unresolved
+blocking `MaintenanceIssue`) inside their own transactions for the same
+reason — a concurrent write landing between a check and the write it
+guards cannot slip through. There is still no `rooms.updateStatus()` (or
+any other generic Room-mutation method) anywhere in `src/lib/tenant` — see
+docs/DECISIONS.md Amendment A and the 2026-08-26 M5 design-decisions entry
+for the full authorized-workflow list.
 
 ## Hotel-level admin vs. platform-level admin
 A hotel's OWNER/ADMIN role manages that hotel only. A future Ageez

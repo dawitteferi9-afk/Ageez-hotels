@@ -4,6 +4,93 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-26 — M5 (Housekeeping + Maintenance) design decisions, recorded retroactively at Phase d
+**Status:** Approved (implemented across Phases a/b/c, `f64a08c`/`5e0f10c`/
+`efd9073`; this entry closes a CLAUDE.md rule 7 gap — those phases recorded
+their design in code comments and `docs/CHANGELOG.md` but never in this
+log, unlike M4's phases)
+**Decision:** The following M5 design points are the ones a future session
+would otherwise have to reverse-engineer from `src/lib/tenant/index.ts` and
+`src/lib/domain/{maintenanceTransitions,reservationTransitions}.ts`:
+1. **No schema migration was needed for any of M5a/b/c.** `RoomStatus`
+   (`CLEANING`, `MAINTENANCE`), `MaintenanceIssue`, `MaintenancePriority`,
+   `MaintenanceStatus` all already existed from the M1 schema — M5 is
+   entirely new business logic (`withTenant()` methods, domain validators,
+   RBAC rows) over data the schema already modeled. `RESERVED` and
+   `OUT_OF_SERVICE` (also M1 enum values) remain **unused by every v0.1
+   write path** after M5 — no code anywhere sets a `Room.status` to either
+   value; they exist in the schema/UI filter dropdowns for forward
+   compatibility only, not as reachable states.
+2. **Final Room state machine (authoritative transitions):**
+   `AVAILABLE → OCCUPIED` (check-in), `OCCUPIED → CLEANING` (check-out, no
+   blocking issue), `OCCUPIED → MAINTENANCE` (check-out, blocking issue
+   present), `CLEANING → AVAILABLE` (housekeeping completes cleaning, no
+   blocking issue), `CLEANING → MAINTENANCE` (a blocking issue is reported
+   while the room is mid-clean), `AVAILABLE → MAINTENANCE` (a blocking
+   issue is reported against an available room), `MAINTENANCE → CLEANING`
+   (the last blocking issue on the room is resolved/closed). There is
+   deliberately **no** `OCCUPIED → AVAILABLE`, `MAINTENANCE → AVAILABLE`,
+   or `CLEANING → OCCUPIED` edge, and no generic `rooms.updateStatus()`
+   anywhere — every Room-state change is still the side effect of one
+   specific authorized workflow method (`reservations.checkIn()`,
+   `reservations.checkOut()`, `rooms.completeCleaning()`,
+   `maintenanceIssues.report()`, `maintenanceIssues.manage()`), per the
+   M4 Amendment A pattern extended, not replaced, by M5.
+3. **"Blocking" is one definition shared by checkout, housekeeping, and
+   maintenance:** `priority` in `HIGH`/`URGENT` **and** `status` in
+   `OPEN`/`IN_PROGRESS` (`BLOCKING_MAINTENANCE_PRIORITIES`/
+   `UNRESOLVED_MAINTENANCE_STATUSES` constants, `src/lib/tenant/index.ts`).
+   `LOW`/`MEDIUM` issues, and `RESOLVED`/`CLOSED` issues regardless of
+   priority, never take a room out of service or keep it out of service.
+4. **No housekeeping task/assignment table.** `RoomStatus` alone
+   (`CLEANING` = "needs cleaning") is the entire housekeeping data model —
+   the `/management/housekeeping` queue is just
+   `withTenant().rooms.findMany({ where: { status: "CLEANING" } })`, no new
+   model. Sufficient at this scale (max 52 rooms, one demo hotel); a real
+   housekeeping-task/assignment system is future scope, not silently
+   dropped.
+5. **Maintenance status graph:** `OPEN → IN_PROGRESS`, `OPEN → RESOLVED`,
+   `OPEN → CLOSED` (administrative close), `IN_PROGRESS → RESOLVED`,
+   `IN_PROGRESS → CLOSED` (administrative close), `RESOLVED → CLOSED`
+   (normal closure after a completed repair). `CLOSED` is terminal — no
+   edge leaves it, including back to `OPEN`. An "administrative close"
+   (`OPEN`/`IN_PROGRESS` → `CLOSED` directly, skipping `RESOLVED`) requires
+   a non-empty `resolutionNotes` — it means the ticket is being closed
+   without ever having been fixed (duplicate, invalid report, etc.) and
+   must never be presented as a successful repair. `RESOLVED → CLOSED`
+   requires no reason, since the repair already happened.
+6. **RBAC: `report` is a narrower authority than `mutate`, and exists only
+   on the `maintenance` module.** Every role may report a problem
+   (`view`+`report` = all five roles) since anyone can discover or be told
+   about one; only OWNER_ADMIN/MANAGER/MAINTENANCE may manage the
+   lifecycle (`mutate`: assign, change status, add resolution notes).
+   FRONT_DESK/HOUSEKEEPING can create an issue but structurally cannot
+   manage it — `maintenanceIssues.report()` has no assign/status
+   parameters at all, so this isn't only an RBAC-matrix restriction, the
+   report-only entry point can't do those things even if RBAC were
+   misconfigured. `housekeeping`'s `mutate` action
+   (OWNER_ADMIN/MANAGER/HOUSEKEEPING) is the separate, narrower authority
+   for `rooms.completeCleaning()` — FRONT_DESK and MAINTENANCE are
+   view-only on that module, matching the corrected M5 RBAC matrix (not
+   the earlier first-draft matrix superseded during the M5 design review).
+7. **Every M5 mutation follows the same tenant-isolation shape already
+   established in M4 Phase 3:** `requireStaffAccess(module, action)`
+   re-loads the `StaffUser` from the database, `withTenant(staff.hotelId)`
+   scopes every read/write, and a cross-tenant or nonexistent id throws
+   the identical `RecordNotFoundError` either way (no existence leak). No
+   M5 method introduces a new authorization pattern.
+**Rationale:** CLAUDE.md rule 7 requires recording architectural decisions
+in this log "as part of the same change" — M5a/b/c's real design decisions
+(the state machine, the blocking definition, the maintenance status graph,
+the report/mutate RBAC split) existed only as code comments and
+`docs/CHANGELOG.md` prose by the time M5d started. Consolidating them here,
+at M5 close, is the M5d "finalize documentation" pass catching that gap
+before M5 is marked complete, not a new design decision in its own right —
+every point above was already implemented and tested in Phases a/b/c;
+nothing here changes behavior.
+
+---
+
 ## 2026-08-25 — Staff-initiated reservation creation deferred to a new M4 Phase 4.5; legacy `reservations.create()` must not be exposed to the management UI as-is
 **Status:** Approved (Product Owner clarification, follow-up to the M4
 Phase 4 implementation decisions below)

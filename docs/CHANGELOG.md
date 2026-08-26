@@ -1,5 +1,79 @@
 # Changelog
 
+## M5 — Housekeeping + Maintenance, Phase d (2026-08-26)
+Integration/verification/documentation pass — no application code changed
+except one new test file. M5 (a/b/c/d) is now complete.
+- **Full-lifecycle E2E:** added `tests/e2e/managementLifecycle.spec.ts` (3
+  tests) — the one M5 lifecycle path not already driven through the
+  browser as one continuous chain: an occupied stay (`CHECKED_IN`/
+  `OCCUPIED`) with a pre-existing unresolved `HIGH` maintenance issue ->
+  check-out (`Reservation -> CHECKED_OUT`, `Room -> MAINTENANCE`, not
+  `CLEANING` — and confirmed absent from the housekeeping queue) -> the
+  last blocker resolved (`Room -> CLEANING`, never directly `AVAILABLE`)
+  -> housekeeping completes the cleaning (`Room -> AVAILABLE`). The other
+  two required lifecycle paths were already covered end to end and are not
+  duplicated: normal turnover (check-in -> check-out -> housekeeping
+  complete) in `tests/e2e/management.spec.ts`, and a `CLEANING` room
+  interrupted by a newly-reported blocking issue in
+  `tests/e2e/managementMaintenance.spec.ts`'s "lifecycle 1/3..3/3" tests.
+- **Room state-machine audit:** confirmed the 7 authoritative transitions
+  (`AVAILABLE→OCCUPIED`, `OCCUPIED→CLEANING`, `OCCUPIED→MAINTENANCE`,
+  `CLEANING→AVAILABLE`, `CLEANING→MAINTENANCE`, `AVAILABLE→MAINTENANCE`,
+  `MAINTENANCE→CLEANING`) are each reachable through exactly the workflow
+  method that owns them, the 4 forbidden direct transitions
+  (`OCCUPIED→AVAILABLE`, `MAINTENANCE→AVAILABLE`, `CLEANING→OCCUPIED`, any
+  generic `Room.status` setter) remain structurally impossible (no
+  `rooms.updateStatus()` exists anywhere in `src/lib/tenant`), and
+  `RESERVED`/`OUT_OF_SERVICE` are confirmed unused by every v0.1 write
+  path — by code inspection of `src/lib/tenant/index.ts` cross-referenced
+  against every integration test that already exercises each edge (no
+  gaps found, no code changed).
+- **Reservation, maintenance, and RBAC/tenant-isolation audits:**
+  cross-checked `src/lib/domain/reservationTransitions.ts`,
+  `maintenanceTransitions.ts`, `src/lib/auth/rbac.ts`'s final matrix, and
+  every `withTenant()` mutation's `requireStaffAccess()` gate against this
+  phase's approved requirements — all matched exactly (check-in requires
+  `Room.status === "AVAILABLE"`; blocking = `HIGH`/`URGENT` +
+  `OPEN`/`IN_PROGRESS`; administrative maintenance closes require a
+  reason; `report` vs `mutate` on `maintenance` is enforced both by RBAC
+  and by `report()`'s own narrower shape; every mutation re-loads
+  `StaffUser` and scopes via `withTenant(staff.hotelId)`; cross-tenant ids
+  throw the same `RecordNotFoundError` as a nonexistent id). No
+  discrepancy found; no code changed.
+- **Docs finalized:** added a consolidated M5 design-decisions entry to
+  `docs/DECISIONS.md` (retroactively recording the Room state machine, the
+  shared "blocking" definition, the maintenance status graph, and the
+  `report`/`mutate` RBAC split that Phases a/b/c implemented but never
+  logged there — a CLAUDE.md rule 7 gap this phase closes); extended
+  `docs/SECURITY.md`'s RBAC matrix with the `housekeeping`/`maintenance`
+  rows and the `report`-vs-`mutate` distinction; extended
+  `docs/DATABASE.md` with the Room state machine, the `MaintenanceIssue`
+  status graph, and confirmation that M5 needed zero schema migrations;
+  extended `docs/DEMO_SCRIPT.md` with the normal-turnover and
+  maintenance-variation staff sequences (continuing from the existing
+  script's step 9); marked M5 **Complete** in `docs/V0.1_SCOPE.md` with a
+  new M5 deliverables section.
+- **Verified:** `prisma validate`; `npm run typecheck`; `npm run lint` (0
+  warnings); `npm run test` (76/76, unchanged — no unit-level code
+  changed); `npm run test:integration` (92/92, unchanged — no
+  integration-level code changed); `npm run build` (route table unchanged
+  — no new routes, this phase added only a test file); the full Playwright
+  suite, `--workers=1` (41/41 — the 38 pre-existing tests across
+  `auth.spec.ts`/`booking.spec.ts`/`management.spec.ts`/
+  `managementMaintenance.spec.ts`/`managementReservationCreate.spec.ts`,
+  all passing unchanged, plus the 3 new `managementLifecycle.spec.ts`
+  tests).
+- **DB baseline:** confirmed clean before this phase started (52 rooms all
+  `AVAILABLE`, 0 Guest/Reservation/MaintenanceIssue — the exact M1 seed
+  counts) and re-confirmed identically clean after the full e2e run, once
+  the pre-existing leftover-`@example.com`-fixture-data gotcha from
+  `tests/e2e/booking.spec.ts` (documented in project memory, not an M5d
+  regression — that suite has no `afterAll` cleanup by design) was cleared
+  by hand both before and after this phase's own verification runs.
+- No schema changes, no new `withTenant()` methods, no RBAC changes, no
+  M6+ functionality — this phase is integration/verification/documentation
+  only, per its scope.
+
 ## M5 — Housekeeping + Maintenance, Phase c (2026-08-26)
 Maintenance backend + UI. M5 (a/b/c) is now feature-complete; M5d
 (full-lifecycle e2e already covered incrementally, plus docs/demo-script

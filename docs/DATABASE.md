@@ -4,6 +4,12 @@
 exists at `prisma/migrations/20260824000000_init/` (generated via `prisma
 migrate diff`, **not applied to any database** — no Postgres was reachable
 in the environment that authored it; see `docs/CHANGELOG.md` M1 entry).
+Two additive migrations followed in M3/M4
+(`20260824181030_add_reservation_guest_count`,
+`20260824221224_add_staffuser_password_hash`); **M5 (a/b/c/d) required no
+schema migration at all** — every enum/model M5's check-out, housekeeping,
+and maintenance workflows needed (`RoomStatus.CLEANING`/`MAINTENANCE`,
+`MaintenanceIssue` and its enums) already existed from the M1 schema.
 
 ## Core principle
 Every tenant-owned model has an indexed `hotelId String` (FK to `Hotel.id`)
@@ -19,6 +25,19 @@ tenant root.
 - **Room** — `hotelId`, `roomTypeId`, `roomNumber`, `floor`, `status` (enum
   `RoomStatus`: AVAILABLE, RESERVED, OCCUPIED, CLEANING, MAINTENANCE,
   OUT_OF_SERVICE — default AVAILABLE). Unique on `(hotelId, roomNumber)`.
+  **`RESERVED` and `OUT_OF_SERVICE` remain unused by every v0.1 write
+  path** (confirmed at M5 close) — no code anywhere sets either value; they
+  exist in the enum/UI filters for forward compatibility only. The
+  authoritative v0.1 state machine, entirely implemented in
+  `src/lib/tenant/index.ts` with no generic `updateStatus()` method (see
+  docs/DECISIONS.md Amendment A and the M5 design-decisions entry): `AVAILABLE
+  → OCCUPIED` (check-in) → `CLEANING` or `MAINTENANCE` (check-out,
+  depending on whether an unresolved blocking issue exists) → `AVAILABLE`
+  (housekeeping completes cleaning) or `CLEANING` (the last blocking issue
+  on a `MAINTENANCE` room is resolved/closed) → `AVAILABLE`. A blocking
+  issue reported directly against an `AVAILABLE` or `CLEANING` room also
+  moves it to `MAINTENANCE`. "Blocking" = `priority` HIGH/URGENT **and**
+  `status` OPEN/IN_PROGRESS on `MaintenanceIssue`.
 - **Guest** — `hotelId`, `name`, `email?`, `phone?`, `nationality?`.
   Fictional-only, no real PII. No rows seeded in M1 — created live in the
   M3 booking demo.
@@ -38,7 +57,14 @@ tenant root.
 - **MaintenanceIssue** — `hotelId`, `roomId`, `description`, `priority`
   (enum `MaintenancePriority`: LOW, MEDIUM, HIGH, URGENT), `status` (enum
   `MaintenanceStatus`: OPEN, IN_PROGRESS, RESOLVED, CLOSED), `assignedTo`
-  (nullable FK to `StaffUser`), `resolutionNotes?`. No rows seeded.
+  (nullable FK to `StaffUser`), `resolutionNotes?`. No rows seeded. Status
+  graph (M5c, `src/lib/domain/maintenanceTransitions.ts`): `OPEN →
+  IN_PROGRESS`, `OPEN/IN_PROGRESS → RESOLVED`, `OPEN/IN_PROGRESS → CLOSED`
+  (administrative close — requires non-empty `resolutionNotes`), `RESOLVED
+  → CLOSED` (normal closure, no reason required). `CLOSED` is terminal. No
+  standalone housekeeping-task/assignment table exists — `Room.status ===
+  "CLEANING"` alone is the housekeeping data model (docs/DECISIONS.md M5
+  design-decisions entry).
 - **StaffUser** — `hotelId`, `name`, `email` (unique), `role` (enum
   `StaffRole`: OWNER_ADMIN, MANAGER, FRONT_DESK, HOUSEKEEPING,
   MAINTENANCE). No password/session fields — Auth.js wiring (and whatever
