@@ -1,5 +1,88 @@
 # Changelog
 
+## M5 — Housekeeping + Maintenance, Phase c (2026-08-26)
+Maintenance backend + UI. M5 (a/b/c) is now feature-complete; M5d
+(full-lifecycle e2e already covered incrementally, plus docs/demo-script
+polish) remains.
+- **RBAC:** extended `Action` from `"view"|"mutate"` to include `"report"`
+  — a narrow, creation-only authority that exists only on the new
+  `maintenance` module's row. Matrix: `view` + `report` for all five
+  roles; `mutate` (assign/status/resolution) for OWNER_ADMIN/MANAGER/
+  MAINTENANCE only. FRONT_DESK/HOUSEKEEPING can report but structurally
+  cannot manage — enforced both by RBAC and by `report()` having no
+  assign/status parameters at all.
+- Added `src/lib/domain/maintenanceTransitions.ts`
+  (`validateMaintenanceTransition`, `isAdministrativeClose`,
+  `allowedNextStatuses`) — the approved graph: `OPEN → IN_PROGRESS`,
+  `OPEN/IN_PROGRESS → RESOLVED`, `OPEN/IN_PROGRESS → CLOSED`
+  (administrative close, requires a reason), `RESOLVED → CLOSED` (normal
+  closure, no reason required); `CLOSED` terminal.
+- Added `withTenant().maintenanceIssues` (`report()`/`manage()`/
+  `findMany()`/`findById()`):
+  - `report()` — tenant-scoped room check, creates the issue
+    (`status: "OPEN"`), and — atomically, same transaction — sets
+    `Room.status → MAINTENANCE` only if priority is blocking (`HIGH`/
+    `URGENT`) **and** the room is currently `AVAILABLE`/`CLEANING`;
+    `OCCUPIED` rooms are left untouched (issue still recorded); `LOW`/
+    `MEDIUM` never touch `Room.status`.
+  - `manage()` — re-verifies any `assignedToId` as a same-tenant
+    `StaffUser` (`RecordNotFoundError` otherwise); validates any status
+    change against the graph (`InvalidTransitionError`); requires
+    non-empty `resolutionNotes` for an administrative close
+    (`ClosureReasonRequiredError`); and, when a *blocking* issue moves out
+    of `OPEN`/`IN_PROGRESS` into `RESOLVED`/`CLOSED`, re-checks for any
+    *other* unresolved blocking issue on the room — if none remain and the
+    room is currently `MAINTENANCE`, sets it to `CLEANING` (never directly
+    `AVAILABLE` — housekeeping's `completeCleaning()` remains the only
+    path there). All in one Serializable transaction.
+  - `checkOut()` (M5a) and `completeCleaning()` (M5b) refactored to share
+    the same `BLOCKING_MAINTENANCE_PRIORITIES`/`UNRESOLVED_MAINTENANCE_STATUSES`
+    constants this phase introduced — no behavior change, just one
+    definition of "blocking"/"unresolved" instead of three copies.
+- **UI:** `/management/maintenance` (tenant-scoped list, status/priority/
+  room filters), `/management/maintenance/new` (report form — reachable by
+  all five roles), `/management/maintenance/[id]` (detail; manage controls
+  — assign, status, resolution/closure notes — rendered only for
+  `maintenance`/`mutate` roles). Nav: "Maintenance" enabled.
+  `MaintenanceStatusBadge`/`MaintenancePriorityBadge` added alongside the
+  existing status-badge components.
+- **Tests:** `tests/unit/maintenanceTransitions.test.ts` (15, exhaustive
+  over all 16 status pairs) and `tests/unit/rbac.test.ts` extended (+7,
+  the new `report` action + `maintenance` mutate role); new
+  `tests/integration/maintenanceIssues.test.ts` (23 tests — RBAC,
+  report-time room-status side effects for every priority/room-status
+  combination requested, every graph edge, closure-reason enforcement,
+  same-/cross-tenant assignment, and every room-recalculation case
+  including the OCCUPIED-stays-OCCUPIED case); new
+  `tests/e2e/managementMaintenance.spec.ts` (12 tests, incl. the full
+  CLEANING→report→MAINTENANCE→resolve→CLEANING→complete→AVAILABLE
+  interaction loop against a real seeded room).
+- **Verified:** `npm run typecheck`, `npm run lint` (0 warnings), `npm run
+  test` (76/76 total — 15 new in `maintenanceTransitions.test.ts`, 7 new in
+  `rbac.test.ts`), `npm run test:integration` (92/92 total — 23 new in
+  `maintenanceIssues.test.ts`), `npm run build` (route table adds only the
+  three `/management/maintenance*` routes), the new e2e suite (12/12),
+  `tests/e2e/management.spec.ts` (8/8), `tests/e2e/auth.spec.ts` (5/5),
+  `tests/e2e/booking.spec.ts` (4/4),
+  `tests/e2e/managementReservationCreate.spec.ts` (9/9) — all pass, all
+  regressions green.
+- **Pre-existing test-locator bug found and fixed while verifying (not an
+  M5c application bug, and not new — the identical class of bug was
+  already fixed once in `managementReservationCreate.spec.ts`, just not
+  yet applied to this new file):** `managementMaintenance.spec.ts`'s
+  `toHaveURL(/\/management\/maintenance\/[a-z0-9]+$/)` also matches the
+  literal `/management/maintenance/new` path (`"new"` satisfies
+  `[a-z0-9]+`), so the assertion passed instantly against the
+  still-on-the-form page without ever waiting for the real post-submit
+  redirect, and a subsequent test navigating to that wrongly-captured URL
+  found no manage form. Fixed with a `(?!new)` exclusion, confirmed by a
+  standalone reproduction script before and after the fix. Separately,
+  the first attempt at this suite also used a sign-out/sign-in cycle
+  within a single test to switch roles (mirroring an already-committed
+  pattern elsewhere) — restructured to one login per test throughout,
+  which is both more robust and the pattern used everywhere else in this
+  test suite.
+
 ## M5 — Housekeeping + Maintenance, Phase b (2026-08-26)
 Housekeeping backend + UI only. No maintenance report/manage APIs or UI yet
 (M5c). RoomStatus remains the only state tracked — no housekeeping-task

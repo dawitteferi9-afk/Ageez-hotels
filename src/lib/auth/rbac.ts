@@ -30,15 +30,28 @@ export const MODULES = [
   "reports",
   "staff",
   "housekeeping",
+  "maintenance",
 ] as const;
 export type Module = (typeof MODULES)[number];
 
-export type Action = "view" | "mutate";
+/**
+ * M5c adds "report" — a narrow, creation-only authority distinct from
+ * "mutate". It exists *only* on the `maintenance` module's row (every
+ * other module simply omits the key, exactly like `rooms` already omits
+ * "mutate" — `MATRIX`'s type already tolerates a module using a subset of
+ * actions, so this isn't a new pattern). "report" grants ONLY
+ * `maintenanceIssues.report()` (create an issue); it must never be
+ * confused with "mutate", which alone gates
+ * `maintenanceIssues.manage()` (assign/status/resolution).
+ */
+export type Action = "view" | "mutate" | "report";
 
 const ALL_ROLES: readonly StaffRole[] = STAFF_ROLES;
 const FRONT_OFFICE_ROLES: readonly StaffRole[] = ["OWNER_ADMIN", "MANAGER", "FRONT_DESK"];
 /** M5b — the roles that may complete a cleaning (docs/DECISIONS.md M5 design, decision 4-adjacent housekeeping RBAC row). */
 const HOUSEKEEPING_MUTATE_ROLES: readonly StaffRole[] = ["OWNER_ADMIN", "MANAGER", "HOUSEKEEPING"];
+/** M5c — the roles that may manage the maintenance lifecycle (assign/status/resolution). Everyone can "report"; only these three can "mutate". */
+const MAINTENANCE_MUTATE_ROLES: readonly StaffRole[] = ["OWNER_ADMIN", "MANAGER", "MAINTENANCE"];
 
 /**
  * The approved M4 matrix (docs/DECISIONS.md, docs/SECURITY.md), extended in
@@ -71,6 +84,17 @@ const MATRIX: Record<Module, Partial<Record<Action, readonly StaffRole[]>>> = {
    * own module (M5c), not this one.
    */
   housekeeping: { view: ALL_ROLES, mutate: HOUSEKEEPING_MUTATE_ROLES },
+  /**
+   * M5c. Every role may "report" (create) a maintenance issue — they're
+   * commonly the ones who discover or receive the problem. Only
+   * OWNER_ADMIN/MANAGER/MAINTENANCE may "mutate" (assign, change status,
+   * add resolution notes) — FRONT_DESK/HOUSEKEEPING can report and view,
+   * never manage the lifecycle. `maintenanceIssues.report()` structurally
+   * cannot assign/resolve (no such parameters exist on it) — this matrix
+   * entry is the RBAC half of that same narrow-authority boundary, not the
+   * only enforcement of it.
+   */
+  maintenance: { view: ALL_ROLES, report: ALL_ROLES, mutate: MAINTENANCE_MUTATE_ROLES },
 };
 
 /** Whether `role` may perform `action` on `module` per the approved M4 matrix. */

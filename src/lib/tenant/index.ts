@@ -8,6 +8,11 @@ import {
   validateServiceRequestTransition,
   type ServiceRequestStatus,
 } from "@/lib/domain/serviceRequestTransitions";
+import {
+  validateMaintenanceTransition,
+  isAdministrativeClose,
+  type MaintenanceStatus,
+} from "@/lib/domain/maintenanceTransitions";
 
 /**
  * Centralized tenant-aware data access (docs/ARCHITECTURE.md,
@@ -115,6 +120,21 @@ export class InvalidGuestSelectionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvalidGuestSelectionError";
+  }
+}
+
+/**
+ * M5c — an "administrative close" (`OPEN`/`IN_PROGRESS` -> `CLOSED`
+ * directly, without ever being fixed) was attempted with no non-empty
+ * `resolutionNotes`. `RESOLVED -> CLOSED` (normal closure after a
+ * completed repair) never throws this — only the two administrative-close
+ * edges require a reason (`isAdministrativeClose()`,
+ * `src/lib/domain/maintenanceTransitions.ts`).
+ */
+export class ClosureReasonRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClosureReasonRequiredError";
   }
 }
 
@@ -283,6 +303,15 @@ type ScopedServiceRequestArgs = Omit<Prisma.ServiceRequestFindManyArgs, "where">
   where?: Omit<Prisma.ServiceRequestWhereInput, "hotelId">;
 };
 
+type ScopedMaintenanceIssueArgs = Omit<Prisma.MaintenanceIssueFindManyArgs, "where"> & {
+  where?: Omit<Prisma.MaintenanceIssueWhereInput, "hotelId">;
+};
+
+/** Blocking = operationally significant enough to take a room out of service; `LOW`/`MEDIUM` never do (docs/DECISIONS.md M5 design). */
+const BLOCKING_MAINTENANCE_PRIORITIES: Prisma.MaintenanceIssueWhereInput["priority"] = { in: ["HIGH", "URGENT"] };
+/** Unresolved = still an open concern; `RESOLVED`/`CLOSED` issues never count as blockers regardless of priority. */
+const UNRESOLVED_MAINTENANCE_STATUSES: Prisma.MaintenanceIssueWhereInput["status"] = { in: ["OPEN", "IN_PROGRESS"] };
+
 /** `select`/`include` are deliberately excluded — `staffUsers` reads always force `STAFF_USER_SAFE_SELECT` so `passwordHash` can never leak through this namespace. */
 type ScopedStaffUserArgs = Omit<Prisma.StaffUserFindManyArgs, "where" | "select" | "include"> & {
   where?: Omit<Prisma.StaffUserWhereInput, "hotelId">;
@@ -429,8 +458,8 @@ export function withTenant(hotelId: string) {
               where: {
                 hotelId,
                 roomId,
-                priority: { in: ["HIGH", "URGENT"] },
-                status: { in: ["OPEN", "IN_PROGRESS"] },
+                priority: BLOCKING_MAINTENANCE_PRIORITIES,
+                status: UNRESOLVED_MAINTENANCE_STATUSES,
               },
             });
             if (blockingIssue) {
@@ -621,8 +650,8 @@ export function withTenant(hotelId: string) {
               where: {
                 hotelId,
                 roomId: reservation.roomId,
-                priority: { in: ["HIGH", "URGENT"] },
-                status: { in: ["OPEN", "IN_PROGRESS"] },
+                priority: BLOCKING_MAINTENANCE_PRIORITIES,
+                status: UNRESOLVED_MAINTENANCE_STATUSES,
               },
             });
             const nextRoomStatus = blockingIssue ? "MAINTENANCE" : "CLEANING";
@@ -839,6 +868,180 @@ export function withTenant(hotelId: string) {
           where: { id: staffId, hotelId },
           select: STAFF_USER_SAFE_SELECT,
         }),
+    },
+
+    maintenanceIssues: {
+      /** Generic over `T` — see `rooms.findMany`'s comment for why (preserves `include`/`select`, e.g. the management list's `{ include: { room: { include: { roomType: true } }, assignedTo: true } }`). */
+      findMany: <T extends ScopedMaintenanceIssueArgs>(args?: T) =>
+        prisma.maintenanceIssue.findMany({
+          ...args,
+          where: { ...args?.where, hotelId },
+        } as Prisma.MaintenanceIssueFindManyArgs) as unknown as Promise<Array<Prisma.MaintenanceIssueGetPayload<T>>>,
+      /** Cross-tenant id returns `null`, identical to "doesn't exist" — no existence leak. */
+      findById: (id: string) =>
+        prisma.maintenanceIssue.findFirst({
+          where: { id, hotelId },
+          include: { room: { include: { roomType: true } }, assignedTo: true },
+        }),
+
+      /**
+       * M5c — the narrow, creation-only entry point gated by
+       * `requireStaffAccess("maintenance","report")` (docs/DECISIONS.md M5
+       * design — every role may report a problem; only "mutate" roles may
+       * manage it, see `manage()` below). Deliberately has no
+       * `assignedToId`/`status` parameter at all — a report-only caller
+       * structurally cannot assign or resolve, not just by RBAC but by
+       * this function's own shape. One Serializable transaction:
+       *   1. Verify `roomId` belongs to `hotelId` — `RecordNotFoundError`
+       *      if cross-tenant/nonexistent.
+       *   2. Create the issue (`status: "OPEN"`, schema default).
+       *   3. If `priority` is blocking (`HIGH`/`URGENT`) **and** the
+       *      room's current status is `AVAILABLE` or `CLEANING` — set
+       *      `Room.status → MAINTENANCE`. If the room is `OCCUPIED` (a
+       *      guest is present) or already `MAINTENANCE`, leave it
+       *      untouched — the issue is still recorded either way. Never
+       *      touches `Room.status` for `LOW`/`MEDIUM` priority.
+       * Creation and any resulting Room state change are the same
+       * transaction — never a partial write.
+       */
+      report: (input: { roomId: string; description: string; priority: Prisma.MaintenanceIssueCreateInput["priority"] }) =>
+        prisma.$transaction(
+          async (tx) => {
+            const room = await tx.room.findFirst({ where: { id: input.roomId, hotelId } });
+            if (!room) {
+              throw new RecordNotFoundError(`No room ${input.roomId} found for this hotel.`);
+            }
+
+            const issue = await tx.maintenanceIssue.create({
+              data: {
+                hotelId,
+                roomId: input.roomId,
+                description: input.description,
+                priority: input.priority,
+                status: "OPEN",
+              },
+            });
+
+            const isBlocking = input.priority === "HIGH" || input.priority === "URGENT";
+            if (isBlocking && (room.status === "AVAILABLE" || room.status === "CLEANING")) {
+              await tx.room.update({ where: { id: room.id }, data: { status: "MAINTENANCE" } });
+            }
+
+            return issue;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
+
+      /**
+       * M5c — the maintenance lifecycle-management entry point, gated by
+       * `requireStaffAccess("maintenance","mutate")` (OWNER_ADMIN/MANAGER/
+       * MAINTENANCE only — never a `report()`-only role). Covers
+       * assign/reassign, status transitions, and resolution notes as one
+       * validated method (mirrors `guests.update()`'s shape). One
+       * Serializable transaction:
+       *   1. Load the issue scoped to `hotelId` — `RecordNotFoundError` if
+       *      missing/cross-tenant.
+       *   2. If `assignedToId` is provided (and non-null), re-verify it
+       *      tenant-scoped via a `staffUser` lookup — `RecordNotFoundError`
+       *      if that staff member doesn't belong to this hotel (same
+       *      pattern `createForStaff()`'s `existingGuestId` check uses).
+       *      `null` explicitly unassigns.
+       *   3. If `status` is provided and differs from the current status,
+       *      validate the transition (`validateMaintenanceTransition()`)
+       *      — `InvalidTransitionError` otherwise — and, if this is an
+       *      administrative close (`isAdministrativeClose()`: `OPEN`/
+       *      `IN_PROGRESS` -> `CLOSED` directly), require a non-empty
+       *      `resolutionNotes` — `ClosureReasonRequiredError` otherwise.
+       *      `RESOLVED -> CLOSED` (normal closure after repair) has no
+       *      such requirement.
+       *   4. Write the update.
+       *   5. **Room recalculation**: only when this issue is blocking
+       *      (`HIGH`/`URGENT`) and the status transition actually moved it
+       *      OUT of an unresolved state (`OPEN`/`IN_PROGRESS`) INTO
+       *      `RESOLVED` or `CLOSED` — re-query for any *other* unresolved
+       *      blocking issue on the same room; if none remain and the
+       *      room's current status is `MAINTENANCE`, set
+       *      `Room.status → CLEANING` (never directly `AVAILABLE` —
+       *      housekeeping's own `completeCleaning()` is the only path
+       *      there). If the room is `OCCUPIED` (or any other status),
+       *      nothing changes. `LOW`/`MEDIUM` issues never trigger this.
+       * Assignment, status write, and room recalculation are the same
+       * transaction.
+       */
+      manage: (
+        issueId: string,
+        input: { assignedToId?: string | null; status?: MaintenanceStatus; resolutionNotes?: string | null }
+      ) =>
+        prisma.$transaction(
+          async (tx) => {
+            const issue = await tx.maintenanceIssue.findFirst({ where: { id: issueId, hotelId } });
+            if (!issue) {
+              throw new RecordNotFoundError(`No maintenance issue ${issueId} found for this hotel.`);
+            }
+
+            let assignedToId = issue.assignedToId;
+            if (input.assignedToId !== undefined) {
+              if (input.assignedToId === null) {
+                assignedToId = null;
+              } else {
+                const staffMember = await tx.staffUser.findFirst({
+                  where: { id: input.assignedToId, hotelId },
+                });
+                if (!staffMember) {
+                  throw new RecordNotFoundError(`No staff member ${input.assignedToId} found for this hotel.`);
+                }
+                assignedToId = staffMember.id;
+              }
+            }
+
+            const previousStatus = issue.status as MaintenanceStatus;
+            let nextStatus: MaintenanceStatus = previousStatus;
+            if (input.status && input.status !== previousStatus) {
+              const check = validateMaintenanceTransition(previousStatus, input.status);
+              if (!check.valid) {
+                throw new InvalidTransitionError(check.error!);
+              }
+              if (isAdministrativeClose(previousStatus, input.status) && !input.resolutionNotes?.trim()) {
+                throw new ClosureReasonRequiredError(
+                  "A closure reason is required to close this issue without resolving it first."
+                );
+              }
+              nextStatus = input.status;
+            }
+
+            const resolutionNotes =
+              input.resolutionNotes !== undefined ? input.resolutionNotes : issue.resolutionNotes;
+
+            const updated = await tx.maintenanceIssue.update({
+              where: { id: issueId },
+              data: { assignedToId, status: nextStatus, resolutionNotes },
+            });
+
+            const wasUnresolved = previousStatus === "OPEN" || previousStatus === "IN_PROGRESS";
+            const nowSettled = nextStatus === "RESOLVED" || nextStatus === "CLOSED";
+            const isBlocking = issue.priority === "HIGH" || issue.priority === "URGENT";
+            if (wasUnresolved && nowSettled && isBlocking) {
+              const room = await tx.room.findFirst({ where: { id: issue.roomId, hotelId } });
+              if (room && room.status === "MAINTENANCE") {
+                const otherBlocker = await tx.maintenanceIssue.findFirst({
+                  where: {
+                    hotelId,
+                    roomId: issue.roomId,
+                    id: { not: issueId },
+                    priority: BLOCKING_MAINTENANCE_PRIORITIES,
+                    status: UNRESOLVED_MAINTENANCE_STATUSES,
+                  },
+                });
+                if (!otherBlocker) {
+                  await tx.room.update({ where: { id: room.id }, data: { status: "CLEANING" } });
+                }
+              }
+            }
+
+            return updated;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
     },
   };
 }
