@@ -5,6 +5,7 @@ import {
   calculateTotalPrice,
   dateRangesOverlap,
   formatBookingReference,
+  startOfDay,
 } from "../../src/lib/domain/booking";
 
 const today = new Date(2026, 7, 24); // 2026-08-24, matches this project's "current date"
@@ -72,5 +73,31 @@ describe("formatBookingReference", () => {
 
   it("falls back to RES when the hotel name has no letters", () => {
     expect(formatBookingReference("123", "cmt7abcd1234efgh5678")).toBe("RES-EFGH5678");
+  });
+});
+
+describe("startOfDay (M4 Phase 6 — exported for src/lib/tenant's Reports 'today' definition)", () => {
+  it("zeroes the time-of-day component, keeping the same local calendar date", () => {
+    const midAfternoon = new Date(2026, 7, 24, 15, 42, 30, 500);
+    const result = startOfDay(midAfternoon);
+    expect(result.getFullYear()).toBe(2026);
+    expect(result.getMonth()).toBe(7);
+    expect(result.getDate()).toBe(24);
+    expect(result.getHours()).toBe(0);
+    expect(result.getMinutes()).toBe(0);
+    expect(result.getSeconds()).toBe(0);
+    expect(result.getMilliseconds()).toBe(0);
+  });
+
+  it("is idempotent — applying it twice gives the same instant", () => {
+    const once = startOfDay(new Date(2026, 7, 24, 23, 59, 59));
+    const twice = startOfDay(once);
+    expect(twice.getTime()).toBe(once.getTime());
+  });
+
+  it("treats two moments on the same calendar day as equal", () => {
+    const morning = startOfDay(new Date(2026, 7, 24, 0, 1));
+    const night = startOfDay(new Date(2026, 7, 24, 23, 59));
+    expect(morning.getTime()).toBe(night.getTime());
   });
 });

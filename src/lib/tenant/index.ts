@@ -1,9 +1,9 @@
 import { cache } from "react";
 import { prisma } from "@/lib/db";
-import { Prisma } from "@prisma/client";
+import { Prisma, type RoomStatus } from "@prisma/client";
 import { hasPermission, type Module, type Action, type StaffRole } from "@/lib/auth/rbac";
 import { validateCheckIn, validateCheckOut, type ReservationStatus } from "@/lib/domain/reservationTransitions";
-import { validateStayDates, nightsBetween, calculateTotalPrice } from "@/lib/domain/booking";
+import { validateStayDates, nightsBetween, calculateTotalPrice, startOfDay } from "@/lib/domain/booking";
 import {
   validateServiceRequestTransition,
   type ServiceRequestStatus,
@@ -332,6 +332,71 @@ const STAFF_USER_SAFE_SELECT = {
 const BLOCKING_RESERVATION_STATUSES: Prisma.ReservationWhereInput["status"] = {
   in: ["CONFIRMED", "CHECKED_IN"],
 };
+
+/**
+ * M4 Phase 6 (Reports) — every possible enum value, used so a report's
+ * count object always has every key present at `0` rather than omitting a
+ * status nothing currently holds (docs/DECISIONS.md's approved Reports
+ * scope: "room counts by RoomStatus" / "counts by ReservationStatus").
+ * Duplicated as plain literal arrays rather than derived from the Prisma
+ * enum object, matching the existing `STATUS_OPTIONS` convention already
+ * used per-page in `rooms/page.tsx`/`maintenance/page.tsx`/etc. — this is
+ * the one place that convention moves into `src/lib/tenant` because a
+ * report, unlike a list page, needs the zeroed defaults, not just the
+ * options for a `<select>`.
+ */
+const ALL_ROOM_STATUSES: readonly RoomStatus[] = [
+  "AVAILABLE",
+  "RESERVED",
+  "OCCUPIED",
+  "CLEANING",
+  "MAINTENANCE",
+  "OUT_OF_SERVICE",
+];
+const ALL_RESERVATION_STATUSES: readonly ReservationStatus[] = [
+  "CREATED",
+  "CONFIRMED",
+  "CHECKED_IN",
+  "CHECKED_OUT",
+  "CANCELLED",
+];
+
+function zeroedRoomStatusCounts(): Record<RoomStatus, number> {
+  return Object.fromEntries(ALL_ROOM_STATUSES.map((s) => [s, 0])) as Record<RoomStatus, number>;
+}
+
+function zeroedReservationStatusCounts(): Record<ReservationStatus, number> {
+  return Object.fromEntries(ALL_RESERVATION_STATUSES.map((s) => [s, 0])) as Record<ReservationStatus, number>;
+}
+
+export interface OccupancyByRoomType {
+  roomTypeId: string;
+  roomTypeName: string;
+  total: number;
+  byStatus: Record<RoomStatus, number>;
+}
+
+export interface OccupancySummary {
+  totalRooms: number;
+  byStatus: Record<RoomStatus, number>;
+  /** `OCCUPIED / totalRooms`, as a whole-number percentage; `0` when there are no rooms at all. */
+  occupancyRate: number;
+  byRoomType: OccupancyByRoomType[];
+}
+
+export interface ArrivalOrDeparture {
+  reservationId: string;
+  guestName: string;
+  roomNumber: string;
+  status: ReservationStatus;
+}
+
+export interface TodayArrivalsDepartures {
+  /** The local calendar date ("today") this snapshot was computed for, `YYYY-MM-DD`. */
+  date: string;
+  arrivals: ArrivalOrDeparture[];
+  departures: ArrivalOrDeparture[];
+}
 
 /**
  * Find a Room of `roomTypeId` with no blocking reservation overlapping
@@ -1114,6 +1179,142 @@ export function withTenant(hotelId: string) {
           },
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
         ),
+    },
+
+    /**
+     * M4 Phase 6 — the approved minimal, live, read-only operational
+     * snapshot (docs/DECISIONS.md's 2026-08-25 pre-implementation
+     * decisions, item 4): no charts, no export, no historical/date-range
+     * filtering. Built here (not scattered across `/management/reports`'s
+     * own component) specifically so M7's AI Management Assistant can
+     * reuse these same functions as whitelisted tool functions instead of
+     * duplicating aggregation logic (CLAUDE.md rule 4 — the AI never
+     * touches the database directly, only whitelisted functions like
+     * these). Every method here is read-only — `reports`/"view" is the
+     * only permission this module needs, and `hasPermission()`'s matrix
+     * has no `reports`/"mutate" entry at all.
+     */
+    reports: {
+      /**
+       * Room counts by `RoomStatus`, overall and by `RoomType`, plus a
+       * simple occupancy-rate percentage. Fetches the full room set once
+       * and reduces it in memory — the same scale-appropriate
+       * simplification `rooms/page.tsx` (M4 Phase 4) already uses and
+       * justifies (at most 52 seeded rooms per `docs/DATABASE.md`), not a
+       * new pattern. Every `RoomStatus` value is always present in
+       * `byStatus` (zeroed if no room currently holds it).
+       */
+      occupancySummary: async (): Promise<OccupancySummary> => {
+        const rooms = await prisma.room.findMany({
+          where: { hotelId },
+          select: { status: true, roomType: { select: { id: true, name: true } } },
+        });
+
+        const byStatus = zeroedRoomStatusCounts();
+        const byRoomTypeMap = new Map<string, OccupancyByRoomType>();
+        for (const room of rooms) {
+          byStatus[room.status]++;
+
+          let entry = byRoomTypeMap.get(room.roomType.id);
+          if (!entry) {
+            entry = {
+              roomTypeId: room.roomType.id,
+              roomTypeName: room.roomType.name,
+              total: 0,
+              byStatus: zeroedRoomStatusCounts(),
+            };
+            byRoomTypeMap.set(room.roomType.id, entry);
+          }
+          entry.total++;
+          entry.byStatus[room.status]++;
+        }
+
+        const totalRooms = rooms.length;
+        return {
+          totalRooms,
+          byStatus,
+          occupancyRate: totalRooms === 0 ? 0 : Math.round((byStatus.OCCUPIED / totalRooms) * 100),
+          byRoomType: Array.from(byRoomTypeMap.values()).sort((a, b) => a.roomTypeName.localeCompare(b.roomTypeName)),
+        };
+      },
+
+      /**
+       * Reservation counts by `ReservationStatus` — a real database-level
+       * aggregate (`groupBy`), unlike `occupancySummary()`'s in-memory
+       * reduce, since `Reservation` (unlike the fixed 52-room inventory)
+       * has no bounded row count. Every `ReservationStatus` value is
+       * always present (zeroed if no reservation currently holds it).
+       */
+      reservationStatusSummary: async (): Promise<Record<ReservationStatus, number>> => {
+        const grouped = await prisma.reservation.groupBy({
+          by: ["status"],
+          where: { hotelId },
+          _count: true,
+        });
+        const counts = zeroedReservationStatusCounts();
+        for (const row of grouped) {
+          counts[row.status as ReservationStatus] = row._count;
+        }
+        return counts;
+      },
+
+      /** Total guests on file for this hotel — the one Guests metric the approved scope calls for. */
+      guestCount: (): Promise<number> => prisma.guest.count({ where: { hotelId } }),
+
+      /**
+       * Today's arrivals (`checkIn` falls on the current local calendar
+       * day) and departures (`checkOut` falls on the current local
+       * calendar day), excluding `CANCELLED` reservations either way — a
+       * cancelled booking is not really arriving or departing. Uses
+       * `startOfDay()` from `src/lib/domain/booking.ts` — the same
+       * local-calendar-day definition of "today" `validateStayDates()`
+       * already establishes elsewhere in this codebase, not a second,
+       * competing definition. `now` is injectable for testability, same
+       * pattern as `validateStayDates(checkIn, checkOut, now)`.
+       */
+      todayArrivalsDepartures: async (now: Date = new Date()): Promise<TodayArrivalsDepartures> => {
+        const dayStart = startOfDay(now);
+        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+
+        const toArrivalOrDeparture = (r: {
+          id: string;
+          status: string;
+          guest: { name: string };
+          room: { roomNumber: string };
+        }): ArrivalOrDeparture => ({
+          reservationId: r.id,
+          guestName: r.guest.name,
+          roomNumber: r.room.roomNumber,
+          status: r.status as ReservationStatus,
+        });
+
+        const [arrivals, departures] = await Promise.all([
+          prisma.reservation.findMany({
+            where: { hotelId, status: { not: "CANCELLED" }, checkIn: { gte: dayStart, lt: dayEnd } },
+            include: { guest: true, room: true },
+            orderBy: { checkIn: "asc" },
+          }),
+          prisma.reservation.findMany({
+            where: { hotelId, status: { not: "CANCELLED" }, checkOut: { gte: dayStart, lt: dayEnd } },
+            include: { guest: true, room: true },
+            orderBy: { checkOut: "asc" },
+          }),
+        ]);
+
+        return {
+          // Local Y/M/D, NOT `toISOString().slice(0, 10)` — that converts
+          // to UTC first, which silently shifts to the previous calendar
+          // day for any positive-UTC-offset server timezone (this
+          // project's own machine included — see the identical gotcha
+          // already documented for `isoDate()` in
+          // tests/e2e/managementReservationCreate.spec.ts). `dayStart` is
+          // already a local-midnight `Date` (via `startOfDay()`), so its
+          // own local getters are what must be read back out.
+          date: `${dayStart.getFullYear()}-${String(dayStart.getMonth() + 1).padStart(2, "0")}-${String(dayStart.getDate()).padStart(2, "0")}`,
+          arrivals: arrivals.map(toArrivalOrDeparture),
+          departures: departures.map(toArrivalOrDeparture),
+        };
+      },
     },
   };
 }

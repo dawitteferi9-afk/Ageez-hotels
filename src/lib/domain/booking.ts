@@ -16,8 +16,15 @@ export interface DateRangeValidation {
   error?: string;
 }
 
-/** Midnight (local) for a given date — used to compare "today" without a time-of-day component. */
-function startOfDay(date: Date): Date {
+/**
+ * Midnight (local) for a given date — used to compare "today" without a
+ * time-of-day component. Exported (M4 Phase 6) so
+ * `src/lib/tenant/index.ts`'s Reports aggregation (`todayArrivalsDepartures()`)
+ * reuses this exact definition of "today" instead of inventing a second
+ * one — the same local-calendar-day semantics `validateStayDates()` below
+ * already establishes for "is this check-in date today or later".
+ */
+export function startOfDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 

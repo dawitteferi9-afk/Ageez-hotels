@@ -4,6 +4,67 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-26 — M4 Phase 6 (Reports UI) implementation decisions
+**Status:** Approved-by-continuation (implements the already-approved M4
+Reports scope — docs/DECISIONS.md's 2026-08-25 pre-implementation
+decisions, item 4 — deferred out of Phase 4; these are the concrete
+choices this phase's implementation required that weren't already pinned
+down)
+**Decision:**
+1. **Aggregations live as a new `withTenant().reports` namespace in
+   `src/lib/tenant/index.ts`**, exactly as item 4 specified ("Built as
+   `src/lib/tenant` aggregation functions so M7's AI Management Assistant
+   can reuse them as whitelisted tool functions"): `occupancySummary()`,
+   `reservationStatusSummary()`, `guestCount()`, and
+   `todayArrivalsDepartures()`. The Reports page component (`/management/reports`)
+   calls only these — no raw Prisma query was written in the component
+   itself, matching the pattern already established for every other
+   management module (`rooms`, `guests`, `reservations`, etc. all read
+   through `withTenant()`, never ad hoc).
+2. **`occupancySummary()` fetches the full room set and reduces it in
+   memory**, the same scale-appropriate simplification `rooms/page.tsx`
+   (M4 Phase 4) already established and justified (at most 52 seeded
+   rooms per `docs/DATABASE.md`) — not a new pattern.
+   **`reservationStatusSummary()` uses a real database-level `groupBy`**
+   instead, since `Reservation` (unlike the fixed 52-room inventory) has
+   no bounded row count. Both always return every possible enum value
+   (zeroed if nothing currently holds it), so the UI never has to guess at
+   a missing key.
+3. **"Today" is the local calendar day, using `startOfDay()` — now
+   exported from `src/lib/domain/booking.ts`** specifically so
+   `todayArrivalsDepartures()` reuses the exact same definition of "today"
+   `validateStayDates()` already establishes elsewhere in this codebase,
+   rather than inventing a second one. `now` is injectable, same pattern
+   as `validateStayDates(checkIn, checkOut, now)`.
+4. **Bug found and fixed during this phase's own integration testing (not
+   a pre-existing regression — this code was new this phase): the first
+   draft of `todayArrivalsDepartures()`'s returned `date` field used
+   `dayStart.toISOString().slice(0, 10)`, which converts to UTC first and
+   silently shows the *previous* calendar day on any positive-UTC-offset
+   server (this project's own development machine included) — the
+   identical class of bug already documented for `isoDate()` in
+   `tests/e2e/managementReservationCreate.spec.ts`. Fixed to build the
+   date string from `dayStart`'s own local `getFullYear()`/`getMonth()`/
+   `getDate()` instead. Caught by `tests/integration/reports.test.ts`
+   before this phase's implementation was considered complete, not
+   discovered later.
+5. **RBAC required no change.** `reports` already had `view: ALL_ROLES`
+   and no `mutate` entry at all in the approved M4 matrix — Reports is
+   structurally read-only (no `withTenant().reports` method writes
+   anything), so there was never a "mutate" permission to add.
+6. **No charts, export, date-range filtering, or housekeeping/maintenance/
+   revenue/forecasting/AI-summary metrics** — exactly the approved minimal
+   scope, nothing more. `Card`/plain HTML `<table>` elements (already used
+   throughout `/management`) are sufficient; no charting library was added.
+**Rationale:** All six points are small, load-bearing implementation
+choices or direct precedent-follows this phase required, per the same
+"flag/record rather than silently invent or silently omit" standard
+CLAUDE.md rule 8 and the 2026-08-25/2026-08-26 M4 decision entries already
+established. None expand RBAC or scope beyond the already-approved minimal
+Reports snapshot.
+
+---
+
 ## 2026-08-26 — M4 Phase 5 (Services / ServiceRequest management UI) implementation decisions
 **Status:** Approved-by-continuation (implements the already-approved M4
 Services scope — docs/DECISIONS.md's 2026-08-25 pre-implementation

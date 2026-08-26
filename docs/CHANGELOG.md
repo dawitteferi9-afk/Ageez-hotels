@@ -1,5 +1,73 @@
 # Changelog
 
+## M4 — Management Dashboard, Phase 6 (2026-08-26)
+Reports UI — the approved minimal, live, read-only operational snapshot
+(docs/DECISIONS.md's 2026-08-25 "Reports (M4) is a minimal, live,
+read-only snapshot" decision), the last approved M4 module besides
+Staff-administration. M5 is untouched by this phase; no M5 functionality
+is attributed to M4.
+- Added `withTenant().reports` (`src/lib/tenant/index.ts`):
+  `occupancySummary()` (room counts by `RoomStatus`, overall and by
+  `RoomType`, plus a whole-number occupancy-rate percentage — fetches the
+  full room set and reduces in memory, same scale-appropriate
+  simplification `rooms/page.tsx` already established), `reservationStatusSummary()`
+  (counts by `ReservationStatus`, a real database `groupBy` since
+  Reservation has no bounded row count), `guestCount()`, and
+  `todayArrivalsDepartures()` (reservations whose `checkIn`/`checkOut`
+  falls on the local calendar day, excluding `CANCELLED`). Every count
+  object always has every enum value present, zeroed if unused. All four
+  are read-only, reusable by M7's AI Management Assistant as whitelisted
+  tool functions per the approved design.
+- Exported `startOfDay()` from `src/lib/domain/booking.ts` (was a private
+  helper) so `todayArrivalsDepartures()` reuses the exact same local
+  calendar-day definition of "today" `validateStayDates()` already
+  establishes, rather than a second competing one.
+- **Bug found and fixed during this phase's own integration testing:**
+  the first draft of `todayArrivalsDepartures()`'s `date` field used
+  `.toISOString().slice(0, 10)`, which converts to UTC first and silently
+  returns the *previous* calendar day on this project's positive-UTC-offset
+  development machine — the identical class of bug already documented for
+  `isoDate()` in `managementReservationCreate.spec.ts`. Fixed to build the
+  date string from local `getFullYear()`/`getMonth()`/`getDate()` instead;
+  caught by the new integration test before this phase was considered
+  complete.
+- **RBAC unchanged.** `reports` already had `view: ALL_ROLES` and no
+  `mutate` entry in the approved M4 matrix — Reports is structurally
+  read-only (no `withTenant().reports` method writes anything).
+- **UI:** `/management/reports` — KPI cards (Occupancy Rate, Total Rooms,
+  Total Reservations, Total Guests), an occupancy-by-status badge row, an
+  occupancy-by-room-type table, a reservation-status badge row, and
+  Today's Arrivals / Today's Departures tables. No charts, no export, no
+  date-range filtering, no housekeeping/maintenance/revenue/forecasting/
+  AI-summary metrics — exactly the approved scope. Nav: "Reports" enabled
+  (moved out of the disabled-links list; only "Staff" remains disabled).
+- **Tests:** `tests/unit/booking.test.ts` extended (+3: `startOfDay()`
+  zeroes time-of-day, is idempotent, treats same-calendar-day moments as
+  equal); new `tests/integration/reports.test.ts` (14 tests — every
+  aggregation checked against ground truth computed directly via Prisma
+  rather than hardcoded totals, cross-tenant isolation for all four
+  methods, `todayArrivalsDepartures()` boundary cases (today/tomorrow/
+  yesterday, `CANCELLED` exclusion), RBAC view access for all five roles,
+  and check-in/check-out shifting occupancy + reservation-status counts
+  correctly); new `tests/e2e/managementReports.spec.ts` (7 tests — all
+  five roles can view, the page is read-only (no form/button/select/input
+  anywhere in `<main>` besides the layout's own Sign-out control), KPI
+  values match real seeded counts, today's arrivals/departures list a
+  fixture guest correctly, and a live check-in/check-out through the real
+  UI updates both the reservation's status badge and the Executive Room
+  occupancy-by-type row, verified against fresh Prisma ground truth).
+- **Verified:** `npm run typecheck`; `npm run lint` (0 warnings); `npm run
+  test` (83/83 — 80 existing + 3 new); `npm run test:integration`
+  (116/116 — 102 existing + 14 new); `npm run build` (route table adds
+  only `/management/reports`); the full Playwright suite, `--workers=1`
+  (55/55 — 48 existing regressions + 7 new). DB baseline confirmed clean
+  before and after (52 rooms AVAILABLE, 0 Guest/Reservation/
+  MaintenanceIssue/ServiceRequest), with the pre-existing `booking.spec.ts`
+  `@example.com` leftover-fixture gotcha (documented, no-`afterAll`-by-design)
+  cleared by hand both times.
+- No schema changes, no RBAC changes, no M5/M6+ functionality, no charts/
+  export/date-range filtering, no Staff-administration work.
+
 ## M4 — Management Dashboard, Phase 5 (2026-08-26)
 Services / ServiceRequest management UI — the last approved M4 module
 besides Reports/Staff-administration (deferred out of Phase 4 —
