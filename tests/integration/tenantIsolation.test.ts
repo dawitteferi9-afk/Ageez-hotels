@@ -105,9 +105,14 @@ describe("tenant isolation — mutations", () => {
     expect(stillPending?.status).toBe("PENDING");
   });
 
-  it("has no room-mutation method reachable from any tenant scope (docs/DECISIONS.md Amendment A)", () => {
+  it("has no GENERIC room-mutation method reachable from any tenant scope (docs/DECISIONS.md Amendment A) — only the one approved narrow M5b workflow", () => {
     const scopedA = withTenant(hotelA.hotel.id);
     expect((scopedA.rooms as unknown as Record<string, unknown>).updateStatus).toBeUndefined();
-    expect(Object.keys(scopedA.rooms).sort()).toEqual(["count", "findMany", "findUnique"]);
+    // `completeCleaning` (M5b) is the one approved exception — a narrow,
+    // single-purpose `CLEANING -> AVAILABLE` workflow, not a generic
+    // setter. Amendment A's invariant is "no generic mutation", not "no
+    // mutation at all"; this list is exhaustive so any *new* method
+    // silently added later still fails this test until explicitly reviewed.
+    expect(Object.keys(scopedA.rooms).sort()).toEqual(["completeCleaning", "count", "findMany", "findUnique"]);
   });
 });

@@ -38,6 +38,21 @@ let guestId: string;
 let roomId: string;
 let roomNumber: string;
 
+/**
+ * A table row containing a specific room number, matched by an exact cell
+ * value — NOT `page.locator("tr", { hasText: roomNumber })`, which does a
+ * substring match across the row's whole concatenated text. That's
+ * ambiguous for 3-digit room numbers: e.g. `hasText: "101"` also matches
+ * room "110"'s row, because its "110" room-number cell immediately
+ * followed by its "1" floor cell concatenates to "1101", which contains
+ * "101" as a substring. Harmless while asserting a status only one of the
+ * two rooms could have (`OCCUPIED`/`CLEANING`), but a real ambiguity once
+ * both rows can show the same status (`AVAILABLE`, M5b).
+ */
+function roomRowByNumber(page: import("@playwright/test").Page, roomNumber: string) {
+  return page.locator("tr").filter({ has: page.getByRole("cell", { name: roomNumber, exact: true }) });
+}
+
 async function login(page: import("@playwright/test").Page, email: string) {
   await page.goto("/management/login");
   await page.fill('input[name="email"]', email);
@@ -138,7 +153,7 @@ test("FRONT_DESK checks in the reservation through the management UI, and the ro
   await expect(page.getByRole("button", { name: "Check In" })).toHaveCount(0);
 
   await page.goto("/management/rooms");
-  const roomRow = page.locator("tr", { hasText: roomNumber });
+  const roomRow = roomRowByNumber(page, roomNumber);
   await expect(roomRow.getByText("OCCUPIED", { exact: true })).toBeVisible();
 });
 
@@ -172,8 +187,38 @@ test("M5a: FRONT_DESK checks the same reservation out through the management UI,
   await expect(page.getByRole("button", { name: "Check Out" })).toHaveCount(0);
 
   await page.goto("/management/rooms");
-  const roomRow = page.locator("tr", { hasText: roomNumber });
+  const roomRow = roomRowByNumber(page, roomNumber);
   await expect(roomRow.getByText("CLEANING", { exact: true })).toBeVisible();
+});
+
+test("M5b: FRONT_DESK (view-only for housekeeping) sees the room in the queue but cannot mark it cleaned", async ({
+  page,
+}) => {
+  await login(page, FRONT_DESK.email);
+  // The room is still CLEANING from the M5a checkout test above.
+  await page.goto("/management/housekeeping");
+  await expect(page.getByRole("heading", { name: "Housekeeping" })).toBeVisible();
+  const queueRow = roomRowByNumber(page, roomNumber);
+  await expect(queueRow).toBeVisible();
+  await expect(queueRow.getByRole("button", { name: "Mark Cleaned" })).toHaveCount(0);
+  await expect(queueRow.getByText("View only")).toBeVisible();
+});
+
+test("M5b: HOUSEKEEPING marks the room clean through the management UI, and it becomes Available", async ({
+  page,
+}) => {
+  await login(page, HOUSEKEEPING.email);
+  await page.goto("/management/housekeeping");
+  const queueRow = roomRowByNumber(page, roomNumber);
+  await expect(queueRow).toBeVisible();
+  await queueRow.getByRole("button", { name: "Mark Cleaned" }).click();
+
+  // Settled state: the room leaves the CLEANING queue entirely.
+  await expect(roomRowByNumber(page, roomNumber)).toHaveCount(0);
+
+  await page.goto("/management/rooms");
+  const roomRow = roomRowByNumber(page, roomNumber);
+  await expect(roomRow.getByText("AVAILABLE", { exact: true })).toBeVisible();
 });
 
 test("direct URL to a nonexistent reservation or guest id shows Not Found, not a crash or leaked data", async ({

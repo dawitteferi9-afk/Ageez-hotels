@@ -10,14 +10,15 @@ import { hasPermission, STAFF_ROLES, MODULES, type Module, type Action } from ".
 
 const FRONT_OFFICE = ["OWNER_ADMIN", "MANAGER", "FRONT_DESK"];
 
-// Expected "mutate" allow-list per module, per the approved M4 matrix
-// (docs/DECISIONS.md 2026-08-25, docs/SECURITY.md). A module with no entry
-// here means NO role may mutate it (currently only "rooms" — Amendment A).
+// Expected "mutate" allow-list per module, per the approved M4/M5b matrix
+// (docs/DECISIONS.md, docs/SECURITY.md). A module with no entry here means
+// NO role may mutate it (currently only "rooms" — Amendment A).
 const EXPECTED_MUTATE: Partial<Record<Module, string[]>> = {
   reservations: FRONT_OFFICE,
   guests: FRONT_OFFICE,
   services: FRONT_OFFICE,
   staff: ["OWNER_ADMIN"],
+  housekeeping: ["OWNER_ADMIN", "MANAGER", "HOUSEKEEPING"],
 };
 
 describe("hasPermission — view", () => {
@@ -68,5 +69,14 @@ describe("hasPermission — mutate", () => {
     expect(hasPermission("FRONT_DESK", "services", "mutate")).toBe(true);
     expect(hasPermission("FRONT_DESK", "rooms", "mutate")).toBe(false);
     expect(hasPermission("FRONT_DESK", "staff", "mutate")).toBe(false);
+  });
+
+  it("M5b: OWNER_ADMIN, MANAGER, and HOUSEKEEPING may mutate housekeeping; FRONT_DESK and MAINTENANCE may not", () => {
+    for (const role of ["OWNER_ADMIN", "MANAGER", "HOUSEKEEPING"] as const) {
+      expect(hasPermission(role, "housekeeping", "mutate")).toBe(true);
+    }
+    for (const role of ["FRONT_DESK", "MAINTENANCE"] as const) {
+      expect(hasPermission(role, "housekeeping", "mutate")).toBe(false);
+    }
   });
 });

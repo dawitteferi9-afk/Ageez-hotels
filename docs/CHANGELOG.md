@@ -1,5 +1,64 @@
 # Changelog
 
+## M5 — Housekeeping + Maintenance, Phase b (2026-08-26)
+Housekeeping backend + UI only. No maintenance report/manage APIs or UI yet
+(M5c). RoomStatus remains the only state tracked — no housekeeping-task
+table, no staff assignment, per the approved M5 design.
+- Added the `housekeeping` module to the RBAC matrix
+  (`src/lib/auth/rbac.ts`): `view` for all five roles, `mutate` for
+  OWNER_ADMIN/MANAGER/HOUSEKEEPING only — FRONT_DESK and MAINTENANCE stay
+  view-only, matching the corrected M5 RBAC/operation matrix.
+- Added `withTenant().rooms.completeCleaning(roomId)` — the only
+  housekeeping Room-mutation workflow, still no generic
+  `rooms.updateStatus()`. One Serializable transaction re-verifies, live,
+  against the database: tenant ownership (scoped lookup), current status
+  is `CLEANING`, and no unresolved *blocking* `MaintenanceIssue`
+  (`priority` `HIGH`/`URGENT`, `status` `OPEN`/`IN_PROGRESS`) exists for
+  the room — deliberately a live re-check rather than relying solely on
+  the "a CLEANING room can't have a blocking issue open" by-construction
+  argument from the design proposal, per the approved concurrency-hardening
+  amendment. Only then: `Room.status → AVAILABLE`. Fails safely
+  (`InvalidTransitionError`, no partial write) if any check doesn't hold.
+- **UI:** new `/management/housekeeping` — the `CLEANING`-room queue
+  (`withTenant().rooms.findMany({ where: { status: "CLEANING" } })`, no
+  new read method), a "Mark Cleaned" button per row for
+  `housekeeping`/`mutate` roles, read-only for others. Nav updated:
+  "Housekeeping" enabled, "Maintenance" added to the disabled placeholder
+  list (previously implied by "Services Reports Staff").
+- **Tests:** `tests/unit/rbac.test.ts` (+1 exhaustive check, and the
+  generic per-module mutate-allow-list table extended);
+  `tests/integration/housekeeping.test.ts` (new, 12 tests — valid
+  completion, invalid source states (AVAILABLE/OCCUPIED/MAINTENANCE),
+  blocking-vs-non-blocking priority, RESOLVED/CLOSED issues don't block,
+  cross-tenant rejection, RBAC allow/deny); extended
+  `tests/e2e/management.spec.ts` with a real browser-driven
+  checkout→queue(view-only proof)→mark-cleaned→Available chain, continuing
+  directly from the existing check-in/check-out fixture state. Updated
+  `tests/integration/tenantIsolation.test.ts`'s Amendment A structural
+  test — it previously asserted the *exact* method list on `rooms`; now
+  updated to include `completeCleaning` (the one approved narrow
+  exception) while still failing if any *other* method is ever added
+  without review.
+- **Verified:** `npm run typecheck`, `npm run lint` (0 warnings), `npm run
+  test` (48/48 — 46 existing + 2 new), `npm run test:integration` (69/69 —
+  57 existing + 12 new), `npm run build` (route table adds only
+  `/management/housekeeping`), `tests/e2e/management.spec.ts` (8/8),
+  `tests/e2e/auth.spec.ts` (5/5), `tests/e2e/booking.spec.ts` (4/4),
+  `tests/e2e/managementReservationCreate.spec.ts` (9/9) — all pass, all
+  regressions green.
+- **Pre-existing test-locator bug found and fixed while verifying (not an
+  M5b application bug):** `management.spec.ts`'s `page.locator("tr", {
+  hasText: roomNumber })` does a substring match across a row's whole
+  concatenated text, which is ambiguous for 3-digit room numbers — e.g.
+  `hasText: "101"` also matches room "110"'s row, because its "110"
+  room-number cell immediately followed by its "1" floor cell concatenates
+  to text containing "101" as a substring. Harmless while asserting a
+  status only one candidate row could have (`OCCUPIED`/`CLEANING`, used by
+  the M4/M5a tests already in this file), but a real ambiguity once both
+  rows could show the same status (`AVAILABLE`, first exercised by M5b's
+  new test). Replaced with an exact-cell-match helper
+  (`roomRowByNumber()`) used everywhere in the file.
+
 ## M5 — Housekeeping + Maintenance, Phase a (2026-08-26)
 Check-out workflow + check-in hardening only (backend + UI). No housekeeping
 or maintenance report/manage APIs or UI yet — those are M5b/M5c. Design

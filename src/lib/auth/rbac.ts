@@ -29,6 +29,7 @@ export const MODULES = [
   "services",
   "reports",
   "staff",
+  "housekeeping",
 ] as const;
 export type Module = (typeof MODULES)[number];
 
@@ -36,19 +37,22 @@ export type Action = "view" | "mutate";
 
 const ALL_ROLES: readonly StaffRole[] = STAFF_ROLES;
 const FRONT_OFFICE_ROLES: readonly StaffRole[] = ["OWNER_ADMIN", "MANAGER", "FRONT_DESK"];
+/** M5b — the roles that may complete a cleaning (docs/DECISIONS.md M5 design, decision 4-adjacent housekeeping RBAC row). */
+const HOUSEKEEPING_MUTATE_ROLES: readonly StaffRole[] = ["OWNER_ADMIN", "MANAGER", "HOUSEKEEPING"];
 
 /**
- * The approved M4 matrix (docs/DECISIONS.md, docs/SECURITY.md). All five
- * roles get "view" on every module. "mutate" is narrower per module.
+ * The approved M4 matrix (docs/DECISIONS.md, docs/SECURITY.md), extended in
+ * M5b with the `housekeeping` module. All five roles get "view" on every
+ * module. "mutate" is narrower per module.
  *
  * `rooms` deliberately has NO "mutate" entry at all — not even for
  * OWNER_ADMIN. This is docs/DECISIONS.md Amendment A: no role gets a
- * generic/standalone Room-mutation permission in M4. Room state changes
- * happen only as a side effect of an authorized workflow (check-in), which
- * is reached through the `reservations` module's "mutate" permission and
- * implemented as `withTenant().reservations.checkIn()` — there is no
- * `withTenant().rooms.updateStatus()` for any role to call in the first
- * place, so this is enforced structurally, not just by this matrix.
+ * generic/standalone Room-mutation permission. Room state changes happen
+ * only as the side effect of an authorized workflow — check-in/check-out
+ * (`reservations`/"mutate", M4/M5a) or completing a cleaning
+ * (`housekeeping`/"mutate", M5b) — never a direct "set room status"
+ * control. There is still no `withTenant().rooms.updateStatus()` for any
+ * role to call, so this is enforced structurally, not just by this matrix.
  */
 const MATRIX: Record<Module, Partial<Record<Action, readonly StaffRole[]>>> = {
   dashboard: { view: ALL_ROLES },
@@ -58,6 +62,15 @@ const MATRIX: Record<Module, Partial<Record<Action, readonly StaffRole[]>>> = {
   services: { view: ALL_ROLES, mutate: FRONT_OFFICE_ROLES },
   reports: { view: ALL_ROLES },
   staff: { view: ALL_ROLES, mutate: ["OWNER_ADMIN"] },
+  /**
+   * M5b — the only Room-mutation surface for the housekeeping recovery loop
+   * (`rooms.completeCleaning()`, `CLEANING → AVAILABLE`). FRONT_DESK and
+   * MAINTENANCE are view-only here, matching the corrected M5 RBAC/operation
+   * matrix — front desk's role ends at check-out (which already produces
+   * `CLEANING`); maintenance's own room-state authority is scoped to its
+   * own module (M5c), not this one.
+   */
+  housekeeping: { view: ALL_ROLES, mutate: HOUSEKEEPING_MUTATE_ROLES },
 };
 
 /** Whether `role` may perform `action` on `module` per the approved M4 matrix. */

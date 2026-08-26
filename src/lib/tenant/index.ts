@@ -385,6 +385,64 @@ export function withTenant(hotelId: string) {
       count: (where?: ScopedRoomArgs["where"]) =>
         prisma.room.count({ where: { ...where, hotelId } }),
       findUnique: (roomId: string) => prisma.room.findFirst({ where: { id: roomId, hotelId } }),
+
+      /**
+       * M5b — the only housekeeping Room-mutation workflow
+       * (docs/DECISIONS.md M5 design: `CLEANING → AVAILABLE`, never a
+       * generic `rooms.updateStatus()`). Runs entirely inside one
+       * Serializable transaction, re-verifying every precondition against
+       * the database rather than trusting the caller or an assumed
+       * invariant:
+       *   1. Load the room scoped to `hotelId` — cross-tenant or
+       *      nonexistent id throws `RecordNotFoundError` (no existence
+       *      leak, same convention as every other scoped lookup here).
+       *   2. Require `status === "CLEANING"` — `InvalidTransitionError`
+       *      otherwise.
+       *   3. Re-query for any unresolved *blocking* `MaintenanceIssue`
+       *      (`priority` `HIGH`/`URGENT`, `status` `OPEN`/`IN_PROGRESS`) on
+       *      this room — `InvalidTransitionError` if one exists, and the
+       *      room is left untouched (fails safely, no partial write).
+       *      This is a live re-check, not reliance on the "a room can only
+       *      be CLEANING if nothing blocking is open against it"
+       *      by-construction argument from the design proposal — a
+       *      concurrent `maintenanceIssues.report()` (M5c) landing between
+       *      this transaction's start and its own blocking-issue query
+       *      would still be caught, because both operations run inside
+       *      Serializable transactions against the same rows.
+       *   4. Only then: `Room.status → AVAILABLE`.
+       *
+       * Callers must obtain `hotelId` from `requireStaffAccess("housekeeping","mutate")`,
+       * never from client input.
+       */
+      completeCleaning: (roomId: string) =>
+        prisma.$transaction(
+          async (tx) => {
+            const room = await tx.room.findFirst({ where: { id: roomId, hotelId } });
+            if (!room) {
+              throw new RecordNotFoundError(`No room ${roomId} found for this hotel.`);
+            }
+            if (room.status !== "CLEANING") {
+              throw new InvalidTransitionError(`Cannot complete cleaning for a room with status ${room.status}.`);
+            }
+
+            const blockingIssue = await tx.maintenanceIssue.findFirst({
+              where: {
+                hotelId,
+                roomId,
+                priority: { in: ["HIGH", "URGENT"] },
+                status: { in: ["OPEN", "IN_PROGRESS"] },
+              },
+            });
+            if (blockingIssue) {
+              throw new InvalidTransitionError(
+                "This room has an unresolved high-priority maintenance issue and cannot be marked available."
+              );
+            }
+
+            return tx.room.update({ where: { id: roomId }, data: { status: "AVAILABLE" } });
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
     },
 
     aiKnowledgeDocuments: {
