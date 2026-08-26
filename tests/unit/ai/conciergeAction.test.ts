@@ -33,15 +33,34 @@ vi.mock("@/lib/ai/provider", () => ({
   getAiProvider: () => ({ converse }),
 }));
 
+// M6c: the action never decodes a token itself — it only ever asks
+// `resolveVerifiedReservationContext()`, so that's the one seam to mock to
+// exercise the action's own branching (which tools/prompt it picks) without
+// a real token/database.
+const resolveVerifiedReservationContext = vi.fn();
+vi.mock("@/lib/ai/verifiedContext", () => ({
+  resolveVerifiedReservationContext: (token: string) => resolveVerifiedReservationContext(token),
+}));
+
+const VERIFIED_CONTEXT = {
+  hotelId: "hotel-1",
+  hotelName: "Test Hotel",
+  reservationId: "res-1",
+  guestId: "guest-1",
+};
+
 beforeEach(() => {
   getCurrentTenantHotel.mockReset();
   converse.mockReset();
+  resolveVerifiedReservationContext.mockReset();
   getCurrentTenantHotel.mockResolvedValue(mockHotel);
+  resolveVerifiedReservationContext.mockResolvedValue(null);
 });
 
-function formDataWith(message: string): FormData {
+function formDataWith(message: string, token?: string): FormData {
   const fd = new FormData();
   fd.set("message", message);
+  if (token) fd.set("token", token);
   return fd;
 }
 
@@ -93,5 +112,71 @@ describe("sendConciergeMessageAction", () => {
     expect(result.error).toBeDefined();
     expect(result.error).not.toContain("Hotel row");
     expect(converse).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendConciergeMessageAction — M6c verified-context token handling", () => {
+  it("adds the two verified tools and uses the verified prompt when a valid token resolves", async () => {
+    resolveVerifiedReservationContext.mockResolvedValue(VERIFIED_CONTEXT);
+    converse.mockResolvedValue({ reply: "You're in the Executive Room.", toolCalls: [] });
+
+    const result = await sendConciergeMessageAction({ messages: [] }, formDataWith("What room am I in?", "valid-token"));
+
+    expect(result.error).toBeUndefined();
+    expect(resolveVerifiedReservationContext).toHaveBeenCalledWith("valid-token");
+    const call = converse.mock.calls[0]![0];
+    expect(call.tools.map((t: { name: string }) => t.name).sort()).toEqual([
+      "getHotelKnowledge",
+      "getReservationSummary",
+      "getRoomTypesSummary",
+      "getServiceRequestStatus",
+    ]);
+    expect(call.systemPrompt).toContain("completed booking verification");
+  });
+
+  it("falls back to the anonymous tools/prompt when the token does not resolve (expired/invalid/tampered/wrong-tenant)", async () => {
+    resolveVerifiedReservationContext.mockResolvedValue(null);
+    converse.mockResolvedValue({ reply: "I can't look that up right now.", toolCalls: [] });
+
+    const result = await sendConciergeMessageAction({ messages: [] }, formDataWith("What room am I in?", "stale-token"));
+
+    expect(result.error).toBeUndefined();
+    const call = converse.mock.calls[0]![0];
+    expect(call.tools.map((t: { name: string }) => t.name).sort()).toEqual(["getHotelKnowledge", "getRoomTypesSummary"]);
+    expect(call.systemPrompt).not.toContain("completed booking verification");
+  });
+
+  it("behaves identically to plain M6b when no token is submitted at all — anonymous tools/prompt only", async () => {
+    converse.mockResolvedValue({ reply: "Check-in is at 2 PM.", toolCalls: [] });
+
+    await sendConciergeMessageAction({ messages: [] }, formDataWith("When is check-in?"));
+
+    expect(resolveVerifiedReservationContext).not.toHaveBeenCalled();
+    const call = converse.mock.calls[0]![0];
+    expect(call.tools.map((t: { name: string }) => t.name).sort()).toEqual(["getHotelKnowledge", "getRoomTypesSummary"]);
+  });
+
+  it("never reads or forwards a guest contact value to the provider, even if one is smuggled into the chat form's FormData", async () => {
+    resolveVerifiedReservationContext.mockResolvedValue(VERIFIED_CONTEXT);
+    converse.mockResolvedValue({ reply: "ok", toolCalls: [] });
+
+    const formData = formDataWith("What room am I in?", "valid-token");
+    // This action never reads a "contact" field — it doesn't exist in its
+    // formData handling at all — so even if a buggy/malicious client
+    // attached one, it structurally cannot reach the provider. The hotel's
+    // own PUBLIC contact info (a fixed fixture value below) legitimately
+    // does appear in the prompt — this test is about the GUEST's private
+    // verification contact, a different, guest-supplied value that has no
+    // code path into this action's inputs at all.
+    formData.set("contact", "guest-private-contact@example.com");
+
+    await sendConciergeMessageAction({ messages: [] }, formData);
+
+    const call = converse.mock.calls[0]![0];
+    // Tool definitions carry no `execute` after JSON serialization (functions
+    // aren't serializable) — this only inspects the plain-data fields
+    // (systemPrompt, history, tool name/description/inputSchema).
+    const serialized = JSON.stringify({ systemPrompt: call.systemPrompt, history: call.history, tools: call.tools });
+    expect(serialized).not.toContain("guest-private-contact@example.com");
   });
 });

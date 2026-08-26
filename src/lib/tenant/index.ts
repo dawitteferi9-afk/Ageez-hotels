@@ -4,7 +4,13 @@ import { prisma } from "@/lib/db";
 import { Prisma, type RoomStatus } from "@prisma/client";
 import { hasPermission, type Module, type Action, type StaffRole } from "@/lib/auth/rbac";
 import { validateCheckIn, validateCheckOut, type ReservationStatus } from "@/lib/domain/reservationTransitions";
-import { validateStayDates, nightsBetween, calculateTotalPrice, startOfDay } from "@/lib/domain/booking";
+import {
+  validateStayDates,
+  nightsBetween,
+  calculateTotalPrice,
+  startOfDay,
+  formatBookingReference,
+} from "@/lib/domain/booking";
 import {
   validateServiceRequestTransition,
   type ServiceRequestStatus,
@@ -640,6 +646,78 @@ export function withTenant(hotelId: string) {
         }),
 
       /**
+       * M6c — fresh, tenant- AND guest-scoped reservation lookup for the
+       * verified-context concierge tools (`getReservationSummary`). Requires
+       * BOTH `hotelId` (via closure) and the caller-supplied `guestId` to
+       * match — a valid verified-context token for one guest can never
+       * resolve another guest's reservation at this hotel, even if
+       * `reservationId` were somehow guessed or reused. This is the "fresh
+       * tenant-scoped database lookup" every guest-specific operation must
+       * perform per the M6c token-authorization rule (docs/DECISIONS.md) —
+       * never trust a token's decoded contents alone.
+       */
+      findOwnedByGuest: (reservationId: string, guestId: string) =>
+        prisma.reservation.findFirst({
+          where: { id: reservationId, hotelId, guestId },
+          include: { room: { include: { roomType: true } } },
+        }),
+
+      /**
+       * M6c — resolve a guest-supplied booking reference + contact detail
+       * to exactly one reservation, for the anonymous concierge's
+       * booking-verification flow. `formatBookingReference()` is a derived
+       * display string, not a unique indexed column (docs/DECISIONS.md M6
+       * design) — an 8-character suffix of a cuid is not provably
+       * collision-free, and Postgres cannot use an index for a suffix/`LIKE
+       * '%...'` match against `Reservation.id` regardless. This deliberately
+       * never does that: it narrows candidates via an indexed, tenant-scoped
+       * `Guest` contact match (the single guest-supplied value, checked
+       * against BOTH `email` — case-insensitively — and `phone` — exact —
+       * so the caller never has to know or declare which one they're
+       * supplying), then recomputes the full reference for each candidate
+       * reservation and compares the complete string, case-insensitively.
+       *
+       * Returns the resolved ids only when EXACTLY ONE reservation matches
+       * — the Booking Verification Ambiguity Rule (docs/DECISIONS.md): a
+       * collision (vanishingly unlikely at this scale, but not ruled out by
+       * the schema — `Guest.email`/`phone` aren't unique, and two different
+       * guests' reservation ids could in principle share the same last-8
+       * suffix) must fail exactly like "no match" — never pick a first
+       * result, never disclose that multiple candidates existed.
+       */
+      verifyGuestBooking: async (
+        bookingReference: string,
+        contact: string
+      ): Promise<{ reservationId: string; guestId: string } | null> => {
+        const trimmedContact = contact.trim();
+        const trimmedReference = bookingReference.trim();
+        if (!trimmedContact || !trimmedReference) return null;
+
+        const hotel = await prisma.hotel.findUnique({ where: { id: hotelId } });
+        if (!hotel) return null;
+
+        const guests = await prisma.guest.findMany({
+          where: {
+            hotelId,
+            OR: [{ email: { equals: trimmedContact, mode: "insensitive" } }, { phone: trimmedContact }],
+          },
+          include: { reservations: { where: { hotelId } } },
+        });
+
+        const target = trimmedReference.toLowerCase();
+        const matches: Array<{ reservationId: string; guestId: string }> = [];
+        for (const guest of guests) {
+          for (const reservation of guest.reservations) {
+            if (formatBookingReference(hotel.name, reservation.id).toLowerCase() === target) {
+              matches.push({ reservationId: reservation.id, guestId: guest.id });
+            }
+          }
+        }
+
+        return matches.length === 1 ? matches[0]! : null;
+      },
+
+      /**
        * The one authorized OCCUPIED-side Room-state-changing workflow
        * (docs/DECISIONS.md Amendment A — there is no generic
        * `rooms.updateStatus()`). Runs entirely inside one Serializable
@@ -944,6 +1022,21 @@ export function withTenant(hotelId: string) {
         prisma.serviceRequest.findFirst({
           where: { id, hotelId },
           include: { guest: true, reservation: { include: { room: { include: { roomType: true } } } } },
+        }),
+
+      /**
+       * M6c — fresh, tenant- AND guest- AND reservation-scoped ServiceRequest
+       * list for the verified-context concierge's `getServiceRequestStatus`
+       * tool. All three of `hotelId` (closure), `reservationId`, and
+       * `guestId` must match the same row — same reasoning as
+       * `reservations.findOwnedByGuest()` above: a verified token for one
+       * guest's reservation can never return another guest's or another
+       * reservation's service requests.
+       */
+      findOwnedByGuest: (reservationId: string, guestId: string) =>
+        prisma.serviceRequest.findMany({
+          where: { hotelId, reservationId, guestId },
+          orderBy: { createdAt: "desc" },
         }),
 
       /**

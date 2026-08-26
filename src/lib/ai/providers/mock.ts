@@ -25,8 +25,19 @@ import type { AiProvider, AiConverseInput, AiConverseResult, AiToolCallRecord } 
  * `PERSONAL_INFO_PATTERN` check below is evaluated first, before either
  * the room-type or knowledge-category branches, specifically so a
  * personalized question can never be mistaken for — and answered as if it
- * were — a request for public hotel information. It calls no tool and
- * returns no guest/reservation/service data.
+ * were — a request for public hotel information. When no verified tools
+ * are available, it calls no tool and returns no guest/reservation/service
+ * data.
+ *
+ * M6c: once the conversation has been verified (the caller passed the two
+ * verified-tier tools, `getReservationSummary`/`getServiceRequestStatus`,
+ * alongside the anonymous ones — see `getVerifiedConciergeTools()`), the
+ * SAME personalized-question pattern instead calls the appropriate
+ * verified tool and answers strictly from its deterministic output —
+ * never inventing a room, date, status, or request outcome. If a verified
+ * tool call fails (the token has expired or no longer resolves — see
+ * `resolveVerifiedReservationContext()`), this falls back to
+ * `VERIFY_AGAIN_REPLY`, never a guess.
  */
 
 const KNOWLEDGE_CATEGORY_KEYWORDS: Record<string, string[]> = {
@@ -59,6 +70,12 @@ const PERSONAL_INFO_PATTERN =
 const PERSONAL_INFO_REPLY =
   "I can't look up personal booking, room, or request details in this chat yet — that requires verifying who you are first, and that verification isn't available in this version. Please contact the front desk with your booking reference for help with your reservation or request.";
 
+/** A verified-tier personalized question specifically about a service request, vs. the reservation itself. */
+const SERVICE_REQUEST_PATTERN = /\brequest\b/;
+
+const VERIFY_AGAIN_REPLY =
+  "I couldn't confirm your booking verification for that — please verify your booking again, or contact the front desk for help.";
+
 export function createMockProvider(): AiProvider {
   return {
     async converse({ history, tools }: AiConverseInput): Promise<AiConverseResult> {
@@ -67,6 +84,21 @@ export function createMockProvider(): AiProvider {
       const toolCalls: AiToolCallRecord[] = [];
 
       if (PERSONAL_INFO_PATTERN.test(question)) {
+        const reservationTool = tools.find((t) => t.name === "getReservationSummary");
+        const serviceRequestTool = tools.find((t) => t.name === "getServiceRequestStatus");
+
+        if (reservationTool && serviceRequestTool) {
+          if (SERVICE_REQUEST_PATTERN.test(question)) {
+            const result = await serviceRequestTool.execute({});
+            toolCalls.push({ name: serviceRequestTool.name, input: {}, result });
+            return { reply: summarizeServiceRequests(result), toolCalls };
+          }
+
+          const result = await reservationTool.execute({});
+          toolCalls.push({ name: reservationTool.name, input: {}, result });
+          return { reply: summarizeReservation(result), toolCalls };
+        }
+
         return { reply: PERSONAL_INFO_REPLY, toolCalls };
       }
 
@@ -98,6 +130,34 @@ export function createMockProvider(): AiProvider {
       return { reply: NOT_FOUND_REPLY, toolCalls };
     },
   };
+}
+
+function summarizeReservation(result: unknown): string {
+  const typed = result as {
+    found: boolean;
+    bookingReference?: string;
+    roomNumber?: string;
+    roomTypeName?: string;
+    checkIn?: string;
+    checkOut?: string;
+    status?: string;
+    totalPrice?: string;
+    currency?: string;
+    paymentMethod?: string;
+  };
+  if (!typed.found) return VERIFY_AGAIN_REPLY;
+  return (
+    `Booking reference ${typed.bookingReference}: ${typed.roomTypeName} (Room ${typed.roomNumber}), ` +
+    `check-in ${typed.checkIn}, check-out ${typed.checkOut}. Status: ${typed.status}. ` +
+    `Total: ${typed.totalPrice} ${typed.currency} (${typed.paymentMethod}).`
+  );
+}
+
+function summarizeServiceRequests(result: unknown): string {
+  const requests = result as Array<{ type: string; status: string; notes: string | null; createdAt: string }>;
+  if (!Array.isArray(requests)) return VERIFY_AGAIN_REPLY;
+  if (requests.length === 0) return "You have no service requests on file for this reservation.";
+  return requests.map((r) => `${r.type}: ${r.status}${r.notes ? ` (${r.notes})` : ""}`).join("; ");
 }
 
 function summarizeRoomTypes(result: unknown): string {

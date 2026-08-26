@@ -4,6 +4,95 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-27 — M6 Phase c (verified reservation context) implementation decisions
+**Status:** Approved (implemented, this phase — the overall approach was
+already approved at M6 design time; these are the concrete choices this
+phase's implementation required)
+**Decision:**
+1. **One contact field, checked against both `email` (case-insensitive)
+   and `phone` (exact), not a "which one is this" selector.** The
+   verification form asks for a single "email used for booking, or phone
+   if no email was provided" value; `verifyGuestBooking()` matches it
+   against both `Guest` columns with a single `OR`. The guest never has
+   to know or declare which kind of contact they're supplying, and the
+   final exact-reference-recompute step is the real disambiguator, not the
+   contact match (which only narrows candidates).
+2. **The Booking Verification Ambiguity Rule collapses into the same
+   single generic failure, not a "give one more distinguishing detail"
+   follow-up.** The M6 design session's original wording floated asking
+   for extra detail on a multi-match collision; this phase's actual
+   instruction ("always return the same generic message... never reveal
+   which field failed") is simpler and stronger, and a collision
+   (vanishingly unlikely at this scale, but not schema-ruled-out) is
+   treated as exactly what it should be to the guest: "couldn't verify
+   that booking" — no different code path, no extra round trip.
+3. **The verified reservation summary includes the guest's own room
+   number.** `docs/AI_SPEC.md`'s original M6c scope text separated "room
+   information appropriate for the guest" from "internal room operational
+   status" without settling which side room number falls on. Precedent:
+   the M3 public booking-confirmation page
+   (`src/app/(guest)/booking/confirmation/[reservationId]/page.tsx`)
+   already shows a guest their own room number, room type, `Reservation`
+   status (not `Room.status`), total price, and payment method — this
+   phase's tool exposes exactly that same already-approved guest-facing
+   field set, nothing more. `Room.status` (operational/housekeeping
+   state) is never included.
+4. **The verified-tier system prompt is a fully separate function
+   (`buildVerifiedConciergeSystemPrompt()`), not a conditional branch
+   inside the anonymous one.** The anonymous prompt's rule 5 states "you
+   cannot access any guest's personal or reservation information" —
+   appending verified-tool instructions on top of that unchanged sentence
+   would have the model's own system prompt contradict itself.
+5. **Every verified tool re-verifies the raw token on every single
+   `execute()` call — not once when the tool list is built.**
+   `getVerifiedConciergeTools(token)` binds the raw signed string via
+   closure; each tool's `execute()` independently calls
+   `resolveVerifiedReservationContext(token)` (full signature/expiry/
+   tenant/DB-ownership check). The calling Server Action also checks
+   validity once, to decide whether to offer the tools and which prompt
+   to use at all — this is deliberate defense in depth, not redundant
+   dead code: if a token expired mid-conversation, the very next tool
+   call still fails safely rather than trusting an earlier decode.
+6. **An expired/invalid/tampered token during an ongoing chat silently
+   falls back to the anonymous tools and prompt for that message — there
+   is no distinct "your verification just expired" reply.** A
+   personalized question in that state gets the same M6b
+   `PERSONAL_INFO_REPLY` ("verification isn't available in this version")
+   a never-verified guest would see, rather than a message tailored to
+   "you were verified a moment ago." Accepted as a minor UX imprecision,
+   not a safety gap — no data is ever leaked or invented either way.
+7. **The verified-context token lives in React state only — no
+   `sessionStorage`.** Same reasoning as M6b's conversation-storage
+   decision (see that entry below): the corrected M6 design allows
+   `sessionStorage` as an *optional* convenience, and this phase
+   deliberately skips it — a bearer-style capability token is exactly the
+   kind of value that benefits most from never touching browser storage.
+   Refreshing the page or navigating away always requires re-verifying.
+8. **`resolveVerifiedReservationContext()`'s tenant-matching branch is
+   unit-tested with a mocked `@/lib/tenant`, not integration-tested
+   against disposable fixture hotels.** `getCurrentTenantHotel()` always
+   resolves to the real, single oldest `Hotel` row in the whole database
+   (docs/DECISIONS.md's 2026-08-24 "M2 guest-site tenant resolution"
+   entry) — a disposable fixture hotel created by `setupTestHotels()` is
+   never "current," so a fixture-hotel integration test cannot exercise
+   the "does the token's hotelId match the current tenant" branch
+   meaningfully. That branch is unit-tested with a mocked
+   `getCurrentTenantHotel()` instead
+   (`tests/unit/ai/verifiedContext.test.ts`); the real database
+   query layer it depends on
+   (`withTenant().reservations.{verifyGuestBooking,findOwnedByGuest}()`,
+   `withTenant().serviceRequests.findOwnedByGuest()`) IS integration-
+   tested against real fixture hotels
+   (`tests/integration/verifiedReservationContext.test.ts`), including a
+   genuine cross-tenant rejection test between two disposable hotels.
+**Rationale:** None of the above changes the M6 design's approved
+architecture (two-tier concierge, exact-match verification, stateless
+signed token, token re-verified fresh on every use, demo-only rate
+limiter) — they are the concrete choices that design left open for this
+phase's implementation, recorded per CLAUDE.md rule 7.
+
+---
+
 ## 2026-08-27 — M6 Phase b correction: personalized questions get a distinct, deterministic verification-required reply
 **Status:** Approved (Product Owner pre-approval review of `f545f98`)
 **Decision:** A guest-specific/personalized question ("What room am I

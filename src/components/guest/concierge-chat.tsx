@@ -1,11 +1,11 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import type { ConciergeChatState } from "@/app/(guest)/concierge/actions";
+import type { ConciergeChatState, VerifyBookingState } from "@/app/(guest)/concierge/actions";
 
 /**
  * M6 Phase b — the anonymous public concierge chat. All hotel-specific
@@ -17,6 +17,16 @@ import type { ConciergeChatState } from "@/app/(guest)/concierge/actions";
  * `useActionState` — nothing is written to `localStorage`/`sessionStorage`
  * or the database, so refreshing the page starts a fresh conversation
  * (docs/DECISIONS.md M6 corrected design — browser-only, no persistence).
+ *
+ * M6c adds an optional booking-verification panel (below). The resulting
+ * signed token is held ONLY in this component's own React state (a
+ * deliberate M6c decision, matching M6b's own — see docs/DECISIONS.md —
+ * not `sessionStorage`, so no bearer-style token is ever written to
+ * browser storage) and is threaded into the chat form as a hidden field on
+ * every message, so `sendConciergeMessageAction` can attempt to resolve it
+ * fresh on the server for that one request. Refreshing the page or
+ * clearing verification always returns to the exact M6b anonymous
+ * experience — nothing about the base chat changes.
  */
 const STARTER_QUESTIONS = [
   "What time is check-in?",
@@ -26,14 +36,25 @@ const STARTER_QUESTIONS = [
 ] as const;
 
 type ConciergeAction = (prevState: ConciergeChatState, formData: FormData) => Promise<ConciergeChatState>;
+type VerifyAction = (prevState: VerifyBookingState, formData: FormData) => Promise<VerifyBookingState>;
 
-const initialState: ConciergeChatState = { messages: [] };
+const initialChatState: ConciergeChatState = { messages: [] };
+const initialVerifyState: VerifyBookingState = {};
 
-export function ConciergeChat({ hotelName, action }: { hotelName: string; action: ConciergeAction }) {
-  const [state, formAction, isPending] = useActionState(action, initialState);
+export function ConciergeChat({
+  hotelName,
+  action,
+  verifyAction,
+}: {
+  hotelName: string;
+  action: ConciergeAction;
+  verifyAction: VerifyAction;
+}) {
+  const [state, formAction, isPending] = useActionState(action, initialChatState);
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
+  const [token, setToken] = useState<string | undefined>(undefined);
 
   // Clear the input after every submission resolves (success or inline error).
   useEffect(() => {
@@ -60,7 +81,7 @@ export function ConciergeChat({ hotelName, action }: { hotelName: string; action
         className="flex max-h-[28rem] min-h-[16rem] flex-col gap-3 overflow-y-auto rounded-lg border border-basalt-700/15 bg-parchment-50 p-4"
       >
         <ConciergeBubble role="assistant">
-          {`Welcome to ${hotelName}! I'm the virtual concierge. Ask me about our rooms, dining, facilities, services, or policies.`}
+          {`Welcome to ${hotelName}! I'm the virtual concierge. Ask me about our rooms, dining, facilities, services, or policies. Verify your booking below to ask about your own reservation or requests.`}
         </ConciergeBubble>
 
         {state.messages.map((message, index) => (
@@ -98,7 +119,10 @@ export function ConciergeChat({ hotelName, action }: { hotelName: string; action
         </div>
       )}
 
+      <VerifyBookingPanel verifyAction={verifyAction} token={token} onVerified={setToken} onClear={() => setToken(undefined)} />
+
       <form ref={formRef} action={formAction} className="flex items-end gap-3">
+        <input type="hidden" name="token" value={token ?? ""} />
         <div className="flex-1">
           <Label htmlFor="concierge-message" className="sr-only">
             Your message
@@ -119,6 +143,95 @@ export function ConciergeChat({ hotelName, action }: { hotelName: string; action
         </Button>
       </form>
     </div>
+  );
+}
+
+/**
+ * M6c — the optional booking-verification panel. Collapsed by default so
+ * the anonymous experience is unchanged unless a guest chooses to verify.
+ * Only two fields are ever asked for: the displayed booking reference, and
+ * a single contact field (checked against both email and phone
+ * server-side — the guest never has to say which one they're giving).
+ * Never asks for a surname, database id, guest id, or hotel id.
+ */
+function VerifyBookingPanel({
+  verifyAction,
+  token,
+  onVerified,
+  onClear,
+}: {
+  verifyAction: VerifyAction;
+  token: string | undefined;
+  onVerified: (token: string) => void;
+  onClear: () => void;
+}) {
+  const [verifyState, verifyFormAction, verifyPending] = useActionState(verifyAction, initialVerifyState);
+  const [expanded, setExpanded] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (verifyState.token) {
+      onVerified(verifyState.token);
+      setExpanded(false);
+      formRef.current?.reset();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verifyState]);
+
+  if (token) {
+    return (
+      <div className="flex items-center justify-between rounded-lg border border-green-300 bg-green-50 px-4 py-2 text-sm text-green-800">
+        <p role="status">✓ Booking verified — you can now ask about your reservation and requests.</p>
+        <button type="button" onClick={onClear} className="font-medium underline hover:no-underline">
+          Clear verification
+        </button>
+      </div>
+    );
+  }
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="self-start rounded-full border border-basalt-700/25 bg-parchment-50 px-4 py-1.5 text-sm font-medium text-basalt-800 transition-colors hover:bg-parchment-100"
+      >
+        Verify My Booking
+      </button>
+    );
+  }
+
+  return (
+    <form
+      ref={formRef}
+      action={verifyFormAction}
+      className="flex flex-col gap-3 rounded-lg border border-basalt-700/15 bg-parchment-50 p-4"
+    >
+      <p className="text-sm font-medium text-basalt-900">Verify your booking</p>
+      {verifyState.error && (
+        <p role="alert" className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {verifyState.error}
+        </p>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <Label htmlFor="verify-reference">Booking reference</Label>
+          <Input id="verify-reference" name="bookingReference" autoComplete="off" required disabled={verifyPending} />
+        </div>
+        <div>
+          <Label htmlFor="verify-contact">Email used for booking, or phone if no email was provided</Label>
+          <Input id="verify-contact" name="contact" autoComplete="off" required disabled={verifyPending} />
+        </div>
+      </div>
+      <div className="flex gap-3">
+        <Button type="submit" size="sm" disabled={verifyPending}>
+          {verifyPending ? "Verifying…" : "Verify"}
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={() => setExpanded(false)} disabled={verifyPending}>
+          Cancel
+        </Button>
+      </div>
+    </form>
   );
 }
 

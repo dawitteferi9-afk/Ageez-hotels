@@ -1,5 +1,145 @@
 # Changelog
 
+## M6 — AI Guest Concierge, Phase c (2026-08-27)
+Verified reservation/service-request context — an optional, read-only
+extension of the anonymous `/concierge` chat. M6d (chat-driven
+ServiceRequest creation), M6e (M6 integration/closeout), and M7 are
+untouched; M6 as a whole is **not** marked complete.
+- **Booking-reference verification
+  (`withTenant().reservations.verifyGuestBooking()`,
+  `src/lib/tenant/index.ts`):** a guest supplies the displayed booking
+  reference plus the email or phone used at booking (a single contact
+  field, checked against both columns). Candidates are narrowed by an
+  indexed, tenant-scoped `Guest` contact match, then the full reference is
+  recomputed per candidate reservation and exact-compared,
+  case-insensitively — never a suffix/`LIKE` lookup against
+  `Reservation.id` (confirmed unsafe by inspection: `formatBookingReference()`
+  is a derived display string, not a unique indexed column). Resolves to
+  exactly one reservation or fails — the Booking Verification Ambiguity
+  Rule: more than one match fails identically to no match, never a
+  first-result guess, never a hint that multiple candidates exist.
+- **Signed verified-context token (`src/lib/ai/verifiedContext.ts`):** a
+  hand-rolled, minimal HMAC-SHA256-signed token (Node's built-in `crypto`
+  only — no new dependency), 30-minute TTL, containing exactly `{hotelId,
+  reservationId, guestId, exp}` — no email/phone/name/nationality/room
+  number/price/role/staff data. `CONCIERGE_TOKEN_SECRET` (new env var,
+  server-only, placeholder in `.env.example`) signs/verifies it.
+  `resolveVerifiedReservationContext()` is the one full authorization
+  pipeline every guest-specific read performs: verify signature + expiry,
+  independently resolve the CURRENT tenant (never from the token), confirm
+  the token's `hotelId` matches it, then a fresh tenant+guest-scoped
+  database lookup confirming the reservation still exists and still
+  belongs to that guest. A stale/expired/tampered/cross-tenant token fails
+  this pipeline and returns `null` — one safe, generic outcome for every
+  failure mode. Called independently by the Server Action (to decide the
+  tool list/prompt) AND by each verified tool's own `execute()` (defense
+  in depth — never a single upfront check trusted for the rest of the
+  conversation).
+- **Verified-tier tools (`src/lib/ai/tools/{getReservationSummary,getServiceRequestStatus,verifiedConciergeTools}.ts`):**
+  `getReservationSummary()` (booking reference, room number/type, dates,
+  reservation status, total price, payment method — the same guest-facing
+  field set the M3 public confirmation page already shows, never
+  `Room.status`/operational state) and `getServiceRequestStatus()` (type,
+  status, notes, created date for the guest's own reservation) — both
+  read-only, both bound to a raw signed token via closure (never a
+  client/model-suppliable id), both re-verify that token fresh on every
+  call. `withTenant().reservations.findOwnedByGuest()` /
+  `withTenant().serviceRequests.findOwnedByGuest()` (new
+  `src/lib/tenant/index.ts` methods) require BOTH `hotelId` and `guestId`
+  to match — one guest's verified token can never resolve another guest's
+  reservation or service requests, even at the same hotel.
+- **Verified-tier system prompt (`buildVerifiedConciergeSystemPrompt()`,
+  `src/lib/ai/prompt.ts`):** a fully separate function from the anonymous
+  prompt (not a branch) — the anonymous prompt's "you cannot access any
+  guest's personal or reservation information" rule would otherwise
+  directly contradict the newly-granted capability. Grounds the two
+  verified tools the same way the anonymous prompt grounds its two;
+  restates the no-mutation, no-other-guest, no-internal-exposure, and
+  emergency-escalation rules.
+- **Mock provider (`src/lib/ai/providers/mock.ts`):** the M6b
+  `PERSONAL_INFO_PATTERN` check now routes to the real verified tools
+  (`getReservationSummary` for room/dates/reference questions,
+  `getServiceRequestStatus` for request-shaped questions, split on a
+  `request` keyword) whenever they're present in the tool list, answering
+  strictly from their deterministic output — never inventing a room,
+  date, status, or request outcome — and falls back to a "verify your
+  booking again" reply if a verified tool call reports the token no
+  longer resolves. Unchanged, regression-tested: when only the anonymous
+  tools are present, the exact M6b `PERSONAL_INFO_REPLY` still applies.
+- **UI (`src/components/guest/concierge-chat.tsx`):** an optional,
+  collapsed-by-default "Verify My Booking" panel — two fields only
+  (booking reference; "Email used for booking, or phone if no email was
+  provided"), never a surname/database id/guest id/hotel id. On success,
+  shows a "✓ Booking verified" status and a "Clear verification" control;
+  the resulting token is threaded into the chat form as a hidden field on
+  every message and held only in this component's own React state (a
+  deliberate decision, like M6b's, not to use `sessionStorage` for this —
+  see `docs/DECISIONS.md`). The base anonymous chat is otherwise
+  unchanged.
+- **Rate limiting (`src/lib/ai/rateLimiter.ts`):** an honest, in-memory,
+  per-process, fixed-window limiter (5 attempts / 10 minutes per client
+  IP) scoped narrowly to `verifyReservationContextAction` — explicitly
+  documented as demo/local-only, NOT protection for a horizontally scaled
+  or serverless deployment (each instance has its own counters); robust
+  distributed rate limiting is flagged as a deferred production
+  requirement, not solved here. The anonymous knowledge chat itself is
+  never rate-limited by this mechanism.
+- **Docs:** `docs/DECISIONS.md` gained this phase's implementation
+  decisions (contact-field shape, the ambiguity rule's exact collapse,
+  room-number inclusion precedent, separate verified prompt, per-call
+  token re-verification, the accepted mid-conversation-expiry UX
+  simplification, and the unit-vs-integration test-tier split for
+  tenant-matching). `docs/SECURITY.md` gained a "Verified guest context"
+  section with the full security invariants. `docs/AI_SPEC.md` updated
+  to describe the verified tier. `docs/V0.1_SCOPE.md`'s M6 row and
+  deliverables updated to Phases a+b+c complete.
+- **Tests:** `tests/unit/ai/verifiedContext.test.ts` (12 — token
+  sign/verify round-trip, payload-shape/no-PII, expiry, tampering, wrong
+  secret, malformed tokens, and `resolveVerifiedReservationContext()`'s
+  tenant-matching/DB-lookup orchestration with a mocked `@/lib/tenant`).
+  `tests/unit/ai/verifiedConciergeTools.test.ts` (5 — registry shape,
+  per-call re-verification, model-input-cannot-override, safe failure on
+  a stale token). `tests/unit/ai/rateLimiter.test.ts` (5 — fixed-window
+  counting, per-key independence, window rollover). `tests/unit/ai/conciergeVerifyAction.test.ts`
+  (6 — success issues a token, generic failure for any mismatch, missing
+  fields, no raw exception leak, rate-limit blocking with a distinct
+  generic message, no DB call once blocked). `tests/unit/ai/mockProvider.test.ts`
+  and `tests/unit/ai/prompt.test.ts` extended for the verified tier and
+  regression-checked for the unchanged anonymous behavior.
+  `tests/unit/ai/conciergeAction.test.ts` extended for the action's
+  tools/prompt branching and a proof that a guest contact value smuggled
+  into the chat form never reaches the provider.
+  `tests/integration/verifiedReservationContext.test.ts` (17 — the exact-
+  match booking-reference strategy including a genuine cross-tenant
+  rejection and a no-partial-match proof, `findOwnedByGuest()` tenant+guest
+  scoping for both reservations and service requests, and the verified
+  tools' own safe-projection correctness against real fixture data).
+  `tests/e2e/concierge.spec.ts` gained one consolidated verification test
+  (success, generic wrong-reference/wrong-contact failures, real grounded
+  personal answers post-verification, clearing verification returning to
+  the exact M6b behavior, and rate-limit exhaustion) — deliberately one
+  test, not several, because the demo-only rate limiter's per-process
+  IP-keyed bucket is shared across the whole suite in a proxy-less local
+  dev server; splitting it up would make each test's outcome depend on
+  unpredictable cross-test ordering against that one shared budget.
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (**159/159** — 108 before this phase's unit
+  work + 51 new/changed); `npm run test:integration` (**156/156** — 139
+  existing + 17 new); `npm run build`, run with only
+  `DATABASE_URL`/`AUTH_SECRET`/`AUTH_URL`/`CONCIERGE_TOKEN_SECRET`
+  exported (no `NODE_ENV` — see the Phase b correction entry below for
+  why) — succeeds cleanly, full route table printed, `/concierge` at
+  2.48 kB (up from 1.93 kB in Phase b). The new concierge e2e suite:
+  **10/10**. The full Playwright suite, `--workers=1`: **72/72** (71
+  passed directly; one `booking.spec.ts` run hit the already-documented
+  pre-existing leftover-fixture gotcha, cleared by hand and re-verified
+  green in isolation, same as at every prior milestone closeout). DB
+  baseline restored afterward (52 rooms AVAILABLE, no leftover
+  `overlap-guest-*` fixture rows, no leftover integration-test fixture
+  hotels).
+- No schema changes, no secrets, no guest mutation path of any kind, no
+  M6d/M6e work, no M7 work.
+
 ## M6 — AI Guest Concierge, Phase b correction (2026-08-27)
 A pre-approval review of the Phase b commit (`f545f98`) surfaced two
 findings, both resolved here — neither is new scope, both are corrections

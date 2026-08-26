@@ -173,11 +173,62 @@ See `docs/AI_SPEC.md`. No AI-generated SQL, no direct DB access, no
 arbitrary function execution, no fabricated operational facts — enforced by
 a closed whitelist of tool functions, not by prompting alone.
 
+### Verified guest context (M6c)
+The anonymous concierge (`/concierge`) can answer questions about one
+guest's own reservation/service-requests only after that guest proves
+ownership of a specific booking — see `docs/DECISIONS.md`'s M6c entries
+for the full design. The security-relevant invariants:
+- **Booking-reference verification never does a suffix/`LIKE` database
+  lookup.** `formatBookingReference()` is a derived display string, not a
+  unique indexed column — `withTenant().reservations.verifyGuestBooking()`
+  narrows candidates by an indexed, tenant-scoped `Guest` contact match
+  (email or phone), then recomputes and exact-compares the full reference
+  per candidate. More than one match fails exactly like no match (the
+  Booking Verification Ambiguity Rule) — never a first-result guess.
+- **Verification failure is always the identical generic message** —
+  wrong reference, wrong contact, nonexistent reservation, and
+  cross-tenant reservation are indistinguishable to the guest.
+- **The verified-context token** (`src/lib/ai/verifiedContext.ts`) is a
+  short-lived (30 min), HMAC-SHA256-signed, stateless capability pointer
+  containing ONLY `{hotelId, reservationId, guestId, exp}` — no email,
+  phone, name, nationality, room number, price, role, or staff data.
+  Signed/verified with `CONCIERGE_TOKEN_SECRET` (server-only; see
+  Secrets, below).
+- **Possessing a decoded token is never sufficient.** Every guest-specific
+  read (`resolveVerifiedReservationContext()`, called independently by the
+  Server Action AND by each verified tool's own `execute()` — defense in
+  depth, not a single check) re-verifies the signature and expiry,
+  independently resolves the CURRENT tenant (never from the token),
+  confirms the token's `hotelId` matches it, and performs a fresh
+  tenant+guest-scoped database lookup confirming the reservation still
+  exists and still belongs to that guest. A stale/expired/tampered/
+  cross-tenant token fails this pipeline and returns `null` — collapsing
+  every failure mode into one safe, generic outcome.
+- **PII minimization:** the guest's verification contact (email/phone)
+  is read only inside `verifyReservationContextAction()` and never leaves
+  that function — it has no code path into the chat action, the system
+  prompt, or the AI provider. The verified tools
+  (`getReservationSummary`/`getServiceRequestStatus`) return a minimal,
+  guest-safe projection only — never another guest's data, never staff/
+  housekeeping/maintenance/occupancy data, never a raw Prisma row.
+- **Rate limiting is demo/local-only, by design.** `src/lib/ai/rateLimiter.ts`
+  is an in-memory, per-process, fixed-window counter scoped narrowly to
+  `verifyReservationContextAction` (5 attempts / 10 minutes per client
+  IP) — it does NOT protect a horizontally scaled or serverless
+  deployment (each instance/invocation has its own independent counters).
+  Robust, shared/distributed rate limiting (Redis/KV-backed, or an
+  edge/WAF-level limiter) is an explicit, deferred production-deployment
+  requirement, not something v0.1 claims to have solved.
+- **No mutation exists yet.** M6c is read-only — no ServiceRequest
+  creation, no reservation modification, no check-in/check-out, no
+  room-status change is reachable from the anonymous concierge at any
+  verification level. That is M6d+ scope.
+
 ## Secrets
 `.env.example` contains placeholders only. Real secrets belong in
 `.env.local` (gitignored) or the hosting platform's secret manager, never
-committed. `ANTHROPIC_API_KEY` and any DB credentials must never reach
-client-side code.
+committed. `ANTHROPIC_API_KEY`, `CONCIERGE_TOKEN_SECRET`, and any DB
+credentials must never reach client-side code.
 
 ## Deferred to M8 (Testing + Security milestone)
 - Formal review of every tenant-scoped query path

@@ -27,6 +27,26 @@ function roomTypesTool(response: Array<{ name: string; capacity: number; basePri
   };
 }
 
+function reservationSummaryTool(response: Record<string, unknown>): AiToolDefinition {
+  return {
+    name: "getReservationSummary",
+    description: "test double",
+    inputSchema: {},
+    execute: vi.fn().mockResolvedValue(response),
+  };
+}
+
+function serviceRequestStatusTool(
+  response: Array<{ type: string; status: string; notes: string | null; createdAt: string }>
+): AiToolDefinition {
+  return {
+    name: "getServiceRequestStatus",
+    description: "test double",
+    inputSchema: {},
+    execute: vi.fn().mockResolvedValue(response),
+  };
+}
+
 describe("createMockProvider — grounded knowledge replies", () => {
   it("calls getHotelKnowledge and returns its content for a policies-shaped question", async () => {
     const tool = knowledgeTool({ found: true, category: "policies", content: "Check-in is 2:00 PM." });
@@ -151,6 +171,104 @@ describe("createMockProvider — personalized/reservation-specific questions", (
 
     expect(result.reply).toBe(NOT_FOUND_REPLY);
     expect(result.reply).not.toBe(PERSONAL_INFO_REPLY);
+  });
+});
+
+describe("createMockProvider — verified-tier personalized questions", () => {
+  it("calls getReservationSummary and answers from its output for a room/dates/reference question, once verified tools are present", async () => {
+    const knowledge = knowledgeTool({ found: false });
+    const roomTypes = roomTypesTool([]);
+    const reservation = reservationSummaryTool({
+      found: true,
+      bookingReference: "AGZ-12345678",
+      roomNumber: "204",
+      roomTypeName: "Executive Room",
+      checkIn: "2026-09-10",
+      checkOut: "2026-09-12",
+      status: "CONFIRMED",
+      totalPrice: "14000",
+      currency: "ETB",
+      paymentMethod: "PAY_AT_HOTEL",
+    });
+    const serviceRequests = serviceRequestStatusTool([]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "What room am I booked in?" }],
+      tools: [knowledge, roomTypes, reservation, serviceRequests],
+    });
+
+    expect(reservation.execute).toHaveBeenCalledWith({});
+    expect(serviceRequests.execute).not.toHaveBeenCalled();
+    expect(result.reply).toContain("AGZ-12345678");
+    expect(result.reply).toContain("Executive Room");
+    expect(result.reply).toContain("204");
+    expect(result.reply).toContain("CONFIRMED");
+  });
+
+  it("calls getServiceRequestStatus, not getReservationSummary, for a request-shaped question", async () => {
+    const reservation = reservationSummaryTool({ found: true });
+    const serviceRequests = serviceRequestStatusTool([
+      { type: "LAUNDRY", status: "COMPLETED", notes: null, createdAt: "2026-09-10T10:00:00.000Z" },
+    ]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Has my request been completed?" }],
+      tools: [reservation, serviceRequests],
+    });
+
+    expect(serviceRequests.execute).toHaveBeenCalledWith({});
+    expect(reservation.execute).not.toHaveBeenCalled();
+    expect(result.reply).toContain("LAUNDRY");
+    expect(result.reply).toContain("COMPLETED");
+  });
+
+  it("reports no service requests honestly, rather than inventing one", async () => {
+    const reservation = reservationSummaryTool({ found: true });
+    const serviceRequests = serviceRequestStatusTool([]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Has my request been completed?" }],
+      tools: [reservation, serviceRequests],
+    });
+
+    expect(result.reply).toMatch(/no service requests/i);
+  });
+
+  it("falls back to a verify-again reply, never a guess, when a verified tool call reports the token no longer resolves", async () => {
+    const reservation = reservationSummaryTool({ found: false });
+    const serviceRequests = serviceRequestStatusTool([]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "What room am I booked in?" }],
+      tools: [reservation, serviceRequests],
+    });
+
+    expect(result.reply).toMatch(/verify your booking again|contact the front desk/i);
+    expect(result.reply).not.toContain("undefined");
+  });
+
+  it("still returns the M6b PERSONAL_INFO_REPLY, unchanged, when only anonymous tools are present (regression)", async () => {
+    const knowledge = knowledgeTool({ found: false });
+    const roomTypes = roomTypesTool([]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "What room am I booked in?" }],
+      tools: [knowledge, roomTypes],
+    });
+
+    expect(result.reply).toBe(
+      "I can't look up personal booking, room, or request details in this chat yet — that requires verifying who you are first, and that verification isn't available in this version. Please contact the front desk with your booking reference for help with your reservation or request."
+    );
   });
 });
 
