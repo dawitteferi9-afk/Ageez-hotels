@@ -10,14 +10,14 @@ import { test, expect, type Page } from "@playwright/test";
  * transcribed from `src/config/defaults/seed/ageez-grand-hotel.ts` — the
  * same seeded facts the mock provider's tools actually read.
  *
- * Note: the more specific "personal info requires verification, coming in
- * a later phase" wording the approved design describes is a system-prompt
- * instruction meant for the real model to follow — the deterministic mock
- * provider doesn't special-case that phrasing (it isn't a real LLM), so
- * this suite verifies the safety property that actually matters
- * (no leaked/fabricated guest or room data, a safe fallback reply) rather
- * than the exact wording, which can only be verified against a live
- * Anthropic provider — not available in this sandbox (no network access).
+ * A personalized/reservation-specific question (see the "personalized
+ * questions" test below) is deterministically recognized by
+ * `src/lib/ai/providers/mock.ts`'s `PERSONAL_INFO_PATTERN` and answered
+ * with a fixed verification-required reply, distinct from the generic
+ * "I don't have that information" fallback used for ordinary unanswerable
+ * questions — this is real mock-provider behavior, not something only a
+ * live model would do, so it's fully e2e-verified here with no network
+ * access.
  */
 
 function conciergeLog(page: Page) {
@@ -92,11 +92,26 @@ test("asking for live room availability never exposes operational room status or
   expect(content).not.toMatch(/\bAVAILABLE\b|\bOCCUPIED\b|\bCLEANING\b/);
 });
 
-test("asking a personal reservation question never leaks guest/reservation data", async ({ page }) => {
+test("personalized reservation questions get the verification-required reply, never the generic fallback or leaked data", async ({
+  page,
+}) => {
   await page.goto("/concierge");
-  await ask(page, "What room am I booked in, and when do I check out?");
-  await expect(conciergeLog(page).getByText(/front desk/)).toBeVisible();
+
+  for (const question of [
+    "What room am I booked in?",
+    "When do I check out?",
+    "What is my booking reference?",
+    "Has my request been completed?",
+  ]) {
+    await ask(page, question);
+    // .last() — all four questions produce the identical reply, so by the
+    // second iteration more than one matching bubble exists in the log.
+    await expect(conciergeLog(page).getByText(/requires verifying who you are/).last()).toBeVisible();
+  }
+
   const content = await conciergeLog(page).textContent();
+  // Never the generic "I don't have that information" fallback for these — a distinct, specific reply.
+  expect(content).not.toMatch(/I don't have that information/);
   // No fabricated room number, reservation id, or checkout date.
   expect(content).not.toMatch(/\broom\s*\d+\b/i);
 });

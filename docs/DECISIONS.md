@@ -4,6 +4,35 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-27 — M6 Phase b correction: personalized questions get a distinct, deterministic verification-required reply
+**Status:** Approved (Product Owner pre-approval review of `f545f98`)
+**Decision:** A guest-specific/personalized question ("What room am I
+booked in?", "When do I check out?", "What is my booking reference?",
+"Has my request been completed?") must never be answered by the same
+generic "I don't have that information" fallback used for an ordinary
+unanswerable hotel-facts question — the two are different failure modes
+(the concierge genuinely lacks a fact, versus the concierge structurally
+cannot access this guest's identity/reservation in the anonymous tier) and
+must read differently to the guest. `src/lib/ai/providers/mock.ts`'s new
+`PERSONAL_INFO_PATTERN` check runs **before** the room-type and
+knowledge-category branches — a personalized question can never be
+mistaken for, or answered as, a request for public information. It calls
+no tool and discloses no guest/reservation/service data. This implements,
+deterministically, the rule `buildAnonymousConciergeSystemPrompt()`
+already stated for a real model (its rule 5: "you cannot access any
+guest's personal or reservation information — direct that kind of request
+to the front desk") — no new capability, no verification, no HMAC tokens,
+no guest/reservation/ServiceRequest reads, no M6c work of any kind. See
+`docs/CHANGELOG.md`'s matching 2026-08-27 entry for the full detail,
+including the separate (documentation-only, no-code-change) `npm run
+build` verification-command finding reviewed at the same time.
+**Rationale:** Found during pre-approval review of Phase b's own commit —
+a gap between the approved M6b requirement and what the deterministic
+mock/e2e-tested substrate actually proved, not a new design decision or a
+change to the M6 tier boundary.
+
+---
+
 ## 2026-08-26 — M6 Phase b (anonymous guest concierge UI) implementation decisions
 **Status:** Approved (implemented, this phase)
 **Decision:**

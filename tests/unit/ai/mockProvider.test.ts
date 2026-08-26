@@ -85,6 +85,75 @@ describe("createMockProvider — grounded knowledge replies", () => {
   });
 });
 
+describe("createMockProvider — personalized/reservation-specific questions", () => {
+  const PERSONAL_INFO_REPLY =
+    "I can't look up personal booking, room, or request details in this chat yet — that requires verifying who you are first, and that verification isn't available in this version. Please contact the front desk with your booking reference for help with your reservation or request.";
+  const NOT_FOUND_REPLY = "I don't have that information — please contact the front desk for details.";
+
+  it.each([
+    "What room am I booked in?",
+    "When do I check out?",
+    "What is my booking reference?",
+    "Has my request been completed?",
+  ])("returns the verification-required reply, not the generic fallback, for %j", async (question) => {
+    const knowledge = knowledgeTool({ found: true, category: "policies", content: "Check-in is 2:00 PM." });
+    const roomTypes = roomTypesTool([{ name: "Executive Room", capacity: 3, basePrice: "7000", currency: "ETB" }]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: question }],
+      tools: [knowledge, roomTypes],
+    });
+
+    expect(result.reply).toBe(PERSONAL_INFO_REPLY);
+    expect(result.reply).not.toBe(NOT_FOUND_REPLY);
+  });
+
+  it("calls no tool and discloses no data for a personalized question — the check happens before any lookup", async () => {
+    const knowledge = knowledgeTool({ found: true, category: "policies", content: "Check-in is 2:00 PM." });
+    const roomTypes = roomTypesTool([{ name: "Executive Room", capacity: 3, basePrice: "7000", currency: "ETB" }]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "What room am I booked in?" }],
+      tools: [knowledge, roomTypes],
+    });
+
+    expect(result.toolCalls).toEqual([]);
+    expect(knowledge.execute).not.toHaveBeenCalled();
+    expect(roomTypes.execute).not.toHaveBeenCalled();
+  });
+
+  it("does not treat an ordinary public-information question as personalized", async () => {
+    const tool = roomTypesTool([{ name: "Executive Room", capacity: 3, basePrice: "7000", currency: "ETB" }]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "What room types do you offer?" }],
+      tools: [tool],
+    });
+
+    expect(result.reply).not.toBe(PERSONAL_INFO_REPLY);
+    expect(result.reply).toContain("Executive Room");
+  });
+
+  it("still uses the normal 'I don't have that information' fallback for unrelated missing information", async () => {
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Do you have a swimming pool and spa?" }],
+      tools: [],
+    });
+
+    expect(result.reply).toBe(NOT_FOUND_REPLY);
+    expect(result.reply).not.toBe(PERSONAL_INFO_REPLY);
+  });
+});
+
 describe("createMockProvider — room type questions", () => {
   it("calls getRoomTypesSummary and summarizes it for a pricing question", async () => {
     const tool = roomTypesTool([{ name: "Executive Room", capacity: 3, basePrice: "7000", currency: "ETB" }]);

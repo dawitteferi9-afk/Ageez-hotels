@@ -1,5 +1,54 @@
 # Changelog
 
+## M6 — AI Guest Concierge, Phase b correction (2026-08-27)
+A pre-approval review of the Phase b commit (`f545f98`) surfaced two
+findings, both resolved here — neither is new scope, both are corrections
+to Phase b's own approved behavior/verification.
+- **Personalized-question behavior gap, fixed:** the deterministic mock
+  provider had no dedicated handling for a guest asking about *their own*
+  reservation/room/request ("What room am I booked in?", "When do I check
+  out?", "What is my booking reference?", "Has my request been
+  completed?") — all four fell through to the same generic "I don't have
+  that information" fallback used for any unrelated unanswerable question,
+  which doesn't tell the guest that personalized info requires
+  verification unavailable in this anonymous chat. `src/lib/ai/providers/mock.ts`
+  now checks a new `PERSONAL_INFO_PATTERN` **first**, before the room-type
+  and knowledge-category branches, so a personalized question can never be
+  answered as if it were a public-information one. It calls no tool and
+  returns a fixed reply explaining that personal booking/room/request
+  details require identity verification not available in this version,
+  and points to the front desk in the meantime — no guest/reservation/
+  service data, no verification, no HMAC tokens, no M6c work of any kind.
+- **`npm run build` verification-command correction, documented (no code
+  change):** the build failure reported at Phase b's original completion
+  was fully investigated and traced to an environment issue, not a code or
+  dependency defect — `.env.local` hardcodes `NODE_ENV="development"`, and
+  running `npm run build` after blanket-sourcing `.env.local` (the
+  existing workaround for Prisma CLI not auto-loading it) exports that
+  value into `next build`'s own process environment. `next build` expects
+  to manage `NODE_ENV` itself; an externally forced non-`production` value
+  is a confirmed trigger (upstream Next.js issue, reproducible on plain
+  `next@15.5.23`) for a spurious `<Html> should not be imported outside of
+  pages/_document` failure while prerendering the framework's own built-in
+  `/500` page — unrelated to any route this project defines. Re-running
+  `npm run build` with only the variables the build actually needs
+  (`DATABASE_URL`, `AUTH_SECRET`, `AUTH_URL` — no `NODE_ENV`) succeeds
+  cleanly, full route table printed, `/concierge` present. **Verification
+  practice going forward: never export `.env.local`'s `NODE_ENV` before
+  running `npm run build`** — no `.env.local`/`.env.example`/config/
+  dependency change was made.
+- **Tests:** `tests/unit/ai/mockProvider.test.ts` gained 6 new cases (the
+  four required personalized-question phrasings each return the new
+  verification-required reply and never the generic fallback, no tool is
+  called for any of them, and both an ordinary public-information question
+  and an unrelated missing-information question are unaffected).
+  `tests/e2e/concierge.spec.ts`'s personalized-question test now asserts
+  the specific verification-required wording for all four phrasings
+  (previously it only asserted the safety property, with an explicit note
+  that the exact wording couldn't be verified deterministically — no
+  longer true now that the mock provider implements it).
+- No schema changes, no secrets, no M6c/M6d/M6e work, no M7 work.
+
 ## M6 — AI Guest Concierge, Phase b (2026-08-26)
 The anonymous public concierge chat UI, built on Phase a's provider/tool
 library. M6c (reservation verification), M6d (ServiceRequest creation via
