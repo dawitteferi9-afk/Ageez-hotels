@@ -26,6 +26,9 @@ let hotelA: HotelFixture;
 let hotelB: HotelFixture;
 let phoneOnlyGuestId: string;
 let phoneOnlyReservationId: string;
+let bothContactGuestId: string;
+let bothContactReservationId: string;
+const BOTH_CONTACT_PHONE = "+251-900-111-222";
 
 beforeAll(async () => {
   ({ hotelA, hotelB } = await setupTestHotels());
@@ -51,6 +54,33 @@ beforeAll(async () => {
   });
   phoneOnlyGuestId = phoneOnlyGuest.id;
   phoneOnlyReservationId = phoneOnlyReservation.id;
+
+  // Supplementary guest with BOTH email and phone on file — proves phone
+  // must NOT authenticate a booking once an email exists (the M6c
+  // security-correction fix).
+  const bothContactGuest = await prisma.guest.create({
+    data: {
+      hotelId: hotelA.hotel.id,
+      name: "Both Contact Guest",
+      email: "both-contact-guest@example.com",
+      phone: BOTH_CONTACT_PHONE,
+    },
+  });
+  const bothContactReservation = await prisma.reservation.create({
+    data: {
+      hotelId: hotelA.hotel.id,
+      guestId: bothContactGuest.id,
+      roomId: hotelA.room.id,
+      checkIn: new Date(Date.now() + 8 * 24 * 60 * 60 * 1000),
+      checkOut: new Date(Date.now() + 9 * 24 * 60 * 60 * 1000),
+      guestCount: 1,
+      status: "CONFIRMED",
+      totalPrice: "100.00",
+      paymentMethod: "PAY_AT_HOTEL",
+    },
+  });
+  bothContactGuestId = bothContactGuest.id;
+  bothContactReservationId = bothContactReservation.id;
 }, 30_000);
 
 afterAll(async () => {
@@ -68,6 +98,64 @@ describe("reservations.verifyGuestBooking — exact-match booking-reference stra
     const reference = formatBookingReference(hotelA.hotel.name, phoneOnlyReservationId);
     const match = await withTenant(hotelA.hotel.id).reservations.verifyGuestBooking(reference, "+251-900-000-000");
     expect(match).toEqual({ reservationId: phoneOnlyReservationId, guestId: phoneOnlyGuestId });
+  });
+
+  describe("phone must NOT authenticate a booking that also has an email (M6c security correction)", () => {
+    it("Case 1 — email + phone booking, correct EMAIL: succeeds", async () => {
+      const reference = formatBookingReference(hotelA.hotel.name, bothContactReservationId);
+      const match = await withTenant(hotelA.hotel.id).reservations.verifyGuestBooking(
+        reference,
+        "both-contact-guest@example.com"
+      );
+      expect(match).toEqual({ reservationId: bothContactReservationId, guestId: bothContactGuestId });
+    });
+
+    it("Case 2 — email + phone booking, correct PHONE: fails (phone cannot bypass an existing email)", async () => {
+      const reference = formatBookingReference(hotelA.hotel.name, bothContactReservationId);
+      const match = await withTenant(hotelA.hotel.id).reservations.verifyGuestBooking(reference, BOTH_CONTACT_PHONE);
+      expect(match).toBeNull();
+    });
+
+    it("Case 3 — phone-only booking (no email on file), correct PHONE: succeeds", async () => {
+      const reference = formatBookingReference(hotelA.hotel.name, phoneOnlyReservationId);
+      const match = await withTenant(hotelA.hotel.id).reservations.verifyGuestBooking(reference, "+251-900-000-000");
+      expect(match).toEqual({ reservationId: phoneOnlyReservationId, guestId: phoneOnlyGuestId });
+    });
+
+    it("Case 4 — phone-only booking, WRONG phone: fails generically", async () => {
+      const reference = formatBookingReference(hotelA.hotel.name, phoneOnlyReservationId);
+      const match = await withTenant(hotelA.hotel.id).reservations.verifyGuestBooking(reference, "+251-900-999-999");
+      expect(match).toBeNull();
+    });
+
+    it("all four failure/success outcomes above use the identical shape (a plain object or null) — no field-specific disclosure", async () => {
+      const reference = formatBookingReference(hotelA.hotel.name, bothContactReservationId);
+      const wrongContactResult = await withTenant(hotelA.hotel.id).reservations.verifyGuestBooking(
+        reference,
+        BOTH_CONTACT_PHONE
+      );
+      const wrongReferenceResult = await withTenant(hotelA.hotel.id).reservations.verifyGuestBooking(
+        "WRONG-REF",
+        "both-contact-guest@example.com"
+      );
+      const nonexistentResult = await withTenant(hotelA.hotel.id).reservations.verifyGuestBooking(
+        "XXX-00000000",
+        "nobody-at-all@example.com"
+      );
+      const crossTenantResult = await withTenant(hotelB.hotel.id).reservations.verifyGuestBooking(
+        reference,
+        "both-contact-guest@example.com"
+      );
+      // Phone-cannot-bypass-email, wrong reference, nonexistent, and
+      // cross-tenant are all indistinguishable to the caller — every one
+      // is exactly `null`.
+      expect([wrongContactResult, wrongReferenceResult, nonexistentResult, crossTenantResult]).toEqual([
+        null,
+        null,
+        null,
+        null,
+      ]);
+    });
   });
 
   it("is case-insensitive on both the reference and the email", async () => {

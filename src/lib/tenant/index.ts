@@ -684,6 +684,15 @@ export function withTenant(hotelId: string) {
        * guests' reservation ids could in principle share the same last-8
        * suffix) must fail exactly like "no match" — never pick a first
        * result, never disclose that multiple candidates existed.
+       *
+       * **Phone only ever authenticates a booking that has no email on
+       * file.** A guest whose `Guest` row has BOTH `email` and `phone` set
+       * must verify with the email — the `phone` branch below is
+       * conditioned on `email: null` specifically so it can never be used
+       * as an alternate/weaker credential once a real email exists
+       * (docs/DECISIONS.md's M6c security-correction entry; found and
+       * fixed in pre-push review — the original `OR` had no such
+       * condition and let phone bypass an existing email).
        */
       verifyGuestBooking: async (
         bookingReference: string,
@@ -699,7 +708,10 @@ export function withTenant(hotelId: string) {
         const guests = await prisma.guest.findMany({
           where: {
             hotelId,
-            OR: [{ email: { equals: trimmedContact, mode: "insensitive" } }, { phone: trimmedContact }],
+            OR: [
+              { email: { equals: trimmedContact, mode: "insensitive" } },
+              { AND: [{ email: null }, { phone: trimmedContact }] },
+            ],
           },
           include: { reservations: { where: { hotelId } } },
         });

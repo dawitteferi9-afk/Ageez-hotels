@@ -1,5 +1,53 @@
 # Changelog
 
+## M6 — AI Guest Concierge, Phase c security correction (2026-08-27)
+A pre-push security review of the Phase c commit (`5dc9cd6`) found two real
+gaps, both fixed here — neither is new scope.
+- **Phone could bypass an existing email.** `verifyGuestBooking()`'s `OR`
+  clause matched `phone` unconditionally, so a guest whose booking had
+  BOTH an email and a phone on file could verify with the phone alone —
+  violating the approved rule that phone only ever authenticates a
+  booking with no email. Fixed: the phone branch is now
+  `{ AND: [{ email: null }, { phone: trimmedContact }] }` — phone can
+  never match a `Guest` row that has an email. Tenant scoping, the exact
+  recomputed-reference comparison, the Ambiguity Rule, and the
+  no-suffix-lookup strategy are all unchanged.
+- **A stale/expired/tampered/wrong-tenant token read to the guest exactly
+  like "never verified."** `sendConciergeMessageAction()` silently fell
+  back to the anonymous tools/prompt whenever a submitted token failed to
+  resolve, so a previously-verified guest whose session lapsed saw the
+  same M6b `PERSONAL_INFO_REPLY` a guest who never verified would see.
+  Fixed: when a token was submitted but
+  `resolveVerifiedReservationContext()` returns `null`, the action now
+  returns a fixed, deterministic reply — *"Your booking verification
+  could not be confirmed. Please verify your booking again, or contact
+  the front desk for help."* — without calling the AI provider or any
+  verified tool, and without disclosing which check failed. A request
+  with no token at all is completely unaffected (unchanged M6b anonymous
+  behavior).
+- **Tests:** `tests/integration/verifiedReservationContext.test.ts`
+  gained a "both email and phone" fixture guest and 5 new cases (email
+  succeeds, phone fails while an email exists, phone-only booking still
+  succeeds with the correct phone, phone-only with the wrong phone still
+  fails generically, and all four failure/success shapes proven
+  indistinguishable). `tests/unit/ai/conciergeAction.test.ts`'s stale-token
+  test now asserts the deterministic verify-again reply and that
+  `converse()` is never called, for four labeled invalid-token causes.
+  `tests/e2e/concierge.spec.ts` gained one new test injecting a tampered
+  token directly into the chat form's hidden field and confirming the new
+  reply appears (and the old M6b wording, and any hint of the actual
+  failure reason, do not).
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (**162/162**); `npm run test:integration`
+  (**161/161**); `npm run build` (only `DATABASE_URL`/`AUTH_SECRET`/
+  `AUTH_URL`/`CONCIERGE_TOKEN_SECRET` exported, no `NODE_ENV`) — clean,
+  `/concierge` unchanged at 2.48 kB. Concierge e2e: **11/11**. Full
+  Playwright suite, `--workers=1`: **73/73**, no failures at all this run.
+  DB baseline restored afterward (52 rooms AVAILABLE, no leftover
+  fixture data).
+- No schema changes, no secrets, no guest mutation path, no M6d/M6e work,
+  no M7 work.
+
 ## M6 — AI Guest Concierge, Phase c (2026-08-27)
 Verified reservation/service-request context — an optional, read-only
 extension of the anonymous `/concierge` chat. M6d (chat-driven

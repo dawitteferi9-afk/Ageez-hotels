@@ -134,17 +134,32 @@ describe("sendConciergeMessageAction — M6c verified-context token handling", (
     expect(call.systemPrompt).toContain("completed booking verification");
   });
 
-  it("falls back to the anonymous tools/prompt when the token does not resolve (expired/invalid/tampered/wrong-tenant)", async () => {
-    resolveVerifiedReservationContext.mockResolvedValue(null);
-    converse.mockResolvedValue({ reply: "I can't look that up right now.", toolCalls: [] });
+  it.each([
+    ["expired", null],
+    ["tampered", null],
+    ["wrong-tenant", null],
+    ["otherwise invalid", null],
+  ])(
+    "returns the deterministic verify-again reply, never the AI provider or anonymous fallback, for a %s token",
+    async (_label, resolved) => {
+      resolveVerifiedReservationContext.mockResolvedValue(resolved);
 
-    const result = await sendConciergeMessageAction({ messages: [] }, formDataWith("What room am I in?", "stale-token"));
+      const result = await sendConciergeMessageAction({ messages: [] }, formDataWith("What room am I in?", "stale-token"));
 
-    expect(result.error).toBeUndefined();
-    const call = converse.mock.calls[0]![0];
-    expect(call.tools.map((t: { name: string }) => t.name).sort()).toEqual(["getHotelKnowledge", "getRoomTypesSummary"]);
-    expect(call.systemPrompt).not.toContain("completed booking verification");
-  });
+      expect(result.error).toBeUndefined();
+      expect(result.messages).toEqual([
+        { role: "user", content: "What room am I in?" },
+        {
+          role: "assistant",
+          content: "Your booking verification could not be confirmed. Please verify your booking again, or contact the front desk for help.",
+        },
+      ]);
+      // Deterministic server behavior only -- never calls the AI provider
+      // (mock or real) to produce this reply, and never touches a verified
+      // tool.
+      expect(converse).not.toHaveBeenCalled();
+    }
+  );
 
   it("behaves identically to plain M6b when no token is submitted at all — anonymous tools/prompt only", async () => {
     converse.mockResolvedValue({ reply: "Check-in is at 2 PM.", toolCalls: [] });

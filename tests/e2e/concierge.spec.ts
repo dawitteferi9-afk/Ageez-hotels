@@ -240,6 +240,27 @@ test("booking verification: success, generic failures, real grounded personal an
   expect(html).not.toMatch(/CONCIERGE_TOKEN_SECRET|verifyVerifiedContextTokenSignature/);
 });
 
+test("a tampered/invalid verified-context token gets the deterministic verify-again reply, not the M6b never-verified reply", async ({
+  page,
+}) => {
+  await page.goto("/concierge");
+
+  // Simulate a token that WAS present (e.g. from an earlier session that
+  // has since expired) but no longer verifies, by writing directly into
+  // the chat form's hidden field before submitting.
+  await page.locator('input[name="token"]').evaluate((el, value) => {
+    (el as HTMLInputElement).value = value;
+  }, "tampered.notarealtoken");
+
+  await ask(page, "What room am I booked in?");
+
+  await expect(conciergeLog(page).getByText(/verification could not be confirmed/i)).toBeVisible();
+  // Never the M6b "never verified" wording, and never a leaked reason.
+  const content = await conciergeLog(page).textContent();
+  expect(content).not.toMatch(/verification isn't available in this version/);
+  expect(content).not.toMatch(/expired|tampered|signature|tenant/i);
+});
+
 test("mock-provider mode is deterministic — the same question gets the same answer", async ({ page }) => {
   await page.goto("/concierge");
   await ask(page, "Tell me about the restaurant.");

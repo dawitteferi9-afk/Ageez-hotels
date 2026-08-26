@@ -4,6 +4,44 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-27 — M6c security correction: phone cannot bypass an existing email; a stale token gets its own deterministic reply
+**Status:** Approved (Product Owner pre-push security review of `5dc9cd6`)
+**Decision:**
+1. **`verifyGuestBooking()`'s phone match is now conditioned on the
+   guest having no email**, not merely evaluated as a second, independent
+   `OR` branch. The pre-push review constructed a real fixture guest with
+   both an email and a phone and proved the original query let the phone
+   alone verify that booking — directly violating the approved rule
+   ("phone may verify only when email was not supplied at booking"). The
+   fix is a one-clause change: `{ AND: [{ email: null }, { phone:
+   trimmedContact }] }`. Every other property of the function is
+   unchanged: still tenant-scoped, still an exact recomputed-reference
+   comparison (never a suffix/`LIKE` lookup), still the Booking
+   Verification Ambiguity Rule, still one uniform `null` for every
+   failure shape.
+2. **A token that was submitted but no longer resolves gets a reply that
+   says so, distinct from the never-verified M6b reply.** The original
+   Phase c implementation treated "token present but invalid" identically
+   to "no token at all," which the pre-push review confirmed (by running
+   the real action with a deliberately bogus token) produces the exact
+   M6b `PERSONAL_INFO_REPLY` — wording that tells a previously-verified
+   guest their verification "isn't available in this version," which is
+   misleading. `sendConciergeMessageAction()` now short-circuits before
+   ever calling the AI provider or a verified tool when `token` is
+   truthy and `resolveVerifiedReservationContext(token)` returns `null`,
+   returning one fixed reply regardless of the underlying cause (expired,
+   tampered, wrong-tenant, or otherwise invalid) — deterministic, not
+   AI-generated, and no different for any of those causes. A request that
+   never included a token at all is completely untouched by this change.
+**Rationale:** Both were real, exploitable/misleading gaps between the
+approved M6c requirements and what Phase c's own commit (`5dc9cd6`)
+actually did, found during the mandatory pre-push security review of that
+commit before pushing — not new design decisions, not scope changes.
+Recorded per CLAUDE.md rule 7. See `docs/CHANGELOG.md`'s matching entry
+for the exact tests added.
+
+---
+
 ## 2026-08-27 — M6 Phase c (verified reservation context) implementation decisions
 **Status:** Approved (implemented, this phase — the overall approach was
 already approved at M6 design time; these are the concrete choices this

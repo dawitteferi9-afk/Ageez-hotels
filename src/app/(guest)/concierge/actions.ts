@@ -38,6 +38,14 @@ import { checkRateLimit, verifyReservationRateLimitKey } from "@/lib/ai/rateLimi
  * straight to `resolveVerifiedReservationContext()`/the verified tools,
  * which perform every check.
  *
+ * A token that WAS submitted but no longer resolves (expired, tampered,
+ * wrong-tenant, or otherwise invalid) is never silently treated as "no
+ * token at all" — see `STALE_TOKEN_REPLY` below, returned deterministically
+ * without ever calling the AI provider or a verified tool for that turn
+ * (docs/DECISIONS.md's M6c security-correction entry). A request with no
+ * token submitted in the first place gets the unchanged, original M6b
+ * anonymous behavior.
+ *
  * Conversation history — and the verified-context token, if any — live
  * only in the browser's React state for this component's lifetime
  * (`useActionState` in `concierge-chat.tsx`) — this function is stateless
@@ -51,6 +59,15 @@ export interface ConciergeChatState {
 
 const GENERIC_ERROR =
   "Sorry, I'm having trouble responding right now. Please try again in a moment, or contact the front desk directly.";
+
+/**
+ * Shown when a token WAS submitted but `resolveVerifiedReservationContext()`
+ * could not confirm it (expired, tampered, wrong-tenant, or any other
+ * reason) — never the same reply an anonymous, never-verified guest sees.
+ * Deliberately does not distinguish which check failed.
+ */
+const STALE_TOKEN_REPLY =
+  "Your booking verification could not be confirmed. Please verify your booking again, or contact the front desk for help.";
 
 export async function sendConciergeMessageAction(
   prevState: ConciergeChatState,
@@ -86,15 +103,19 @@ export async function sendConciergeMessageAction(
     contactEmail: hotel.contactEmail,
   };
 
-  // A stale/expired/tampered/cross-tenant token simply fails to resolve
-  // here (never throws) — the conversation transparently continues as
-  // anonymous. There is no separate "your verification expired" branch:
-  // the model/mock still has the anonymous tools and prompt, so a
-  // personalized question still gets a safe, front-desk-pointing reply,
-  // just not one that distinguishes "never verified" from "verification
-  // expired" — an accepted minor UX simplification (docs/DECISIONS.md),
-  // not a safety gap.
+  // A stale/expired/tampered/cross-tenant token fails to resolve here
+  // (never throws) — resolveVerifiedReservationContext() never reveals
+  // which check failed.
   const verifiedContext = token ? await resolveVerifiedReservationContext(token) : null;
+
+  if (token && !verifiedContext) {
+    // A token WAS submitted but no longer resolves — never silently treat
+    // this the same as "no token at all" (that would read to the guest as
+    // if they'd never verified, which is misleading and unsafe-feeling for
+    // someone who verified moments ago). Deterministic, no AI provider
+    // call, no verified tool access, no disclosure of the actual cause.
+    return { messages: [...messagesWithGuestTurn, { role: "assistant", content: STALE_TOKEN_REPLY }] };
+  }
 
   const systemPrompt = verifiedContext
     ? buildVerifiedConciergeSystemPrompt(hotelIdentity)
