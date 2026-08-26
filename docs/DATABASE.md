@@ -74,11 +74,18 @@ tenant root.
   standalone housekeeping-task/assignment table exists — `Room.status ===
   "CLEANING"` alone is the housekeeping data model (docs/DECISIONS.md M5
   design-decisions entry).
-- **StaffUser** — `hotelId`, `name`, `email` (unique), `role` (enum
-  `StaffRole`: OWNER_ADMIN, MANAGER, FRONT_DESK, HOUSEKEEPING,
-  MAINTENANCE). No password/session fields — Auth.js wiring (and whatever
-  adapter tables it needs) is an M4 decision; adding them is an additive
-  migration, not a redesign. **Seeded:** one fictional row per role.
+- **StaffUser** — `hotelId`, `name`, `email` (**globally unique — not
+  hotel-scoped**; a create/edit that collides with any hotel's existing
+  email is rejected, translated from the database's own constraint
+  violation, see docs/SECURITY.md), `role` (enum `StaffRole`: OWNER_ADMIN,
+  MANAGER, FRONT_DESK, HOUSEKEEPING, MAINTENANCE), `passwordHash` (bcrypt;
+  added M4 Phase 1, migration `20260824221224_add_staffuser_password_hash`
+  — Auth.js uses JWT sessions with no adapter tables, so this is the only
+  auth-related column on the model). No `active`/`disabled`/soft-delete
+  column — v0.1 Staff Administration (M4 Phase 7) is create + edit only,
+  by design (docs/DECISIONS.md's 2026-08-26 entry); adding a deactivation
+  model later is an additive migration, not a redesign. **Seeded:** one
+  fictional row per role.
 - **AiKnowledgeDocument** — `hotelId`, `category`, `content`, `version`
   (default 1). Unique on `(hotelId, category)`. Grounds the AI concierge /
   management assistant; see `docs/AI_SPEC.md`. **Seeded:** policies,

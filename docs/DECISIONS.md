@@ -4,6 +4,101 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-26 — M4 Phase 7 (Staff Administration) implementation decisions
+**Status:** Approved-by-continuation (implements the already-approved M4
+Staff scope — docs/DECISIONS.md's 2026-08-25 pre-implementation decisions'
+RBAC matrix, "Staff accounts" row — deferred out of Phase 4; these are the
+concrete choices this phase's implementation required, including one new
+safety rule this phase's own scope explicitly asked to be designed)
+**Decision:**
+1. **Owner-safety rule: the last `OWNER_ADMIN` at a hotel cannot be edited
+   away from that role.** `withTenant().staffUsers.update()` re-counts
+   *other* `OWNER_ADMIN` rows at the same hotel, inside the same
+   Serializable transaction as the write, whenever a role change would
+   move the target away from `OWNER_ADMIN` — if none remain, the edit is
+   rejected (`LastOwnerAdminError`) and nothing is written. Multiple
+   `OWNER_ADMIN`s at one hotel may freely change each other's roles as
+   long as at least one remains afterward. This is the one rule the
+   current schema makes both *necessary* and *sufficient*: v0.1 has no
+   delete/deactivate for `StaffUser` at all (see point 2), so the only way
+   a hotel could ever end up with zero owners is exactly this one edit
+   path — there is no separate "delete the last owner" case to also guard.
+2. **No delete/deactivate was added, and none was invented to make one
+   possible.** `StaffUser` has no `active`/`disabled`/soft-delete column,
+   and this phase does not add one — CLAUDE.md rule 5 (no premature
+   abstraction) and this phase's explicit scope boundary both apply: nothing
+   in the approved M4 Staff scope calls for account removal, and adding a
+   deactivation model un-asked would be exactly the kind of unrequested
+   schema expansion CLAUDE.md rule 8 says to flag rather than silently
+   build. v0.1 Staff Administration is create + edit only.
+3. **`StaffUser.email` is globally unique at the schema level (from M1),
+   not hotel-scoped** — unchanged by this phase. `create()`/`update()`
+   surface a collision as the database's own P2002 constraint violation,
+   translated to a generic `EmailAlreadyInUseError` ("that email address
+   is already registered") rather than a separate pre-check (avoids a
+   check-then-write race) and rather than confirming whether the
+   conflicting row belongs to this hotel or another one (no cross-tenant
+   existence leak, consistent with every other scoped mutation in this
+   file).
+4. **Editing your own account's name/email produces a cosmetically stale
+   "Signed in as ___" header until next login — accepted, not fixed.** The
+   JWT session (`src/lib/auth/config.ts`) carries only `id`; its
+   `name`/`email` display fields are frozen at whatever they were when
+   that session's token was minted at login and are never refreshed
+   mid-session. Every actual authorization decision re-loads the
+   `StaffUser` row fresh from the database on every request
+   (`requireStaffAccess()`), so this is display-only staleness, not a
+   security or correctness gap — a role change (including one made
+   through this phase's own edit form) takes effect immediately on the
+   very next request regardless. Refreshing session display fields
+   mid-session would mean touching Auth.js's session/jwt callbacks, which
+   this phase's approved scope explicitly excludes ("do not redesign
+   Auth.js").
+5. **RBAC required no change.** `staff` already had `view: ALL_ROLES` and
+   `mutate: ["OWNER_ADMIN"]` in the approved M4 matrix since the M4 Phase 3
+   decision — this phase is the first to build a UI/mutation against it,
+   not a policy change.
+6. **A real, reproducible bug was found and fixed in this phase's own
+   Playwright suite, not in application code.** `tests/e2e/managementStaff.spec.ts`'s
+   shared `login()` helper clicked "Sign in" and returned immediately;
+   several tests then called `page.goto()` right away with no intervening
+   wait. The login form submits via a Next.js Server Action (a fetch-based
+   POST whose success response carries an `x-action-redirect` header the
+   client then follows imperatively), not a plain HTML form navigation —
+   Playwright's usual "a click that triggers navigation is awaited
+   automatically" heuristic does not reliably cover that pattern. The
+   result was a real, consistently-reproducing race: the very next
+   `page.goto()` could reach the server a beat before the session cookie
+   the login response had just set was recognized, so `middleware.ts`'s
+   auth gate correctly bounced that request back to `/management/login` —
+   a test-timing defect, not an authentication or session bug (confirmed
+   by inspecting the actual network trace: the login POST's response did
+   carry a valid, correctly-set `authjs.session-token` cookie every time).
+   Fixed by having `login()` itself wait
+   (`page.waitForURL((url) => url.pathname !== "/management/login" || url.search.includes("error"))`)
+   for the redirect to actually settle before returning, rather than
+   relying on every call site to remember its own follow-up assertion.
+   Recorded here because the same shared `login()` *pattern* (click, then
+   immediately act) is used verbatim in several earlier e2e files
+   (`managementReservationCreate.spec.ts`, `managementServices.spec.ts`,
+   `managementReports.spec.ts`) — those files happened not to trigger the
+   race only because their very next line is always an explicit
+   `await expect(page).toHaveURL(...)`, not because their `login()` is
+   actually race-free. A future session touching those files' `login()`
+   helpers should apply the same fix rather than assume the existing
+   passing runs prove the pattern safe.
+**Rationale:** Points 1-5 are small, load-bearing implementation choices
+this phase's approved scope explicitly required a decision on (owner
+safety) or directly extends existing precedent (email handling, RBAC,
+session staleness — all following the exact shape M4 Phase 3/5 already
+established), per CLAUDE.md rule 8. Point 6 is recorded because it is a
+genuine, reproducible defect this phase's own verification work
+discovered and fixed, in test code shared with earlier phases — leaving
+it undocumented would mean a future session re-discovers the same flaky
+failure from scratch.
+
+---
+
 ## 2026-08-26 — M4 Phase 6 (Reports UI) implementation decisions
 **Status:** Approved-by-continuation (implements the already-approved M4
 Reports scope — docs/DECISIONS.md's 2026-08-25 pre-implementation

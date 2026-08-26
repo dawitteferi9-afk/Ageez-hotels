@@ -1,5 +1,78 @@
 # Changelog
 
+## M4 — Management Dashboard, Phase 7 (2026-08-26)
+Staff Administration UI — the last approved M4 module. This checkpoint
+implements it and passes full verification, but per the Product Owner's
+explicit instruction M4 is **not** marked "Complete" yet in
+`docs/V0.1_SCOPE.md`; final M4 closeout is a separate, later decision. M5/
+M6 are untouched by this phase.
+- Added `withTenant().staffUsers.create()`/`update()` — the only
+  `StaffUser`-mutating methods, gated by `staff`/`mutate` (OWNER_ADMIN
+  only; RBAC required no change, the matrix already had this exactly).
+  Passwords are bcrypt-hashed server-side (`BCRYPT_SALT_ROUNDS`, mirroring
+  the seed script's own cost factor) — never persisted, logged, or echoed
+  back as plaintext; both methods always return `STAFF_USER_SAFE_SELECT`,
+  so `passwordHash` structurally cannot leak through this namespace.
+  `email` collisions (globally unique at the schema level, not
+  hotel-scoped) surface as a generic `EmailAlreadyInUseError` translated
+  from the database's own P2002 violation, not a separate pre-check.
+- **Owner-safety rule:** `update()` rejects (`LastOwnerAdminError`) any
+  role change that would leave a hotel with zero `OWNER_ADMIN`s, re-verified
+  inside the same Serializable transaction as the write. No delete/deactivate
+  exists or was added — v0.1 Staff Administration is create + edit only,
+  since the schema has no safe removal model and none was invented
+  un-asked. See docs/DECISIONS.md's full design entry.
+- **UI:** `/management/staff` (tenant-scoped list: name/email/role/joined
+  date), `/management/staff/new` (OWNER_ADMIN only — name/email/role/
+  initial password + confirmation), `/management/staff/[id]` (detail;
+  edit form gated on `staff`/`mutate` — the role `<select>` disables every
+  option except the current one when editing the hotel's sole
+  `OWNER_ADMIN`, a UI convenience mirroring, never substituting for, the
+  server-side rule). Enabled "Staff" in management navigation — every
+  approved M4 module is now implemented.
+- **Tests:** new `tests/integration/staffAdministration.test.ts` (16 tests
+  — RBAC, bcrypt-hashed creation verified against the raw DB row, never-
+  `passwordHash` guarantee, same-hotel and cross-hotel email-uniqueness
+  rejection, cross-tenant staff-id rejection, password reset changing the
+  hash and leaving it untouched when omitted, and the full owner-safety
+  matrix: sole-owner demotion rejected, sole-owner's own name/email
+  editable without touching role, and demotion allowed once a second
+  owner exists); new `tests/e2e/managementStaff.spec.ts` (7 tests — role
+  access, a real created staff member signing in with the password just
+  set, that hire seeing Staff read-only per their role, a duplicate-email
+  attempt shown as a field error with no row created, a live password
+  reset through the UI where the old password stops working and the new
+  one works, and the sole Owner/Admin's own detail page showing the role
+  control correctly disabled with an explanation).
+- **Real, reproducible bug found and fixed — in the new e2e suite's shared
+  `login()` test helper, not in application code.** The login form is a
+  Next.js Server Action (fetch-based submission + an imperative
+  client-side redirect), which Playwright's "click waits for the
+  resulting navigation" heuristic does not reliably cover; several tests
+  called `page.goto()` immediately after `login()` with no intervening
+  wait, occasionally racing ahead of the session cookie being recognized
+  and getting bounced back to `/management/login` by `middleware.ts`'s
+  auth gate. Confirmed via the actual network trace that the login
+  response's session cookie was always set correctly — this was a test-
+  timing defect, not an authentication bug. Fixed by having `login()`
+  itself wait for the post-submit redirect to settle before returning.
+  The same `login()` *pattern* exists verbatim in three earlier e2e files;
+  see docs/DECISIONS.md for why those happened not to trigger it and a
+  note for whoever next touches them.
+- **Verified:** `npm run typecheck`; `npm run lint` (0 warnings); `npm run
+  test` (83/83, unchanged — no new pure domain logic this phase); `npm run
+  test:integration` (132/132 — 116 existing + 16 new); `npm run build`
+  (route table adds only the three `/management/staff*` routes); the full
+  Playwright suite, `--workers=1` (62/62 — 55 existing regressions + 7
+  new). DB baseline confirmed clean before and after (52 rooms AVAILABLE,
+  5 StaffUser — the exact seeded set, sole seeded OWNER_ADMIN untouched —
+  0 Guest/Reservation/MaintenanceIssue/ServiceRequest), with the
+  pre-existing `booking.spec.ts` `@example.com` leftover-fixture gotcha
+  (documented, no-`afterAll`-by-design) cleared by hand both times.
+- No schema changes (`StaffUser`/`StaffRole` already existed from M1/M4
+  Phase 1), no RBAC changes, no M5/M6+ functionality, no delete/deactivate,
+  no MFA/OAuth/SSO, no email-invitation or password-recovery flow.
+
 ## M4 — Management Dashboard, Phase 6 (2026-08-26)
 Reports UI — the approved minimal, live, read-only operational snapshot
 (docs/DECISIONS.md's 2026-08-25 "Reports (M4) is a minimal, live,

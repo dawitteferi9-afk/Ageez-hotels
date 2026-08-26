@@ -23,7 +23,7 @@ itself is deferred, not the architecture that would support it.
   strategy — no Prisma DB adapter/session tables. `StaffUser.passwordHash`
   is an additive migration column, not a redesign of the M1 schema.
 
-## RBAC (approved 2026-08-25 for M4; extended 2026-08-26 for M5 — see docs/DECISIONS.md)
+## RBAC (approved 2026-08-25 for M4; extended 2026-08-26 for M5 and M4 Phase 7 — see docs/DECISIONS.md)
 Final permission matrix (M4 + M5 modules):
 
 | Module | OWNER_ADMIN | MANAGER | FRONT_DESK | HOUSEKEEPING | MAINTENANCE |
@@ -81,6 +81,53 @@ never accepted as authorization context. `withTenant()`'s `guests`/
 `reservations`/`serviceRequests`/`staffUsers` `findById` methods return
 `null` for a cross-tenant id — identical to a nonexistent id, so no
 response ever leaks whether a foreign-hotel record exists.
+
+## Staff account security (M4 Phase 7)
+`withTenant().staffUsers.create()`/`update()` are the only mutations for
+`StaffUser` rows, gated by `staff`/`mutate` (OWNER_ADMIN only per the
+matrix above). Every list/detail read in the management UI (and every
+`findMany`/`findById` on this namespace) is always projected through
+`STAFF_USER_SAFE_SELECT` (`src/lib/tenant/index.ts`) — `passwordHash`
+structurally cannot leak through this namespace to any response, error
+message, or log line; the one exception, `src/lib/db/staffAuth.ts`'s raw
+lookup for the Auth.js credential verifier, is documented as the sole
+permitted reader of that column.
+
+- **Passwords are always bcrypt-hashed server-side** (`BCRYPT_SALT_ROUNDS`,
+  matching `prisma/seed/index.ts`'s own cost factor) before being written —
+  the plaintext value is never persisted, logged, or echoed back to the
+  client. A create/edit form's `password`/`confirmPassword` fields are
+  excluded from whatever "last submitted values" state a failed
+  submission redisplays, so a validation error never re-populates a
+  password field with anything.
+- **Password reset (edit) only changes `passwordHash` when a non-empty new
+  password is actually submitted** — leaving the field blank keeps the
+  existing hash untouched, verified directly against the database in
+  `tests/integration/staffAdministration.test.ts` (not just inferred from
+  the API not being called).
+- **Email uniqueness is enforced by the schema's own global unique
+  constraint** (`StaffUser.email`, not hotel-scoped — see
+  `docs/DATABASE.md`), surfaced as a generic `EmailAlreadyInUseError`
+  translated from the database's own P2002 violation — never a separate
+  existence pre-check, and never confirms whether a conflicting email
+  belongs to this hotel or another one.
+- **Owner-safety rule:** an edit that would move the last remaining
+  `OWNER_ADMIN` at a hotel to any other role is rejected
+  (`LastOwnerAdminError`), re-checked inside the same transaction as the
+  write so a concurrent edit of a different owner can't slip two
+  simultaneous demotions past each other. See docs/DECISIONS.md's
+  2026-08-26 M4 Phase 7 entry for the full design and why this is the only
+  guard v0.1 needs (no delete/deactivate exists to create a second way to
+  end up with zero owners).
+- **Role changes take effect immediately**, on the very next request that
+  calls `requireStaffAccess()` — never delayed by session/token caching,
+  since that function always re-loads the `StaffUser` row fresh from the
+  database rather than trusting any client-held claim. The one accepted
+  exception is purely cosmetic: the layout header's "Signed in as ___"
+  text reflects the JWT's frozen-at-login `name`/`email`, so a staff
+  member editing their own name/email won't see that specific display
+  update until they next sign in — this never affects any actual
+  authorization decision.
 
 ## State-transition integrity
 `ServiceRequest`, `Reservation`, and `Room` status transitions (e.g.

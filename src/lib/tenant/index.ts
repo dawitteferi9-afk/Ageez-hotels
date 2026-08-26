@@ -1,4 +1,5 @@
 import { cache } from "react";
+import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { Prisma, type RoomStatus } from "@prisma/client";
 import { hasPermission, type Module, type Action, type StaffRole } from "@/lib/auth/rbac";
@@ -135,6 +136,41 @@ export class ClosureReasonRequiredError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ClosureReasonRequiredError";
+  }
+}
+
+/**
+ * M4 Phase 7 — `StaffUser.email` is globally unique (schema-level, not
+ * hotel-scoped), so a create/edit that collides with *any* hotel's
+ * existing email is rejected. The message is deliberately generic ("that
+ * email is already registered") rather than confirming the conflict
+ * belongs to this hotel specifically — this hotel's own email is
+ * genuinely privileged information to the caller, but *whether some other
+ * hotel already has that address* is not something this error should
+ * confirm or deny either. Thrown from the database's own unique-constraint
+ * violation (P2002), not a separate pre-check — avoids a check-then-write
+ * race between two concurrent create/edit requests picking the same email.
+ */
+export class EmailAlreadyInUseError extends Error {
+  constructor(message = "That email address is already registered.") {
+    super(message);
+    this.name = "EmailAlreadyInUseError";
+  }
+}
+
+/**
+ * M4 Phase 7 — the owner-safety rule: an edit that would change the sole
+ * remaining `OWNER_ADMIN` at a hotel away from that role is rejected. This
+ * is the only guard v0.1 needs, and the only one the current schema (no
+ * delete/deactivate — docs/DECISIONS.md's M4 Phase 7 entry) makes
+ * possible to violate in the first place; multiple `OWNER_ADMIN`s may
+ * still freely change each other's roles as long as at least one remains
+ * afterward.
+ */
+export class LastOwnerAdminError extends Error {
+  constructor(message = "This is the hotel's only Owner/Admin — assign another Owner/Admin before changing this role.") {
+    super(message);
+    this.name = "LastOwnerAdminError";
   }
 }
 
@@ -327,6 +363,15 @@ const STAFF_USER_SAFE_SELECT = {
   createdAt: true,
   updatedAt: true,
 } as const satisfies Prisma.StaffUserSelect;
+
+/**
+ * M4 Phase 7 — mirrors `prisma/seed/index.ts`'s own `BCRYPT_SALT_ROUNDS`
+ * constant (kept as a separate copy rather than a shared import, since the
+ * seed script is a standalone CLI entry point, not part of this module's
+ * own dependency graph — this is the same cost factor, not a competing
+ * policy).
+ */
+const BCRYPT_SALT_ROUNDS = 10;
 
 /** Reservation statuses that hold a room for its date range (docs/DECISIONS.md, M3). */
 const BLOCKING_RESERVATION_STATUSES: Prisma.ReservationWhereInput["status"] = {
@@ -1005,6 +1050,100 @@ export function withTenant(hotelId: string) {
           where: { id: staffId, hotelId },
           select: STAFF_USER_SAFE_SELECT,
         }),
+
+      /**
+       * M4 Phase 7 — the only approved staff-account-creation mutation,
+       * gated by `requireStaffAccess("staff","mutate")` (OWNER_ADMIN only
+       * per the approved matrix). `hotelId` is bound via the enclosing
+       * `withTenant(hotelId)` closure, never accepted as input — a new
+       * staff account can only ever be created at the creating
+       * OWNER_ADMIN's own hotel. `password` is bcrypt-hashed here
+       * (`BCRYPT_SALT_ROUNDS`, same cost factor as the seed script) and
+       * never persisted or returned as plaintext; the return value is
+       * always projected through `STAFF_USER_SAFE_SELECT`, so the caller
+       * never even receives the hash back, let alone the plaintext.
+       * `StaffUser.email` is globally unique at the schema level (not
+       * hotel-scoped) — a collision surfaces as the database's own P2002
+       * constraint violation, translated to `EmailAlreadyInUseError`,
+       * rather than a separate pre-check (avoids a check-then-write race
+       * between two concurrent creations of the same email).
+       */
+      create: async (input: { name: string; email: string; role: StaffRole; password: string }) => {
+        const passwordHash = await bcrypt.hash(input.password, BCRYPT_SALT_ROUNDS);
+        try {
+          return await prisma.staffUser.create({
+            data: { hotelId, name: input.name, email: input.email, role: input.role, passwordHash },
+            select: STAFF_USER_SAFE_SELECT,
+          });
+        } catch (err) {
+          if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+            throw new EmailAlreadyInUseError();
+          }
+          throw err;
+        }
+      },
+
+      /**
+       * M4 Phase 7 — the only approved staff-account-edit mutation, gated
+       * by `requireStaffAccess("staff","mutate")` (OWNER_ADMIN only).
+       * Fields are all optional — only what's provided is changed.
+       * `password`, when provided, is re-hashed the same way `create()`
+       * does; omitting it (or passing an empty/`undefined` value) leaves
+       * the existing `passwordHash` untouched. One Serializable
+       * transaction:
+       *   1. Load the target scoped to `hotelId` — `RecordNotFoundError`
+       *      if missing/cross-tenant (no existence leak, same convention
+       *      as every other scoped lookup in this file).
+       *   2. **Owner-safety rule** (docs/DECISIONS.md's M4 Phase 7 entry):
+       *      if `role` is provided, differs from the current role, and the
+       *      current role is `OWNER_ADMIN`, re-count *other* `OWNER_ADMIN`
+       *      rows at this hotel inside the same transaction — if none
+       *      remain, throw `LastOwnerAdminError` and write nothing. A
+       *      concurrent edit demoting a different owner at the same
+       *      instant is still caught, because both run inside Serializable
+       *      transactions against the same rows.
+       *   3. Write the update, catching the same `P2002` -> `EmailAlreadyInUseError`
+       *      translation `create()` uses.
+       */
+      update: (
+        staffId: string,
+        input: { name?: string; email?: string; role?: StaffRole; password?: string | null }
+      ) =>
+        prisma.$transaction(
+          async (tx) => {
+            const staffMember = await tx.staffUser.findFirst({ where: { id: staffId, hotelId } });
+            if (!staffMember) {
+              throw new RecordNotFoundError(`No staff member ${staffId} found for this hotel.`);
+            }
+
+            if (input.role && input.role !== staffMember.role && staffMember.role === "OWNER_ADMIN") {
+              const otherOwnerAdmins = await tx.staffUser.count({
+                where: { hotelId, role: "OWNER_ADMIN", id: { not: staffId } },
+              });
+              if (otherOwnerAdmins === 0) {
+                throw new LastOwnerAdminError();
+              }
+            }
+
+            const data: Prisma.StaffUserUpdateInput = {};
+            if (input.name !== undefined) data.name = input.name;
+            if (input.email !== undefined) data.email = input.email;
+            if (input.role !== undefined) data.role = input.role;
+            if (input.password) {
+              data.passwordHash = await bcrypt.hash(input.password, BCRYPT_SALT_ROUNDS);
+            }
+
+            try {
+              return await tx.staffUser.update({ where: { id: staffId }, data, select: STAFF_USER_SAFE_SELECT });
+            } catch (err) {
+              if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+                throw new EmailAlreadyInUseError();
+              }
+              throw err;
+            }
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        ),
     },
 
     maintenanceIssues: {
