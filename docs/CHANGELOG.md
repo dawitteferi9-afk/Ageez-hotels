@@ -1,5 +1,45 @@
 # Changelog
 
+## M4 — Management Dashboard: Complete (closeout audit, 2026-08-26)
+A dedicated closeout audit across the whole milestone (not a new
+implementation phase) — re-verifying the approved scope by direct
+inspection rather than resting on each phase's own report alone, per
+CLAUDE.md's milestone-discipline completion-report requirement. No
+application code changed by this pass.
+- **Re-confirmed by direct code inspection:** the final RBAC matrix in
+  `src/lib/auth/rbac.ts` matches the approved design exactly for every M4
+  module (Dashboard/Reservations/Rooms/Guests/Services/Reports/Staff);
+  no generic `Room.status` mutation method exists anywhere in
+  `src/lib/tenant` (Amendment A); `passwordHash` is selected nowhere
+  outside `src/lib/db/staffAuth.ts`'s dedicated Auth.js lookup; every
+  `withTenant()` method still derives `hotelId` from a freshly
+  DB-reloaded `StaffUser`; `src/components/management/nav.tsx`'s
+  `DISABLED_LINKS` is empty — no remaining placeholder for any approved
+  M4 module (Housekeeping/Maintenance are present and correctly M5, not
+  counted as M4 deliverables).
+- **Full verification gate re-run:** `npx prisma validate`; `npm run
+  typecheck`; `npm run lint` (0 warnings); `npm run test` (83/83); `npm
+  run test:integration` (132/132); `npm run build` (all M4 + M5 routes
+  present); the full Playwright suite across every M4 and M5 e2e file,
+  `--workers=1` (**62/62**). DB baseline confirmed clean before and after
+  (52 rooms AVAILABLE, exactly the 5 seeded `StaffUser` rows, sole
+  `OWNER_ADMIN` untouched, 0 Guest/Reservation/MaintenanceIssue/
+  ServiceRequest), with the pre-existing `booking.spec.ts` `@example.com`
+  leftover-fixture gotcha (documented, no-`afterAll`-by-design) cleared
+  by hand both times.
+- **Docs:** `docs/V0.1_SCOPE.md`'s M4 row and deliverables section changed
+  from "In progress" to "Complete"; added a 2026-08-26 M4 closeout entry
+  to `docs/DECISIONS.md` restating the final M4/M5 boundary for the
+  closing record (no history rewritten across it).
+- **M4/M5 boundary preserved exactly as designed:** M4 = auth, RBAC,
+  tenant isolation, Dashboard, Reservations (incl. check-in), Rooms,
+  Guests, staff walk-in reservation creation, Services, Reports, Staff
+  Administration. M5 = check-out, housekeeping, maintenance — already
+  complete and pushed (`46aa449`), untouched by this audit except to
+  re-run its own regression suites as part of the full gate above.
+- No schema changes, no RBAC changes, no M6 work, no M5 functionality
+  attributed to M4.
+
 ## M4 — Management Dashboard, Phase 7 (2026-08-26)
 Staff Administration UI — the last approved M4 module. This checkpoint
 implements it and passes full verification, but per the Product Owner's

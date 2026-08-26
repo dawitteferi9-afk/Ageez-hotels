@@ -4,6 +4,63 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-26 — M4 (Management Dashboard) closed out as Complete
+**Status:** Approved (Product Owner closeout audit — a dedicated review
+pass across the whole milestone, not a new implementation phase)
+**Decision:** M4 is marked **Complete** in `docs/V0.1_SCOPE.md`. Every
+module in the RBAC matrix approved in the 2026-08-25 pre-implementation
+decisions now has a real, tenant-scoped, RBAC-gated implementation,
+verified end to end against a live, seeded database:
+- **Auth** (Auth.js Credentials + bcrypt + JWT sessions, Phase 2) and
+  **RBAC + tenant isolation** (`requireStaffAccess()`, Phase 3) — the
+  gate every other module below depends on.
+- **Dashboard, Reservations (incl. check-in), Rooms, Guests** (Phase 4).
+- **Staff-initiated / walk-in reservation creation** (Phase 4.5 a+b).
+- **Services / ServiceRequest management** (Phase 5).
+- **Reports** — the minimal, live, read-only operational snapshot (Phase 6).
+- **Staff Administration** — create/edit gated to OWNER_ADMIN, with the
+  owner-safety rule preventing a hotel from ever being left without an
+  `OWNER_ADMIN` (Phase 7).
+
+This audit re-confirmed, by direct code inspection (not solely by trusting
+each phase's own prior report) that: the final RBAC matrix exactly matches
+the approved design for every M4 module (`src/lib/auth/rbac.ts`); no
+generic `Room.status` mutation path exists anywhere in `src/lib/tenant`
+(Amendment A holds structurally, not just by policy); `passwordHash` is
+selected nowhere outside `src/lib/db/staffAuth.ts`'s dedicated Auth.js
+lookup; every `withTenant()` method still re-derives `hotelId` from a
+freshly DB-reloaded `StaffUser`, never a client-supplied value; and the
+management navigation has no remaining disabled placeholder for any
+approved M4 module (`src/components/management/nav.tsx`'s
+`DISABLED_LINKS` is empty — only Housekeeping/Maintenance, both M5, sit
+alongside the M4 modules in the nav).
+
+**M4/M5 boundary, restated for the closing record (not renegotiated):**
+M4 owns auth, RBAC, tenant isolation, Dashboard, Reservations, check-in,
+Rooms, Guests, staff walk-in reservation creation, Services, Reports, and
+Staff Administration. M5 owns check-out, housekeeping, and maintenance —
+already complete and pushed (`46aa449`), and untouched by this closeout
+audit except to re-run its own regression suites as part of the full
+verification gate below. No M5 functionality is retroactively attributed
+to M4, and no M4 history was rewritten to accommodate M5.
+**Verification for this closeout:** `prisma validate`; `npm run
+typecheck`; `npm run lint` (0 warnings); `npm run test` (83/83); `npm run
+test:integration` (132/132); `npm run build`; the full Playwright suite
+across every M4 and M5 e2e file, `--workers=1` (62/62). No application
+code changed by this audit — it is a verification and documentation pass
+only; the one commit it produces
+(`M4: complete management dashboard milestone`) touches only
+`docs/V0.1_SCOPE.md`, `docs/CHANGELOG.md`, and this entry.
+**Rationale:** CLAUDE.md's milestone discipline calls for a concise
+completion report before moving on, and this milestone spanned seven
+separate phases across several sessions — a single closing audit that
+re-verifies the matrix, the tenant-isolation invariant, and the full
+regression suite together (rather than trusting each phase's own report
+in isolation) is the appropriate bar for marking a milestone Complete,
+not just Phase 7's own verification.
+
+---
+
 ## 2026-08-26 — M4 Phase 7 (Staff Administration) implementation decisions
 **Status:** Approved-by-continuation (implements the already-approved M4
 Staff scope — docs/DECISIONS.md's 2026-08-25 pre-implementation decisions'
