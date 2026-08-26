@@ -1,5 +1,81 @@
 # Changelog
 
+## M4 — Management Dashboard, Phase 5 (2026-08-26)
+Services / ServiceRequest management UI — the last approved M4 module
+besides Reports/Staff-administration (deferred out of Phase 4 —
+docs/DECISIONS.md's 2026-08-25 "ServiceRequest is in M4 scope,
+staff-initiated only" decision). M5 is untouched by this phase; no M5
+functionality is attributed to M4.
+- **Replaced the unused, tenant-unsafe legacy `withTenant().serviceRequests.create()`
+  with `createForStaff()`** (same precedent as the M4 Phase 4.5a
+  `reservations.create()` replacement) — `guestId` required and
+  re-verified scoped to the caller's hotel; optional `reservationId`
+  re-verified scoped to **both** the hotel and that same `guestId` (a
+  reservation belonging to a different guest, or another hotel, is
+  rejected identically — `RecordNotFoundError`, no existence leak).
+  `findMany` made generic over its args (preserves `include` in the
+  TypeScript return type, matching the existing `rooms`/`guests`/
+  `reservations`/`maintenanceIssues` pattern); `findById` now always
+  includes `guest` and `reservation` (with `room`/`roomType`).
+- Added `allowedNextStatuses()` to
+  `src/lib/domain/serviceRequestTransitions.ts` — a pure query over the
+  same `ALLOWED_TRANSITIONS` table `validateServiceRequestTransition`
+  already used (no new transition rule), for the manage form to render
+  valid next statuses. `updateStatus()` itself (M4 Phase 3) is unchanged —
+  this phase adds no second status-mutation path.
+- **RBAC unchanged.** `services` already had the exact approved matrix
+  (`view`: all five roles, `mutate`: OWNER_ADMIN/MANAGER/FRONT_DESK) since
+  the M4 Phase 3 decision — this phase is the first to build a UI/mutation
+  against it, not a policy change.
+- **UI:** `/management/services` (tenant-scoped list; status/type/guest
+  filters), `/management/services/new` (existing-guest search/select —
+  reuses the same zero-JS GET-based pattern as
+  `reservations/new/new-reservation-form.tsx`; no new-guest-creation
+  path — a request is always on behalf of an already-known guest; an
+  optional reservation dropdown scoped to that guest's own stays), and
+  `/management/services/[id]` (detail; status-update form gated on
+  `services`/`mutate`, limited to `allowedNextStatuses()`, mirroring
+  `maintenance/[id]/manage-issue-form.tsx`'s shape). Added
+  `ServiceRequestStatusBadge` alongside the existing status-badge
+  components. Nav: "Services" enabled (moved out of the disabled-links
+  list; "Reports"/"Staff" remain disabled placeholders).
+- **Tests:** `tests/unit/serviceRequestTransitions.test.ts` extended (+4:
+  `allowedNextStatuses()` behavior plus a cross-check that it agrees with
+  `validateServiceRequestTransition` for every status pair); new
+  `tests/integration/serviceRequestCreate.test.ts` (10 tests — RBAC
+  mutate/view split, authorized creation with and without a reservation
+  association, empty-string notes normalized to `null`, cross-tenant
+  guestId rejected, nonexistent guestId rejected, cross-tenant
+  reservationId rejected even with a valid guestId, and a same-tenant
+  reservationId belonging to a *different* guest rejected); new
+  `tests/e2e/managementServices.spec.ts` (7 tests — role access
+  (OWNER_ADMIN/MANAGER/FRONT_DESK reach the form, HOUSEKEEPING/MAINTENANCE
+  cannot via the list button or a direct URL), guest-search-and-select
+  creation associated with a reservation, list/filter by status and type,
+  HOUSEKEEPING/MAINTENANCE view-only on the detail page, the full approved
+  lifecycle PENDING→IN_PROGRESS→COMPLETED driven through the UI ending in
+  a correctly-terminal state (no further status offered, Save disabled),
+  and a nonexistent/cross-tenant id showing Not Found). Invalid/
+  out-of-order transitions are proven at the unit + integration level
+  (existing `serviceRequestStatus.test.ts`, unchanged) rather than
+  repeated at the e2e level — the manage form's status `<select>`
+  structurally only ever renders `allowedNextStatuses()`'s own output, so
+  there is no invalid option for a browser test to select; a hand-crafted
+  POST is what the integration test already exercises directly.
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (80/80 — 76 existing + 4 new); `npm run
+  test:integration` (102/102 — 92 existing + 10 new); `npm run build`
+  (route table adds only the three `/management/services*` routes); the
+  full Playwright suite, `--workers=1` (48/48 — 41 existing regressions +
+  7 new). DB baseline confirmed clean before and after (52 rooms
+  AVAILABLE, 0 Guest/Reservation/MaintenanceIssue/ServiceRequest), with
+  the pre-existing `booking.spec.ts` `@example.com` leftover-fixture
+  gotcha (documented, no-`afterAll`-by-design) cleared by hand both times.
+- No schema changes (`ServiceRequest`, its enums, and both nullable
+  relations already existed from M1), no RBAC changes, no M5/M6+
+  functionality, no generic Room-mutation path, no second status-mutation
+  path.
+
 ## M5 — Housekeeping + Maintenance, Phase d (2026-08-26)
 Integration/verification/documentation pass — no application code changed
 except one new test file. M5 (a/b/c/d) is now complete.

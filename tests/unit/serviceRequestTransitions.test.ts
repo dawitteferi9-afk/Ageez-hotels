@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   validateServiceRequestTransition,
+  allowedNextStatuses,
   type ServiceRequestStatus,
 } from "../../src/lib/domain/serviceRequestTransitions";
 
@@ -47,6 +48,32 @@ describe("validateServiceRequestTransition", () => {
   it("rejects a same-state no-op transition", () => {
     for (const status of ALL_STATUSES) {
       expect(validateServiceRequestTransition(status, status).valid).toBe(false);
+    }
+  });
+});
+
+describe("allowedNextStatuses (M4 Phase 5 — same ALLOWED_TRANSITIONS table, exposed for the UI)", () => {
+  it("PENDING may only move to IN_PROGRESS", () => {
+    expect(allowedNextStatuses("PENDING")).toEqual(["IN_PROGRESS"]);
+  });
+
+  it("IN_PROGRESS may move to COMPLETED or CANCELLED", () => {
+    expect(allowedNextStatuses("IN_PROGRESS")).toEqual(["COMPLETED", "CANCELLED"]);
+  });
+
+  it("COMPLETED and CANCELLED are terminal — no further statuses", () => {
+    expect(allowedNextStatuses("COMPLETED")).toEqual([]);
+    expect(allowedNextStatuses("CANCELLED")).toEqual([]);
+  });
+
+  it("agrees with validateServiceRequestTransition for every status pair", () => {
+    for (const current of ALL_STATUSES) {
+      for (const next of ALL_STATUSES) {
+        if (current === next) continue;
+        const listedAsAllowed = allowedNextStatuses(current).includes(next);
+        const validatorSaysValid = validateServiceRequestTransition(current, next).valid;
+        expect(listedAsAllowed).toBe(validatorSaysValid);
+      }
     }
   });
 });

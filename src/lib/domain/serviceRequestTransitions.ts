@@ -41,3 +41,14 @@ export function validateServiceRequestTransition(
   }
   return { valid: true };
 }
+
+/**
+ * Every status this request could validly move to next, for building a UI
+ * control — the current status is not included. M4 Phase 5; same pattern as
+ * `src/lib/domain/maintenanceTransitions.ts`'s `allowedNextStatuses()`, over
+ * the same `ALLOWED_TRANSITIONS` table `validateServiceRequestTransition`
+ * already uses — not a new rule, just exposing the existing one for the UI.
+ */
+export function allowedNextStatuses(current: ServiceRequestStatus): readonly ServiceRequestStatus[] {
+  return ALLOWED_TRANSITIONS[current];
+}

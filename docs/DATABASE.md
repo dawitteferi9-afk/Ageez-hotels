@@ -53,7 +53,16 @@ tenant root.
 - **ServiceRequest** — `hotelId`, `reservationId?`, `guestId?`, `type`
   (enum `ServiceRequestType`: AIRPORT_TRANSFER, LAUNDRY, ROOM_SERVICE,
   RESTAURANT, OTHER), `status` (enum `ServiceRequestStatus`: PENDING,
-  IN_PROGRESS, COMPLETED, CANCELLED). No rows seeded.
+  IN_PROGRESS, COMPLETED, CANCELLED). No rows seeded. Both `reservationId`
+  and `guestId` are schema-nullable, but the M4 Phase 5 write path
+  (`withTenant().serviceRequests.createForStaff()`) requires a `guestId` —
+  staff always create a request "on a guest's behalf" (docs/DECISIONS.md);
+  `reservationId` stays genuinely optional, and when given is verified to
+  belong to that same `guestId`, not just the same hotel. Status graph
+  (M4 Phase 3, `src/lib/domain/serviceRequestTransitions.ts`): `PENDING →
+  IN_PROGRESS`, `IN_PROGRESS → COMPLETED`/`CANCELLED`. `COMPLETED` and
+  `CANCELLED` are both terminal — read as a strict linear chain, so a
+  `PENDING` request cannot be cancelled directly.
 - **MaintenanceIssue** — `hotelId`, `roomId`, `description`, `priority`
   (enum `MaintenancePriority`: LOW, MEDIUM, HIGH, URGENT), `status` (enum
   `MaintenanceStatus`: OPEN, IN_PROGRESS, RESOLVED, CLOSED), `assignedTo`

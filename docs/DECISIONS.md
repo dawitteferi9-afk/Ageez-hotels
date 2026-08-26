@@ -4,6 +4,67 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-26 — M4 Phase 5 (Services / ServiceRequest management UI) implementation decisions
+**Status:** Approved-by-continuation (implements the already-approved M4
+Services scope — docs/DECISIONS.md's 2026-08-25 pre-implementation
+decisions, item 3 — deferred out of Phase 4; these are the concrete
+choices this phase's implementation required that weren't already pinned
+down)
+**Decision:**
+1. **Replaced the unused, tenant-unsafe legacy `withTenant().serviceRequests.create()`
+   with `createForStaff()`, following the exact precedent of the M4 Phase
+   4.5a `reservations.create()` → `createForStaff()` replacement.** The old
+   `create()` had zero callers anywhere in `src/`/`tests/` and passed a
+   caller-supplied `guestId`/`reservationId` straight into
+   `prisma.serviceRequest.create()` with no verification that either
+   belonged to the caller's hotel — CLAUDE.md rule 2 (tenant isolation is
+   architectural) applies exactly as it did to the earlier reservation
+   case. `createForStaff()` re-verifies `guestId` scoped to `hotelId`, and
+   (when supplied) `reservationId` scoped to **both** `hotelId` and that
+   same `guestId` — so a reservation belonging to a different guest at the
+   same hotel is rejected identically to a cross-tenant one
+   (`RecordNotFoundError`, no existence leak either way).
+2. **`guestId` is required, `reservationId` is optional, and there is no
+   "create a new guest" path on this form.** The approved M4 design says
+   staff create a request "on a guest's behalf" — read as requiring an
+   already-known `Guest` row (created via the existing booking or walk-in
+   flows), not as licensing a third guest-creation entry point alongside
+   `guests.update()` and the two reservation-creation flows. The schema
+   itself leaves both `guestId` and `reservationId` nullable (unchanged) —
+   this is an application-layer requirement enforced in
+   `createForStaff()`/the form's zod schema, not a migration.
+3. **No new status-mutation path.** `updateStatus()` (M4 Phase 3) is
+   reused exactly as it already was — this phase adds no transition logic.
+   The one addition, `allowedNextStatuses()` in
+   `src/lib/domain/serviceRequestTransitions.ts`, is a pure query over the
+   same `ALLOWED_TRANSITIONS` table `validateServiceRequestTransition`
+   already used, added only so the manage form can render valid next
+   statuses — the exact pattern `maintenanceTransitions.ts`'s own
+   `allowedNextStatuses()` already established in M5c.
+4. **RBAC required no change.** `src/lib/auth/rbac.ts`'s `services` row
+   (`view`: all five roles, `mutate`: OWNER_ADMIN/MANAGER/FRONT_DESK) was
+   already exactly the approved M4 matrix from the 2026-08-25 decision —
+   Phase 5 is the first phase to actually build a UI/mutation against it,
+   not a policy change.
+5. **`findMany`/`findById` on `serviceRequests` extended to match the
+   established generic-`include` and detail-relation-eager-loading
+   patterns** (docs/DECISIONS.md's 2026-08-25 M4 Phase 4 entry, item 5) —
+   `findMany` is now generic over its args (preserving `include` in the
+   TypeScript return type, e.g. the list's `{ guest, reservation: { room } }`);
+   `findById` now always includes `guest` and `reservation` (with
+   `room`/`roomType`), matching `reservations.findById()`/
+   `maintenanceIssues.findById()`'s existing convention of always loading
+   what their own detail page needs.
+**Rationale:** All five points are small, load-bearing gaps or direct
+precedent-follows this phase's implementation required, per the same
+"flag/record rather than silently invent or silently omit" standard
+CLAUDE.md rule 8 and the 2026-08-25 M4 Phase 3/4 decision entries already
+established. None expand RBAC, weaken tenant isolation, or add a second
+status-mutation path — the opposite: point 1 closes a real tenant-isolation
+gap that existed only because the unsafe method had never been called.
+
+---
+
 ## 2026-08-26 — M5 (Housekeeping + Maintenance) design decisions, recorded retroactively at Phase d
 **Status:** Approved (implemented across Phases a/b/c, `f64a08c`/`5e0f10c`/
 `efd9073`; this entry closes a CLAUDE.md rule 7 gap — those phases recorded

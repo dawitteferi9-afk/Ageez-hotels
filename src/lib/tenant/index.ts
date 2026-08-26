@@ -817,12 +817,84 @@ export function withTenant(hotelId: string) {
     },
 
     serviceRequests: {
-      create: (data: Omit<Prisma.ServiceRequestUncheckedCreateInput, "hotelId">) =>
-        prisma.serviceRequest.create({ data: { ...data, hotelId } }),
-      findMany: (args?: ScopedServiceRequestArgs) =>
-        prisma.serviceRequest.findMany({ ...args, where: { ...args?.where, hotelId } }),
-      /** Cross-tenant id returns `null`, identical to "doesn't exist" — no existence leak. */
-      findById: (id: string) => prisma.serviceRequest.findFirst({ where: { id, hotelId } }),
+      /** Generic over `T` — see `rooms.findMany`'s comment for why (preserves `include`/`select`, e.g. the M4 Phase 5 list's `{ include: { guest: true, reservation: { include: { room: true } } } }`). */
+      findMany: <T extends ScopedServiceRequestArgs>(args?: T) =>
+        prisma.serviceRequest.findMany({
+          ...args,
+          where: { ...args?.where, hotelId },
+        } as Prisma.ServiceRequestFindManyArgs) as unknown as Promise<Array<Prisma.ServiceRequestGetPayload<T>>>,
+      /**
+       * Cross-tenant id returns `null`, identical to "doesn't exist" — no
+       * existence leak. Includes `guest` and `reservation` (with its
+       * `room`/`roomType`) for the M4 Phase 5 detail page — same
+       * always-include-what-the-detail-page-needs convention as
+       * `reservations.findById()`/`maintenanceIssues.findById()`.
+       */
+      findById: (id: string) =>
+        prisma.serviceRequest.findFirst({
+          where: { id, hotelId },
+          include: { guest: true, reservation: { include: { room: { include: { roomType: true } } } } },
+        }),
+
+      /**
+       * M4 Phase 5 — the only approved staff-facing ServiceRequest-creation
+       * mutation. Replaces the unused, tenant-unsafe legacy `create()` that
+       * used to sit here (deleted this phase — like the pre-Phase-4.5
+       * `withTenant().reservations.create()`, it had zero callers anywhere
+       * in `src/`/`tests/` and passed a caller-supplied `guestId`/
+       * `reservationId` straight into `prisma.serviceRequest.create()` with
+       * no verification that either belonged to this hotel at all — see
+       * docs/DECISIONS.md's "Staff-initiated reservation creation
+       * deferred..." entry for the exact precedent this follows).
+       *
+       * `guestId` is required (docs/DECISIONS.md's M4 pre-implementation
+       * decision: staff create a service request "on a guest's behalf") —
+       * re-verified scoped to `hotelId`, `RecordNotFoundError` if
+       * cross-tenant or nonexistent. `reservationId` is optional; when
+       * given, it is re-verified scoped to **both** `hotelId` *and*
+       * `guestId` — a real reservation belonging to a different guest (or a
+       * different hotel) throws the identical `RecordNotFoundError`, so a
+       * request can never end up associated with someone else's stay. No
+       * transaction wrapper is needed (unlike `checkIn()`/`checkOut()`/
+       * `report()`, which each atomically update two related rows) — this
+       * only ever writes the one new `ServiceRequest` row, the same
+       * validate-scoped-then-write shape as `guests.update()`.
+       */
+      createForStaff: async (input: {
+        guestId: string;
+        reservationId?: string | null;
+        type: Prisma.ServiceRequestCreateInput["type"];
+        notes?: string | null;
+      }) => {
+        const guest = await prisma.guest.findFirst({ where: { id: input.guestId, hotelId } });
+        if (!guest) {
+          throw new RecordNotFoundError(`No guest ${input.guestId} found for this hotel.`);
+        }
+
+        let reservationId: string | null = null;
+        if (input.reservationId) {
+          const reservation = await prisma.reservation.findFirst({
+            where: { id: input.reservationId, hotelId, guestId: input.guestId },
+          });
+          if (!reservation) {
+            throw new RecordNotFoundError(
+              `No reservation ${input.reservationId} found for this guest at this hotel.`
+            );
+          }
+          reservationId = reservation.id;
+        }
+
+        return prisma.serviceRequest.create({
+          data: {
+            hotelId,
+            guestId: guest.id,
+            reservationId,
+            type: input.type,
+            notes: input.notes || null,
+          },
+          include: { guest: true, reservation: true },
+        });
+      },
 
       /**
        * Validates the transition (`validateServiceRequestTransition`,

@@ -1,4 +1,10 @@
-import type { ReservationStatus, RoomStatus, MaintenanceStatus, MaintenancePriority } from "@prisma/client";
+import type {
+  ReservationStatus,
+  RoomStatus,
+  MaintenanceStatus,
+  MaintenancePriority,
+  ServiceRequestStatus,
+} from "@prisma/client";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 
 /**
@@ -54,4 +60,16 @@ const MAINTENANCE_PRIORITY_VARIANT: Record<MaintenancePriority, BadgeProps["vari
 
 export function MaintenancePriorityBadge({ priority }: { priority: MaintenancePriority }) {
   return <Badge variant={MAINTENANCE_PRIORITY_VARIANT[priority]}>{priority}</Badge>;
+}
+
+/** M4 Phase 5. `PENDING` mirrors `CONFIRMED`'s "default/waiting" color; `COMPLETED`/`CANCELLED` are terminal either way (docs/DECISIONS.md — literal PENDING→IN_PROGRESS→COMPLETED|CANCELLED chain). */
+const SERVICE_REQUEST_STATUS_VARIANT: Record<ServiceRequestStatus, BadgeProps["variant"]> = {
+  PENDING: "default",
+  IN_PROGRESS: "warning",
+  COMPLETED: "success",
+  CANCELLED: "danger",
+};
+
+export function ServiceRequestStatusBadge({ status }: { status: ServiceRequestStatus }) {
+  return <Badge variant={SERVICE_REQUEST_STATUS_VARIANT[status]}>{status.replace(/_/g, " ")}</Badge>;
 }
