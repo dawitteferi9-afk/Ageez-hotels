@@ -31,7 +31,8 @@ async function fillGuestDetails(
 }
 
 test("existing M2 public pages still load", async ({ page }) => {
-  for (const path of ["/", "/rooms", "/restaurant", "/services", "/about", "/contact"]) {
+  // "/concierge" (M6 Phase b) added to this loop — see tests/e2e/concierge.spec.ts for its own dedicated coverage.
+  for (const path of ["/", "/rooms", "/restaurant", "/services", "/concierge", "/about", "/contact"]) {
     const response = await page.goto(path);
     expect(response?.status()).toBe(200);
   }

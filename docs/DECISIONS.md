@@ -4,6 +4,142 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-26 — M6 Phase b (anonymous guest concierge UI) implementation decisions
+**Status:** Approved (implemented, this phase)
+**Decision:**
+1. **Server Action, not a Route Handler, is the browser/AI boundary.**
+   `src/app/(guest)/concierge/actions.ts`'s `sendConciergeMessageAction()`
+   is the one and only place the browser can reach to talk to the
+   concierge — a plain async server function bound into the client chat
+   component's `useActionState()`, the same shape already used by every
+   other guest/management mutation in this codebase (`createBookingAction`,
+   `checkInReservationAction`, etc.). No new API route, no client-side
+   `fetch()`, no JSON contract to hand-maintain.
+2. **Conversation state is plain in-browser React state, not
+   `sessionStorage`.** The corrected M6 design allowed `sessionStorage` as
+   an *optional* same-session refresh convenience; this phase deliberately
+   didn't add it — `useActionState`'s own state already satisfies the
+   binding requirement ("browser-only, no server persistence, no database
+   table"), and skipping `sessionStorage` means zero conversation content
+   is ever written to any browser storage API, which is a strictly
+   stronger privacy posture for a v0.1 demo. Refresh starts a new
+   conversation; this is an accepted trade-off, not an oversight.
+3. **Starter questions are static UI copy, not hotel-specific answers.**
+   The four suggested prompts in `concierge-chat.tsx` are generic question
+   templates ("What time is check-in?", etc.) — the same fixed strings for
+   every tenant. Clicking one fills the message input and submits through
+   the same `sendConciergeMessageAction()` path as free-typed text; no
+   separate hardcoded-answer shortcut exists for them.
+4. **Nav placement:** "Concierge" was added to `SiteHeader`'s `NAV_LINKS`
+   between "Services" and "About" — both the desktop nav and the existing
+   no-JS `<details>` mobile menu render from the same array, so no
+   duplicate wiring was needed.
+5. **`vitest.config.ts` gained a `@` → `src/` path alias.** No unit test
+   before this phase imported anything via the `@/...` alias (everything
+   used relative paths), so Vitest had never needed to resolve it. Testing
+   `sendConciergeMessageAction()`'s error-handling contract (never leak a
+   raw provider/tenant-resolution exception) deterministically and without
+   a live database requires `vi.mock("@/lib/tenant")` /
+   `vi.mock("@/lib/ai/provider")`, which in turn requires the action module
+   itself (written against `@/...` imports, like the rest of the app) to
+   resolve under Vitest. The alias mirrors `tsconfig.json`'s existing
+   `paths` entry exactly and changes no existing test's module resolution.
+**Rationale:** None of the above changes the approved M6 design — they are
+the concrete implementation choices the design left open (which server
+boundary shape, whether to use the optional `sessionStorage` allowance,
+where a new nav link goes, how to make a new Server Action testable). No
+schema change, no new tool, no verified-context/M6c+ work.
+
+---
+
+## 2026-08-26 — M6 (AI Guest Concierge) design decisions, recorded retroactively at Phase b
+**Status:** Approved (implemented across Phase a, `2552a74`; this entry
+closes a CLAUDE.md rule 7 gap — the M6 design, corrected design, and
+Product-Owner amendments were approved in the design session and already
+assumed by Phase a's own code comments (which cite "docs/DECISIONS.md M6
+design §N"), but the design itself was never actually written into this
+log, unlike M4/M5's design decisions)
+**Decision:** The following are the M6 design points a future session
+would otherwise have to reverse-engineer from `src/lib/ai/*` or from
+session history that isn't part of the repository:
+1. **Two access tiers, structurally separate, never a shared "all tools"
+   registry.** M6b (this milestone) is the **anonymous tier**: any site
+   visitor, no login, no guest identity — grounded knowledge only. A later
+   milestone (M6c+, not yet implemented) is the **verified tier**: a guest
+   who has proven, per-request, that they own a specific reservation (via
+   the flow in point 4 below) may ask personalized questions. Each tier
+   gets its own tool-registry function (`getAnonymousConciergeTools()` is
+   the only one that exists today) — no function ever returns a combined
+   list, and no anonymous-tier code path can reach a verified-tier or
+   management (M7) tool.
+2. **The anonymous tool allow-list is exactly two functions:**
+   `getHotelKnowledge(hotelId, category)` (a deterministic
+   `AiKnowledgeDocument` category lookup — no RAG/embeddings/vector search
+   anywhere in this design) and `getRoomTypesSummary(hotelId)` (live
+   `RoomType` rows: name/description/capacity/price/currency). Both are
+   tenant-scoped via `withTenant(hotelId)` with `hotelId` always supplied
+   by the server, never by the model or the guest. Neither tool exposes
+   live room *availability* or any `Room.status`/occupancy data — the
+   anonymous concierge answers "what do you offer," never "what's free
+   right now."
+3. **`AiProvider` is provider-neutral and defaults to the mock
+   implementation.** `resolveAiProviderName()` only returns `"anthropic"`
+   when `AI_PROVIDER=anthropic` is explicitly set; every other value
+   (unset, misspelled, wrong case) resolves to `"mock"`. This is a
+   deliberate fail-safe so local dev, CI, and this Claude sandbox's
+   verification runs never require network access or `ANTHROPIC_API_KEY`
+   unless a deployment opts in.
+4. **Booking-reference verification strategy (for M6c, not yet
+   implemented):** `formatBookingReference()` produces a *derived display
+   string* (`hotelName-derived-prefix` + last 8 chars of the reservation's
+   UUID, uppercased) — it is not a unique, indexed database column, and a
+   suffix of a UUID is not provably collision-free across a hotel's full
+   reservation history. The approved verification flow is therefore: take
+   the guest-supplied reference plus an exact-match contact field (email or
+   phone, guest-supplied, never inferred), filter reservations by the exact
+   contact match within that tenant, then recompute
+   `formatBookingReference()` for each candidate and compare — never a
+   `LIKE`/suffix database query, never trusting the reference alone.
+   **Booking Verification Ambiguity Rule:** if recomputation yields more
+   than one match, the flow must not disclose that multiple candidates
+   exist, must not pick the first (`[0]`/`find()`-first) result, and must
+   ask the guest for one additional distinguishing detail instead —
+   exactly one confirmed match is required before any personalized data is
+   returned.
+5. **Verified-context tokens (for M6c, not yet implemented) are stateless
+   and re-verified on every use, never trusted from their decoded
+   contents.** The plan is an HMAC-signed token containing only
+   `{hotelId, reservationId, guestId, exp}` (`CONCIERGE_TOKEN_SECRET`, not
+   yet added to `.env.example`) — every tool call that receives one must
+   still re-look-up the referenced rows fresh from the database and
+   re-confirm they belong to the claimed hotel/guest; the token is a
+   short-lived capability pointer, not a cache of guest data.
+6. **No server-side conversation persistence, ever, for the anonymous
+   tier.** No database table, no `localStorage` long-term persistence, no
+   raw prompt/response logging. `AiProvider.converse()` is itself
+   stateless across calls (`src/lib/ai/provider.ts`) — the full history is
+   passed in and returned complete every time.
+7. **Rate limiting is explicitly deferred, not silently dropped.** A
+   demo-scale, in-memory, single-process limiter is acceptable for v0.1;
+   real distributed rate limiting (needed the moment this runs on more than
+   one server process) is an undecided, separate infrastructure question
+   for a later milestone — this design does not claim to have solved it.
+8. **`docs/AI_SPEC.md` was written before any of the above existed** (it
+   describes an unbuilt `src/lib/ai/knowledge` module and management-style
+   tool names like `getRoomAvailability()` that were never implemented for
+   the guest concierge) and is corrected in the same pass as this entry to
+   describe the tools/provider/prompt files that actually exist.
+**Rationale:** Same as the M5 precedent above — CLAUDE.md rule 7 requires
+recording architectural decisions here "as part of the same change."
+Phase a's implementation and its extensive code comments already assumed
+this design was written down; it wasn't. Consolidating it here, discovered
+and fixed during Phase b, is documentation-fidelity, not a new design
+decision — every point above was already approved (design session) and,
+where marked implemented, already built and tested in Phase a; nothing
+here changes behavior.
+
+---
+
 ## 2026-08-26 — M4 (Management Dashboard) closed out as Complete
 **Status:** Approved (Product Owner closeout audit — a dedicated review
 pass across the whole milestone, not a new implementation phase)

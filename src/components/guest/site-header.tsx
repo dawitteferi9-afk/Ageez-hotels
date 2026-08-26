@@ -10,6 +10,7 @@ const NAV_LINKS = [
   { href: "/rooms", label: "Rooms & Suites" },
   { href: "/restaurant", label: "Restaurant" },
   { href: "/services", label: "Services" },
+  { href: "/concierge", label: "Concierge" },
   { href: "/about", label: "About" },
   { href: "/contact", label: "Contact" },
 ] as const;

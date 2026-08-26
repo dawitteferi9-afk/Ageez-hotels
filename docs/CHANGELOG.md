@@ -1,5 +1,149 @@
 # Changelog
 
+## M6 — AI Guest Concierge, Phase b (2026-08-26)
+The anonymous public concierge chat UI, built on Phase a's provider/tool
+library. M6c (reservation verification), M6d (ServiceRequest creation via
+chat), M6e (M6 integration/closeout), and M7 are untouched — M6 as a whole
+is **not** marked complete.
+- **Route:** `/concierge`, in the existing public `(guest)` route group —
+  no staff auth, reuses the shared guest layout/header/footer. Added
+  "Concierge" to `SiteHeader`'s nav (desktop + the existing no-JS mobile
+  menu, same array).
+- **Chat UI (`src/components/guest/concierge-chat.tsx`):** a hotel-named
+  welcome message (templated with the tenant's own name, not a hardcoded
+  fact), four generic starter-question buttons, a text input + Send button,
+  a `role="log" aria-live="polite"` transcript region so new assistant
+  replies are announced, a "Thinking…" pending state, and an inline
+  `role="alert"` error banner on failure. Built with `useActionState` (the
+  same pattern as `BookingForm`/`CheckInButton`) — conversation history is
+  plain in-browser React state for the page's lifetime; nothing is written
+  to `localStorage`/`sessionStorage` or any database table.
+- **Server boundary (`src/app/(guest)/concierge/actions.ts`):**
+  `sendConciergeMessageAction()` is the only way the browser reaches the
+  AI — it resolves the tenant via `getCurrentTenantHotel()`, builds the
+  system prompt via Phase a's `buildAnonymousConciergeSystemPrompt()`,
+  calls `getAiProvider().converse()` with **only**
+  `getAnonymousConciergeTools(hotel.id)`, and returns exclusively
+  `{role, content}` turns plus an optional fixed, front-desk-pointing error
+  string. It never returns the raw system prompt, tool-call records,
+  provider response shape, or an exception's message — any failure
+  (provider error, tenant-resolution error) is caught and replaced with the
+  same generic guest-safe copy.
+- **Grounding is unchanged from Phase a** — this phase adds no new tool and
+  no new knowledge source. A seeded-policy question, a dining/facilities
+  question, and a room-types question all resolve through the real
+  `getHotelKnowledge`/`getRoomTypesSummary` tools; a genuinely unanswerable
+  question, a live-availability question, and a personal-reservation
+  question all fall through to the same honest "I don't have that
+  information" reply in mock-provider mode — no fabrication, no exposed
+  Room status, no leaked guest/reservation data. (Note: the more specific
+  "verification is coming in a later phase" wording is a system-prompt
+  instruction for the real model to follow; it is not separately
+  hand-coded into the deterministic mock provider, so it is not
+  independently e2e-verified in this network-free sandbox — see the
+  Verified section below.)
+- **Docs:** `docs/DECISIONS.md` gained two entries — a retroactive M6
+  design-decisions record (the M6 design/corrected-design/amendments
+  approved earlier were never actually written into this log; Phase a's
+  code comments already cited it as if it existed) and this phase's own
+  implementation decisions (Server Action over Route Handler, in-memory
+  state over `sessionStorage`, the new `vitest.config.ts` `@` alias).
+  `docs/AI_SPEC.md` corrected to describe the tools/provider/prompt files
+  that actually exist (it previously described an unbuilt
+  `src/lib/ai/knowledge` module and different tool names). `docs/V0.1_SCOPE.md`'s
+  M6 row updated to reflect Phases a+b complete, M6 still in progress
+  overall.
+- **Tests:** `tests/unit/ai/conciergeAction.test.ts` (4 new tests —
+  guest-turn/assistant-reply transcript shape and exact two-tool allow-list
+  passed to `converse()`, that a provider rejection never leaks the raw
+  error text, that a blank submission is a no-op, that a tenant-resolution
+  failure also returns only the generic error). `tests/e2e/concierge.spec.ts`
+  (9 new tests — public load with no auth, tenant-named welcome message,
+  starter questions render, a seeded policy question via the starter
+  button, dining/facilities/room-type questions via free text, the
+  not-found fallback for a genuinely unanswerable question, no leaked
+  operational room status for an availability question, no leaked
+  guest/reservation data for a personal question, mock-provider
+  determinism across two fresh page loads, and a page-content scan ruling
+  out provider-key/tool-payload/internal-name leakage). Also added
+  `/concierge` to `booking.spec.ts`'s existing "public pages still load"
+  loop.
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (**108/108** — 104 existing + 4 new); `npm
+  run test:integration` (**139/139**, unchanged from Phase a — this phase
+  adds no new tenant-data access); the full Playwright suite,
+  `--workers=1` (**71/71** — every M3/M4/M5 e2e file plus the new
+  `concierge.spec.ts`; one `booking.spec.ts` run hit the already-documented
+  pre-existing leftover-fixture gotcha — cleared by hand and re-verified
+  green, same as at M4 closeout). **`npm run build` currently fails**, but
+  not because of this phase: it fails prerendering the framework's own
+  built-in `/500` error page (`<Html> should not be imported outside of
+  pages/_document`) before any app route is reached, and the identical
+  failure reproduces on a clean `git stash` back to Phase a's own commit
+  (`2552a74`) with none of this phase's changes present — a pre-existing,
+  unrelated build-tooling issue (the installed `next@15.5.23` resolved
+  from package.json's `^15.1.0` range, versus whatever exact patch was
+  installed when earlier milestones' "`npm run build` succeeds" reports
+  were written). Not fixed here — out of this phase's scope and not caused
+  by it; flagged for the Product Owner rather than silently patched.
+  `npm run typecheck` and `npm run lint` both passed cleanly across the
+  whole app in the same pass, so this is specifically a static-generation
+  issue in the build pipeline, not a type or route error in `/concierge`
+  or anywhere else.
+- No schema changes, no new AI tool, no M6c/M6d/M6e work, no M7 work.
+
+## M6 — AI Guest Concierge, Phase a (2026-08-26)
+The provider-neutral `AiProvider` boundary and the anonymous-tier
+guest-concierge knowledge tools — library layer only, no UI, no route. This
+entry is being added retroactively during Phase b (see
+`docs/DECISIONS.md`'s matching retroactive design-decisions entry) — Phase
+a itself was implemented, tested, and pushed (`2552a74`) without a
+`docs/CHANGELOG.md` entry, a CLAUDE.md rule 7 gap this closes before
+Phase b's own work is layered on top.
+- `src/lib/ai/provider.ts`: the `AiProvider` interface
+  (`converse({systemPrompt, history, tools}) -> {reply, toolCalls}`) and
+  `getAiProvider()`, defaulting to the mock provider unless
+  `AI_PROVIDER=anthropic` is explicitly set.
+- `src/lib/ai/providers/anthropic.ts`: the real adapter (new dependency
+  `@anthropic-ai/sdk`), a manual tool-calling loop (not the beta Tool
+  Runner) against `claude-opus-5`, a 20s per-request timeout, and a bounded
+  tool-iteration count that fails gracefully. `deps.client` is injectable
+  for network-free unit testing.
+- `src/lib/ai/providers/mock.ts`: deterministic, network-free — keyword-
+  matches the guest's question to a knowledge category or room-type
+  intent, calls the real tenant-scoped tool, and otherwise returns a fixed
+  "I don't have that information" reply.
+- `src/lib/ai/tools/getHotelKnowledge.ts` /
+  `src/lib/ai/tools/getRoomTypesSummary.ts`: the two anonymous-tier
+  whitelisted functions, both tenant-scoped via `withTenant(hotelId)`.
+- `src/lib/ai/tools/anonymousConciergeTools.ts`: the closed two-tool
+  registry bound to one `hotelId` — structurally separate from any future
+  verified-context or M7 tool registry.
+- `src/lib/ai/prompt.ts`: `buildAnonymousConciergeSystemPrompt()` — tenant
+  identity interpolated per hotel, enforces grounding/no-hallucination/
+  tone/escalation rules.
+- `.env.example`: documents `AI_PROVIDER` (defaults to `"mock"`) alongside
+  the existing `ANTHROPIC_API_KEY` placeholder.
+- `tests/integration/fixtures.ts`: fixed a latent FK-order gap in
+  `cleanupBySlug()` — `AiKnowledgeDocument` was never deleted before the
+  `Hotel` row, since no integration test had created one against a fixture
+  hotel before this phase's own test needed to.
+- **Tests:** 21 new unit tests (provider selection, mock provider grounding
+  and fallback determinism, Anthropic adapter request shape/tool-loop/
+  error-wrapping/runaway-loop guard against an injected fake client, prompt
+  builder tenant-interpolation and no-secret checks) and 7 new integration
+  tests against disposable fixture hotels (tenant isolation for both tools,
+  deterministic not-found for an unknown category, live `RoomType` data,
+  and the tool allow-list's exact shape).
+- **Verified:** `prisma validate`; `npm run typecheck`; `npm run lint` (0
+  warnings); `npm run test` (104/104 — 83 existing + 21 new); `npm run
+  test:integration` (139/139 — 132 existing + 7 new); `npm run build`
+  (route table unchanged — this phase added no route). No existing e2e
+  suite was re-run: this phase introduced no reachable route or Server
+  Action and was not imported by any existing page, so no existing
+  application behavior could regress.
+- No schema changes, no secrets, no M6b+/M7 work.
+
 ## M4 — Management Dashboard: Complete (closeout audit, 2026-08-26)
 A dedicated closeout audit across the whole milestone (not a new
 implementation phase) — re-verifying the approved scope by direct
