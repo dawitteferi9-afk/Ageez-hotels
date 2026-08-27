@@ -1,5 +1,94 @@
 # Changelog
 
+## M6 — AI Guest Concierge, Phase e (integration audit and closeout) (2026-08-27)
+The final M6 phase — an integration audit, final security review, and
+cross-milestone regression pass across M6a–M6d as one system. **No new
+guest capability, no code defect, and no schema change** — verification
+and documentation only. M6 is now marked **Complete**.
+- **Integration audit:** traced all six guest flows (anonymous knowledge
+  -> booking verification -> verified read context -> ServiceRequest
+  proposal -> ServiceRequest confirmation -> clear verification) as one
+  integrated system rather than isolated phases. No authority leakage
+  found between the anonymous and verified tiers, or from the AI into the
+  ServiceRequest write path. See `docs/DECISIONS.md`'s M6e entry for the
+  full flow-by-flow findings.
+- **Final security audit:** re-confirmed tenant isolation, ownership
+  re-verification, token security (including a full-repository grep
+  proving the token is never logged — zero `console.*` calls anywhere in
+  `src/lib/ai` or `src/app/(guest)/concierge`), PII minimization, the
+  closed AI tool registries (`confirmServiceRequestAction` confirmed
+  absent from every tool registry in the codebase, not just the verified
+  one), server trust boundaries, secrets, and rate limiting. **No open
+  security defect was found.** Two limitations remain intentionally open
+  and documented, not silently solved: the rate limiter is in-memory/
+  per-process (not distributed-safe), and `ServiceRequest` confirmation
+  has no DB-level idempotency (a genuine duplicate double-submit can
+  create two rows) — both explicit, deferred production-hardening items
+  requiring separate approval (the idempotency one specifically needs a
+  schema change). See `docs/SECURITY.md`'s "M6e closeout audit" section.
+- **Cross-milestone regression:** the complete Playwright suite (auth,
+  public booking, all `management*` staff workflows — reservations,
+  check-in, check-out, housekeeping, maintenance, Services/ServiceRequest
+  staff lifecycle, Reports, Staff Administration — and concierge)
+  confirmed no M3/M4/M5 regression.
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (**214/214**); `npm run test:integration`
+  (**173/173**); `npm run build` (only `DATABASE_URL`/`AUTH_SECRET`/
+  `AUTH_URL`/`CONCIERGE_TOKEN_SECRET`/`NEXT_PUBLIC_APP_URL` exported, no
+  blanket `NODE_ENV`) — clean. Full Playwright suite, `--workers=1`:
+  **74/74**, run once cleanly with no overlapping process. DB baseline
+  restored afterward (52 rooms AVAILABLE, 0 Guest/Reservation/
+  ServiceRequest/MaintenanceIssue).
+- **Documentation closeout:** `docs/V0.1_SCOPE.md` (M6 row and
+  deliverables section marked Complete), `docs/AI_SPEC.md` (scope section
+  updated), `docs/SECURITY.md` (M6e closeout audit section added),
+  `README.md` (stale "Milestone M0" status line corrected to reflect
+  M0–M6 complete, M7 not started), and this entry (which also
+  retroactively records the M6d correction commit, `d8fa6f0`, below —
+  omitted from this log when it was made).
+- No schema change, no secrets, no M7 work.
+
+## M6 — AI Guest Concierge, Phase d correction (stale-proposal UX + mock intent coverage) (2026-08-27)
+A Product Owner-directed pre-push security review of Phase d's commit
+(`0f04671`) found two findings, both corrected here (`d8fa6f0`) — neither
+is new scope. *(Recorded retroactively during Phase e closeout — this
+entry was omitted from the log when the correction was originally made.)*
+- **A pending ServiceRequest proposal card remained visible and
+  looked confirmable after "Clear verification."** The server always
+  safely rejected a confirm attempt with no token (`confirmServiceRequestAction`
+  re-verifies fresh regardless), but the UI kept showing the card.
+  Fixed: `concierge-chat.tsx`'s render condition for the card now
+  requires `state.proposal && token` (was `state.proposal` alone) — clearing
+  verification hides the card immediately, matching what the server would
+  do with it anyway.
+- **Two real guest phrasings didn't produce a proposal in the
+  deterministic mock provider:** "I want room service." and "Please make
+  a restaurant request." Fixed with two narrow additions to
+  `src/lib/ai/providers/mock.ts`: the creation-intent trigger gained
+  `i want(?!\s+to\b)` (deliberately excluding "I want to know/ask/..."
+  informational shapes — a genuine "I want to <verb>" request still
+  matches via its own action verb already in the trigger list), and the
+  `RESTAURANT` type-keyword list gained `"restaurant request"` (still
+  gated by the existing `request` trigger word). No enum values added.
+- **Tests:** `tests/unit/ai/conciergeConfirmAction.test.ts` gained a case
+  submitting the exact empty-string `token` the real hidden field sends
+  after clearing verification. `tests/unit/ai/mockProvider.test.ts`
+  gained 8 cases: both corrected phrases produce the right proposal;
+  neither reachable anonymously; "I want to know/ask ..." shapes still
+  produce no proposal; four more informational room-service/restaurant
+  phrasings (without "want") still don't propose; a genuine "I want to
+  book a table" still works; the three original anchor mutation phrases
+  and three original informational anchors are unaffected (no
+  regression). `tests/e2e/concierge.spec.ts`'s consolidated verification
+  test gained a propose -> Clear verification -> card-gone step.
+- **Verified:** `npm run test` (**214/214**); `npm run test:integration`
+  (**173/173**, unchanged); `npm run build` clean; full Playwright suite,
+  `--workers=1`: **74/74** (an initial run showed 1 unrelated failure
+  traced to two accidentally-overlapping Playwright processes in that
+  session's own tooling, not an application regression — re-run cleanly
+  after killing the stray process and restoring the DB).
+- No schema change, no secrets, no new guest authority, no M6e/M7 work.
+
 ## M6 — AI Guest Concierge, Phase d (confirmed guest service request creation) (2026-08-27)
 The first guest-facing M6 mutation: a verified guest may create ONE new
 `ServiceRequest` for their own reservation, but only through a

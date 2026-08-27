@@ -4,6 +4,120 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-27 — M6 (AI Guest Concierge) closed out as Complete
+**Status:** Approved (Product Owner closeout — a dedicated integration
+audit, final security review, and cross-milestone regression pass, not a
+new implementation phase; same bar as the 2026-08-26 M4 closeout entry
+below)
+**Decision:** M6 is marked **Complete** in `docs/V0.1_SCOPE.md`. All five
+phases — a (provider/tool library), b (anonymous chat), c (verified
+read-only context), d (confirmed guest ServiceRequest creation), e (this
+closeout) — are implemented, verified, and pushed
+(`2552a74`/`f545f98`/`4f82beb`/`5dc9cd6`/`d1d09ed`/`0f04671`/`d8fa6f0`).
+This closeout added **no new guest capability, no schema change, and no
+code defect fix** — it is a verification-and-documentation pass, per
+CLAUDE.md's milestone-discipline requirement for a closing report before
+a multi-phase milestone is marked done (the same standard the M4 and M5
+closeout entries already established).
+
+**Integration audit — six guest flows traced as one system, not isolated
+phases:**
+1. **Anonymous** (`/concierge`, no login): `getHotelKnowledge()`/
+   `getRoomTypesSummary()` only — confirmed structurally unable to reach
+   `Reservation`/`Guest`/`ServiceRequest` data or any mutation tool (the
+   anonymous and verified tool registries are built by two separate
+   functions, `getAnonymousConciergeTools()`/`getVerifiedConciergeTools()`,
+   combined in exactly one place, `sendConciergeMessageAction()`, and only
+   when a fresh `resolveVerifiedReservationContext()` call already
+   succeeded for that request).
+2. **Booking verification**: exact-match reference + contact
+   (`verifyGuestBooking()`) — email always eligible; phone eligible only
+   when the `Guest` row has no email on file (the M6c security-correction
+   fix, re-confirmed still in place); every failure shape (wrong
+   reference, wrong contact, nonexistent, cross-tenant, ambiguous
+   multi-match) collapses to one identical generic error.
+3. **Verified read context**: `getReservationSummary()`/
+   `getServiceRequestStatus()` each independently re-run the full
+   `resolveVerifiedReservationContext()` pipeline (signature, expiry,
+   current-tenant match, fresh tenant+guest DB lookup) on every call, not
+   once per conversation — a token that stops resolving mid-conversation
+   fails the very next tool call safely.
+4. **ServiceRequest proposal**: `proposeServiceRequest` has zero
+   `@/lib/tenant`/Prisma imports (re-confirmed by reading the file, not
+   just by comment) — structurally incapable of writing. A conversational
+   "yes"/"okay"/"do it"/"confirm" has no handler anywhere in
+   `sendConciergeMessageAction()` — it can, at most, cause the model to
+   call the same non-mutating proposal tool again.
+5. **ServiceRequest confirmation**: `confirmServiceRequestAction` is the
+   sole caller of `createForVerifiedGuest()`, which is the only other
+   `prisma.serviceRequest.create()` call site in the repository besides
+   staff's `createForStaff()` (confirmed by a full-repository grep, not
+   assumed) — re-verifies the token fresh, revalidates `type`/`notes`
+   server-side, and derives `hotelId`/`reservationId`/`guestId` only from
+   the token, never `formData`. Created rows are always `PENDING`, never
+   staff-assignable.
+6. **Clear verification**: the pending-proposal card now requires both
+   `state.proposal` AND `token` to render (the M6d correction,
+   `d8fa6f0`) — clearing verification hides it immediately; the server
+   already rejected a no-token confirm attempt safely regardless.
+
+No authority leakage was found between tiers in any of the six flows.
+
+**Final security audit** — re-confirmed against the current, pushed code
+(not solely against memory of the earlier M6d pre-push review):
+tenant isolation, ownership re-verification (including the exact-mismatch
+case: a real reservation belonging to a *different* real guest), token
+security (signed, expiry-enforced, tenant-revalidated, fresh-DB-checked,
+minimal payload, never logged — a full-repository `console.*` grep across
+`src/lib/ai`/`src/app/(guest)/concierge` found zero matches — never placed
+in AI-visible prompt/history/tool input), PII minimization (booking
+email/phone read only inside `verifyReservationContextAction`, never
+forwarded), AI authority boundaries (closed 2-tool anonymous / 3-tool
+verified registries; `confirmServiceRequestAction` absent from both, and
+from every other registry in the codebase), server trust boundaries
+(client-supplied ids/status/assignment structurally unreadable by
+`confirmServiceRequestAction`'s own `formData` handling), secrets
+(`ANTHROPIC_API_KEY`/`CONCIERGE_TOKEN_SECRET`/`AUTH_SECRET` referenced
+only in files with no `"use client"` directive), rate limits (separate
+key namespaces for verify vs. confirm, server-side, honestly documented
+as non-distributed), and idempotency (repeated valid confirms can create
+duplicate rows — unchanged, documented v0.1 limitation, no schema
+migration added). **No open security defect was found.** The two
+already-known, already-documented limitations (rate limiter scope,
+confirmation idempotency) remain open by design, not silently expanded or
+silently "fixed" with an unapproved migration.
+
+**Cross-milestone regression:** the full existing Playwright suite
+(`auth`, `booking`, `management*`, `managementLifecycle`,
+`managementMaintenance`, `managementReports`, `managementReservationCreate`,
+`managementServices`, `managementStaff`, `concierge`) passed in full — no
+M3/M4/M5 workflow (public booking, staff auth, RBAC, tenant isolation,
+reservation management, check-in, check-out, housekeeping, maintenance,
+Services/ServiceRequest staff lifecycle, Reports/Dashboard) regressed.
+
+**Verification for this closeout:** `npx prisma validate`; `npm run
+typecheck`; `npm run lint` (0 warnings); `npm run test` (**214/214**);
+`npm run test:integration` (**173/173**); `npm run build` (only
+`DATABASE_URL`/`AUTH_SECRET`/`AUTH_URL`/`CONCIERGE_TOKEN_SECRET`/
+`NEXT_PUBLIC_APP_URL` exported, no blanket `NODE_ENV`); full Playwright
+suite `--workers=1`: **74/74**, run once cleanly end-to-end with no
+overlapping process. DB baseline restored afterward (52 rooms AVAILABLE,
+0 Guest/Reservation/ServiceRequest/MaintenanceIssue). No application code
+changed by this audit — the one commit it produces (`M6 phase e:
+integration audit and concierge closeout`) touches only
+`docs/V0.1_SCOPE.md`, `docs/CHANGELOG.md`, `docs/AI_SPEC.md`,
+`docs/SECURITY.md`, `README.md`, and this entry.
+**Rationale:** Same as the M4/M5 closeout precedent: CLAUDE.md's milestone
+discipline calls for a concise completion report before a multi-phase
+milestone is marked done, and a dedicated closing audit that re-verifies
+the whole system together (not just trusting each phase's own report in
+isolation) is the appropriate bar for M6 — the milestone that introduced
+this project's first AI-driven guest mutation, and therefore the one
+where an independent, whole-system security re-check before marking it
+done matters most.
+
+---
+
 ## 2026-08-27 — M6 Phase d (confirmed guest service request creation) implementation decisions
 **Status:** Approved-by-continuation (implements the M6d scope handed down
 by the Product Owner — a deterministic propose/confirm flow, LLM never the

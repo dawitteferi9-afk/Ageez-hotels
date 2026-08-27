@@ -7,8 +7,14 @@ Hotel** (Addis Ababa, Ethiopia), architected from the start as a
 configurable multi-tenant foundation for future real hotel clients.
 
 ## Status
-**Milestone M0 — Repository + Architecture.** No product features are
-implemented yet. See `docs/V0.1_SCOPE.md` for the milestone plan.
+M0–M5 (repository/architecture, database, public website, booking engine,
+management dashboard, housekeeping + maintenance) are **Complete**. M6 (AI
+Guest Concierge) is closing out: Phases a (provider/tool library), b
+(anonymous chat), c (verified reservation/service-request read context), d
+(confirmed guest service-request creation), and e (integration/security/
+regression closeout) are implemented and verified. M7 (AI Management
+Assistant) has not started. See `docs/V0.1_SCOPE.md` for the full milestone
+plan and current status of each.
 
 ## Stack
 Next.js (App Router, TypeScript) · Tailwind CSS + shadcn/ui · PostgreSQL +

@@ -159,9 +159,10 @@ own knowledge documents and the same tool functions (scoped to its own
 only the tenant identity data passed into them changes.
 
 ## Scope
-M6 Phase a (provider/tool library), Phase b (anonymous public chat UI),
-Phase c (verified reservation/service-request context), and Phase d
-(confirmed guest service request creation) are implemented and verified —
-see `docs/CHANGELOG.md`. M6 integration/closeout (M6e) and the AI
-Management Assistant (M7) are not yet implemented. M6 as a whole is
-**not** marked complete.
+M6 is **Complete**: Phase a (provider/tool library), Phase b (anonymous
+public chat UI), Phase c (verified reservation/service-request context),
+Phase d (confirmed guest service request creation), and Phase e
+(integration audit, final security review, and cross-milestone regression
+closeout — no new capability) are all implemented and verified — see
+`docs/CHANGELOG.md` and `docs/DECISIONS.md`'s M6e entry. The AI
+Management Assistant (M7) has not started.

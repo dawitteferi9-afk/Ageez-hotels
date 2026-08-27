@@ -283,6 +283,25 @@ reachable from `/concierge`. The security-relevant invariants:
   documented v0.1 limitation (adding one would require a schema change,
   out of this phase's approved scope).
 
+### M6e closeout audit
+A final, dedicated security review across M6a–M6d as one integrated system
+(tenant isolation, ownership re-verification, token security, PII
+minimization, the closed AI tool registries, server trust boundaries,
+secrets, rate limits, and idempotency) found no open defect requiring a
+code change — every invariant above was independently re-confirmed,
+including against a real local database with real signed tokens, not just
+by code inspection. Two limitations remain **intentionally** open, not
+silently claimed solved:
+- **Rate limiting is in-memory/per-process** (`src/lib/ai/rateLimiter.ts`)
+  — not distributed-safe; a horizontally scaled deployment would need a
+  shared limiter (Redis/KV or edge/WAF-level), an explicit, deferred
+  production-hardening requirement.
+- **`ServiceRequest` confirmation has no DB-level idempotency** — a
+  genuine repeated valid confirm (two tabs, a scripted replay) can create
+  two rows. Robust idempotency would require a schema change (a
+  unique/idempotency-key constraint), which needs separate Product Owner
+  approval and was not added here.
+
 ## Secrets
 `.env.example` contains placeholders only. Real secrets belong in
 `.env.local` (gitignored) or the hosting platform's secret manager, never
