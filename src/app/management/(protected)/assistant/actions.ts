@@ -41,7 +41,10 @@ import { getManagementAssistantTools } from "@/lib/ai/tools/managementAssistantT
  *     turns plus an optional safe generic error string — never the raw
  *     system prompt, tool-call records, provider response shape, internal
  *     tool names, RBAC implementation detail, or exception detail of any
- *     kind.
+ *     kind. A malformed/empty reply (`undefined`/`null`/`""`/whitespace —
+ *     M7d correction, pre-push review finding) is treated identically to
+ *     a thrown provider failure, never appended as a blank assistant
+ *     message.
  *
  * Conversation history lives only in the browser's React state for this
  * component's lifetime (`useActionState` in
@@ -108,6 +111,18 @@ export async function sendManagementAssistantMessageAction(
 
   try {
     const result = await getAiProvider().converse({ systemPrompt, history: messagesWithStaffTurn, tools });
+    // M7d correction — a provider reply is usable only when it exists and
+    // is a non-blank string. `result.reply` being `undefined`/`null`/`""`/
+    // whitespace-only (concretely reachable in the real Anthropic provider
+    // when the model responds with no text block — see
+    // docs/DECISIONS.md's M7d correction entry) must never be appended as
+    // an assistant message with unusable content; throwing here re-enters
+    // the SAME catch below, so this is not a second error path or a new
+    // user-facing message — just a stricter definition of "the provider
+    // call succeeded."
+    if (typeof result?.reply !== "string" || result.reply.trim().length === 0) {
+      throw new Error("Provider reply was missing or empty.");
+    }
     return { messages: [...messagesWithStaffTurn, { role: "assistant", content: result.reply }] };
   } catch {
     // Deliberately not inspecting/forwarding the error — it may carry a

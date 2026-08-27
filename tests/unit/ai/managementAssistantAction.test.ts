@@ -249,19 +249,50 @@ describe("sendManagementAssistantMessageAction — M7d: provider failure and mal
     expect(result.messages).toEqual([{ role: "user", content: "hello" }]);
   });
 
-  it("returns a safe generic error, never a crash, when the provider resolves with a malformed/empty response (missing reply)", async () => {
+  const GENERIC_ERROR = "Sorry, I'm having trouble responding right now. Please try again in a moment.";
+
+  it.each([
+    ["missing reply (undefined)", {}],
+    ["reply: null", { reply: null }],
+    ["reply: '' (empty string)", { reply: "" }],
+    ["reply: '   ' (whitespace-only)", { reply: "   " }],
+  ])("M7d correction — provider resolves with %s: safe generic error, no blank assistant message", async (_label, malformed) => {
     requireStaffAccess.mockResolvedValue(STAFF_OWNER);
     getHotelById.mockResolvedValue(HOTEL);
-    // Deliberately malformed (missing `reply`/`toolCalls`), proving the action doesn't crash on an unexpected shape.
-    converse.mockResolvedValue({});
+    converse.mockResolvedValue(malformed);
 
     const result = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: "hello" }));
 
-    // Whatever the action does with a missing `reply` (append `undefined`
-    // as content, or treat it as a failure), it must not throw an
-    // unhandled exception out of the Server Action.
-    expect(result).toBeDefined();
-    expect(result.messages[0]).toEqual({ role: "user", content: "hello" });
+    // A: the user's own submitted message may remain in state...
+    expect(result.messages).toEqual([{ role: "user", content: "hello" }]);
+    // ...but NO assistant turn of any kind was appended — never one with
+    // undefined/null/empty/whitespace content.
+    expect(result.messages).toHaveLength(1);
+    // The error field is exactly the existing generic safe error — the
+    // SAME message every other provider-failure path already returns,
+    // never a new/different one.
+    expect(result.error).toBe(GENERIC_ERROR);
+    // No provider/vendor identity, raw result, toolCalls, or internal
+    // validation detail is ever exposed.
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("toolCalls");
+    expect(serialized).not.toMatch(/anthropic/i);
+    expect(serialized).not.toContain("malformed");
+    expect(serialized).not.toContain("empty");
+  });
+
+  it("M7d correction — a valid non-empty reply is completely unaffected (success behavior unchanged)", async () => {
+    requireStaffAccess.mockResolvedValue(STAFF_OWNER);
+    getHotelById.mockResolvedValue(HOTEL);
+    converse.mockResolvedValue({ reply: "5 of 52 rooms occupied.", toolCalls: [{ name: "getOperationalSnapshot", input: {}, result: {} }] });
+
+    const result = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: "What is today's occupancy?" }));
+
+    expect(result.error).toBeUndefined();
+    expect(result.messages).toEqual([
+      { role: "user", content: "What is today's occupancy?" },
+      { role: "assistant", content: "5 of 52 rooms occupied." },
+    ]);
   });
 
   it("returns a safe generic error when a tool's own execute() throws inside the provider (propagated as a converse() rejection)", async () => {
@@ -290,5 +321,23 @@ describe("sendManagementAssistantMessageAction — M7d: provider failure and mal
     const succeeded = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: "What is today's occupancy?" }));
     expect(succeeded.error).toBeUndefined();
     expect(succeeded.messages[1]).toEqual({ role: "assistant", content: "5 of 52 rooms occupied." });
+  });
+
+  it("G: a malformed (empty-reply) response followed by a valid response — the second request succeeds normally, no persistent corruption", async () => {
+    requireStaffAccess.mockResolvedValue(STAFF_OWNER);
+    getHotelById.mockResolvedValue(HOTEL);
+
+    converse.mockResolvedValueOnce({ reply: "", toolCalls: [] });
+    const malformed = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: "hello" }));
+    expect(malformed.error).toBe(GENERIC_ERROR);
+    expect(malformed.messages).toEqual([{ role: "user", content: "hello" }]);
+
+    converse.mockResolvedValueOnce({ reply: "5 of 52 rooms occupied.", toolCalls: [] });
+    const succeeded = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: "What is today's occupancy?" }));
+    expect(succeeded.error).toBeUndefined();
+    expect(succeeded.messages).toEqual([
+      { role: "user", content: "What is today's occupancy?" },
+      { role: "assistant", content: "5 of 52 rooms occupied." },
+    ]);
   });
 });
