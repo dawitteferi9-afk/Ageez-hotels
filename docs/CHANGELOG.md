@@ -1,5 +1,73 @@
 # Changelog
 
+## M7 — AI Management Assistant, Phase a (read-only management AI tool boundary) (2026-08-27)
+The first M7 phase: the complete read-only tool boundary for the
+authenticated, staff-facing AI Management Assistant — no UI yet
+(`/management/assistant` is M7b). Structurally separate from M6's guest
+concierge throughout.
+- **Three new `withTenant().reports` methods**
+  (`housekeepingQueueSummary()`, `maintenanceSummary()`,
+  `serviceRequestSummary()`, `src/lib/tenant/index.ts`) — pure reads
+  extending the existing M4 Phase 6 report aggregates
+  (`occupancySummary()`/`reservationStatusSummary()`/`guestCount()`/
+  `todayArrivalsDepartures()`, all reused as-is). `maintenanceSummary()`
+  reuses the existing `BLOCKING_MAINTENANCE_PRIORITIES`/
+  `UNRESOLVED_MAINTENANCE_STATUSES` "blocking" definition verbatim. Zero
+  mutation path, zero schema change.
+- **Six read-only AI tools** (`src/lib/ai/tools/{getOperationalSnapshot,
+  getTodayArrivalsDepartures,getHousekeepingQueueSummary,
+  getMaintenanceSummary,getServiceRequestSummary,getStaffDirectory}.ts`)
+  and a new, third, structurally separate registry,
+  `getManagementAssistantTools({hotelId, role})`
+  (`src/lib/ai/tools/managementAssistantTools.ts`) — never merged with
+  either M6 guest registry. `getStaffDirectory` (name + role only, never
+  email) is included only for OWNER_ADMIN/MANAGER, omitted entirely for
+  FRONT_DESK/HOUSEKEEPING/MAINTENANCE. Every tool independently re-checks
+  its own RBAC boundary inside `execute()` (defense in depth on top of
+  registry construction, mirroring M6c's per-tool token re-verification
+  rule) and returns a uniform `{available: false}` — never an empty
+  list/zero count — when that check fails, so authorization failure can
+  never be confused with legitimate empty operational data.
+- **`buildManagementAssistantSystemPrompt()`** (`src/lib/ai/prompt.ts`) —
+  a fully separate function from both M6 prompt builders. States identity,
+  the current staff member's name/role, tool-only grounding, the
+  `{available: false}` vs. "there are currently none" distinction, and
+  that the assistant is read-only (cannot check in/out, change room/
+  maintenance/service-request status, or create/edit reservations, guests,
+  or staff accounts).
+- **Deterministic mock-provider behavior** (`src/lib/ai/providers/mock.ts`)
+  — disjoint keyword sets per tool, answering strictly from tool output;
+  a single shared `MANAGEMENT_UNAVAILABLE_REPLY` for every `{available:
+  false}` result, and honest, distinct empty-state wording per tool
+  otherwise.
+- **No mutation, no proposal/confirmation infrastructure, no
+  `AiKnowledgeDocument` access, no RAG/embeddings, no conversation
+  persistence, no new rate limiter, no schema migration** — all
+  explicitly out of this phase's approved scope.
+- **Tests added:** `tests/unit/ai/managementAssistantTools.test.ts`
+  (registry composition per role, closure-only `hotelId`/`role`,
+  structural separation from M6 registries, `{available: true/false}`
+  discriminant correctness), extended `tests/unit/ai/prompt.test.ts`
+  (`buildManagementAssistantSystemPrompt()`), new
+  `tests/unit/ai/mockProviderManagementAssistant.test.ts` (per-tool
+  keyword dispatch, empty-vs-unavailable wording, no cross-system tool
+  leakage), extended `tests/integration/reports.test.ts` (the three new
+  report methods against real fixture hotels, including cross-tenant
+  rejection), new `tests/integration/managementAssistantTools.test.ts`
+  (the six tool wrapper functions against real fixture data, including
+  `getStaffDirectory` never returning email/passwordHash and real
+  cross-tenant isolation).
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (**260/260**); `npm run test:integration`
+  (**193/193**); `npm run build` (only `DATABASE_URL`/`AUTH_SECRET`/
+  `AUTH_URL`/`CONCIERGE_TOKEN_SECRET`/`NEXT_PUBLIC_APP_URL` exported, no
+  blanket `NODE_ENV`) — clean, no new route (confirms no UI was added).
+  No Playwright run required this phase (no UI exists yet); the full
+  existing suite's continued health is re-confirmed at M7b, when e2e
+  coverage becomes possible.
+- No schema change, no secrets, no M7b+ (UI/Server Action/nav) work, no
+  M6 changes, no M4/M5 changes.
+
 ## M6 — AI Guest Concierge, Phase e (integration audit and closeout) (2026-08-27)
 The final M6 phase — an integration audit, final security review, and
 cross-milestone regression pass across M6a–M6d as one system. **No new

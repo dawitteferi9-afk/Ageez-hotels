@@ -59,6 +59,24 @@ import type { AiProvider, AiConverseInput, AiConverseResult, AiToolCallRecord } 
  * is absent (anonymous tier), this block is skipped entirely and the
  * question falls through to the normal knowledge/room-type/fallback
  * handling below — no new anonymous-tier capability.
+ *
+ * M7a — this same provider also serves the AI Management Assistant
+ * (`src/lib/ai/tools/managementAssistantTools.ts`). Structurally, a single
+ * `converse()` call only ever receives EITHER the M6 guest tool set OR the
+ * M7 staff tool set — the two are built by entirely separate, never-merged
+ * registries, so there is no real risk of the branches below firing for
+ * the wrong system; the check is still keyword-AND-tool-presence, exactly
+ * like every other branch here, so it stays true even if that assumption
+ * were ever violated. A management question is recognized by simple,
+ * disjoint keyword sets per tool (checked in registry-declaration order),
+ * calls that ONE matching tool, and answers strictly from its output:
+ *   - `{ available: false }` (the tool's own RBAC re-check failed) always
+ *     produces the fixed `MANAGEMENT_UNAVAILABLE_REPLY` — never a
+ *     different wording per tool, never a hint at which rule failed.
+ *   - `{ available: true, ... }` with an empty list/zero count produces an
+ *     honest, distinct "there are currently none" sentence — legitimate
+ *     empty operational data must never be reworded to sound like a
+ *     restriction, and vice versa.
  */
 
 const KNOWLEDGE_CATEGORY_KEYWORDS: Record<string, string[]> = {
@@ -137,6 +155,55 @@ const GENERIC_SERVICE_REQUEST_PHRASES = ["special request", "service request", "
 const SERVICE_REQUEST_PROPOSAL_DECLINE_REPLY =
   "I couldn't prepare that as a service request right now — please try naming a specific service (laundry, an airport transfer, room service, or a restaurant reservation), verify your booking again if it's been a while, or contact the front desk.";
 
+/**
+ * M7a — one fixed reply for every `{ available: false }` tool result,
+ * regardless of which tool or which RBAC rule produced it. Never
+ * discloses the internal reason, the tool name, or whether more records
+ * exist behind the restriction (docs/DECISIONS.md M7a design).
+ */
+const MANAGEMENT_UNAVAILABLE_REPLY = "I don't have access to that information.";
+
+/**
+ * M7a — disjoint keyword sets per management tool, checked in this fixed
+ * order (matches `getManagementAssistantTools()`'s own declaration order).
+ * Deliberately narrow, fixed phrases — same "deterministic mock, not a
+ * general intent classifier" style as every other keyword table in this
+ * file — not an attempt at exhaustive natural-language coverage.
+ */
+const MANAGEMENT_TOOL_KEYWORDS: Array<{ tool: string; keywords: string[] }> = [
+  {
+    tool: "getOperationalSnapshot",
+    // Deliberately does NOT include a generic "how many rooms" phrase —
+    // "how many rooms need cleaning"/"...are in maintenance" must match
+    // the housekeeping/maintenance branches below, not this one.
+    keywords: ["occupancy", "occupied", "operations summary", "hotel operations", "today's summary"],
+  },
+  {
+    tool: "getTodayArrivalsDepartures",
+    keywords: ["arrival", "arriving", "departure", "departing"],
+  },
+  {
+    tool: "getHousekeepingQueueSummary",
+    keywords: ["cleaning", "housekeeping"],
+  },
+  {
+    tool: "getMaintenanceSummary",
+    keywords: ["maintenance", "urgent", "high priority", "high-priority"],
+  },
+  {
+    tool: "getServiceRequestSummary",
+    keywords: ["service request", "service requests", "pending request", "pending requests"],
+  },
+  {
+    tool: "getStaffDirectory",
+    keywords: ["staff", "directory", "who has owner", "who is owner"],
+  },
+];
+
+function isManagementToolUnavailable(result: unknown): boolean {
+  return typeof result === "object" && result !== null && (result as { available?: boolean }).available === false;
+}
+
 export function createMockProvider(): AiProvider {
   return {
     async converse({ history, tools }: AiConverseInput): Promise<AiConverseResult> {
@@ -177,6 +244,17 @@ export function createMockProvider(): AiProvider {
           toolCalls.push({ name: proposeTool.name, input: { type, notes }, result });
           return { reply: summarizeServiceRequestProposal(result), toolCalls };
         }
+      }
+
+      for (const { tool: toolName, keywords } of MANAGEMENT_TOOL_KEYWORDS) {
+        if (!keywords.some((keyword) => question.includes(keyword))) continue;
+
+        const tool = tools.find((t) => t.name === toolName);
+        if (!tool) break; // Tool not offered to this role (or an M6 conversation) — fall through, never fabricate.
+
+        const result = await tool.execute({});
+        toolCalls.push({ name: tool.name, input: {}, result });
+        return { reply: summarizeManagementToolResult(toolName, result), toolCalls };
       }
 
       if (/room type|price|suite|how much|nightly rate/.test(question)) {
@@ -261,4 +339,114 @@ function summarizeRoomTypes(result: unknown): string {
   return roomTypes
     .map((rt) => `${rt.name} (up to ${rt.capacity} guests, ${rt.basePrice} ${rt.currency}/night)`)
     .join("; ");
+}
+
+/**
+ * M7a — dispatches to the per-tool summarizer, but the `{ available:
+ * false }` check is handled ONCE here, identically for every tool, so
+ * every management reply shares the exact same non-disclosing wording
+ * regardless of which tool or which RBAC rule produced it.
+ */
+function summarizeManagementToolResult(toolName: string, result: unknown): string {
+  if (isManagementToolUnavailable(result)) return MANAGEMENT_UNAVAILABLE_REPLY;
+
+  switch (toolName) {
+    case "getOperationalSnapshot":
+      return summarizeOperationalSnapshot(result);
+    case "getTodayArrivalsDepartures":
+      return summarizeTodayArrivalsDepartures(result);
+    case "getHousekeepingQueueSummary":
+      return summarizeHousekeepingQueueSummary(result);
+    case "getMaintenanceSummary":
+      return summarizeMaintenanceSummary(result);
+    case "getServiceRequestSummary":
+      return summarizeServiceRequestSummary(result);
+    case "getStaffDirectory":
+      return summarizeStaffDirectory(result);
+    default:
+      // Structurally unreachable — MANAGEMENT_TOOL_KEYWORDS only ever
+      // names the six real tool names above — but fails safely rather
+      // than throwing if a future tool is added here without a summarizer.
+      return NOT_FOUND_REPLY;
+  }
+}
+
+function summarizeOperationalSnapshot(result: unknown): string {
+  const typed = result as {
+    occupancy: { totalRooms: number; byStatus: { OCCUPIED: number }; occupancyRate: number };
+    totalGuests: number;
+    todayArrivalCount: number;
+    todayDepartureCount: number;
+  };
+  return (
+    `${typed.occupancy.byStatus.OCCUPIED} of ${typed.occupancy.totalRooms} rooms occupied ` +
+    `(${typed.occupancy.occupancyRate}% occupancy). ${typed.totalGuests} guest(s) on file. ` +
+    `${typed.todayArrivalCount} arrival(s) and ${typed.todayDepartureCount} departure(s) today.`
+  );
+}
+
+function summarizeTodayArrivalsDepartures(result: unknown): string {
+  const typed = result as {
+    arrivals: Array<{ guestName: string; roomNumber: string; status: string }>;
+    departures: Array<{ guestName: string; roomNumber: string; status: string }>;
+  };
+  const arrivalsText =
+    typed.arrivals.length === 0
+      ? "no arrivals today"
+      : typed.arrivals.map((a) => `${a.guestName} (Room ${a.roomNumber}, ${a.status})`).join(", ");
+  const departuresText =
+    typed.departures.length === 0
+      ? "no departures today"
+      : typed.departures.map((d) => `${d.guestName} (Room ${d.roomNumber}, ${d.status})`).join(", ");
+  return `Arrivals: ${arrivalsText}. Departures: ${departuresText}.`;
+}
+
+function summarizeHousekeepingQueueSummary(result: unknown): string {
+  const typed = result as { count: number; rooms: Array<{ roomNumber: string }> };
+  if (typed.count === 0) return "No rooms currently need cleaning.";
+  return `${typed.count} room(s) need cleaning: ${typed.rooms.map((r) => r.roomNumber).join(", ")}.`;
+}
+
+function summarizeMaintenanceSummary(result: unknown): string {
+  const typed = result as {
+    openBlocking: Array<{ roomNumber: string; description: string; priority: string; status: string }>;
+  };
+  if (typed.openBlocking.length === 0) return "No open HIGH or URGENT maintenance issues right now.";
+  return (
+    `${typed.openBlocking.length} open HIGH/URGENT issue(s): ` +
+    typed.openBlocking
+      .map((issue) => `Room ${issue.roomNumber} — ${issue.description} (${issue.priority}, ${issue.status})`)
+      .join("; ") +
+    "."
+  );
+}
+
+function summarizeServiceRequestSummary(result: unknown): string {
+  const typed = result as {
+    pendingAndInProgress: Array<{
+      guestName: string | null;
+      roomNumber: string | null;
+      type: string;
+      status: string;
+      notes: string | null;
+    }>;
+  };
+  if (typed.pendingAndInProgress.length === 0) return "No pending or in-progress service requests.";
+  return (
+    `${typed.pendingAndInProgress.length} request(s): ` +
+    typed.pendingAndInProgress
+      .map(
+        (r) =>
+          `${r.guestName ?? "Guest"} — ${r.type} (${r.status}), Room ${r.roomNumber ?? "—"}` +
+          (r.notes ? `: ${r.notes}` : "")
+      )
+      .join("; ") +
+    "."
+  );
+}
+
+function summarizeStaffDirectory(result: unknown): string {
+  const typed = result as { staff: Array<{ name: string; role: string }> };
+  if (typed.staff.length === 0) return "No staff members found.";
+  return typed.staff.map((s) => `${s.name} (${s.role})`).join(", ") + ".";
 }

@@ -1,7 +1,7 @@
 import { cache } from "react";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
-import { Prisma, type RoomStatus } from "@prisma/client";
+import { Prisma, type RoomStatus, type MaintenancePriority } from "@prisma/client";
 import { hasPermission, type Module, type Action, type StaffRole } from "@/lib/auth/rbac";
 import { validateCheckIn, validateCheckOut, type ReservationStatus } from "@/lib/domain/reservationTransitions";
 import {
@@ -20,7 +20,11 @@ import {
   isAdministrativeClose,
   type MaintenanceStatus,
 } from "@/lib/domain/maintenanceTransitions";
-import { normalizeServiceRequestType } from "@/lib/domain/serviceRequestTypes";
+import {
+  normalizeServiceRequestType,
+  SERVICE_REQUEST_TYPES,
+  type ServiceRequestType,
+} from "@/lib/domain/serviceRequestTypes";
 
 /**
  * Centralized tenant-aware data access (docs/ARCHITECTURE.md,
@@ -437,6 +441,43 @@ function zeroedReservationStatusCounts(): Record<ReservationStatus, number> {
   return Object.fromEntries(ALL_RESERVATION_STATUSES.map((s) => [s, 0])) as Record<ReservationStatus, number>;
 }
 
+/**
+ * M7a — the same "every enum value always present, zeroed if unheld"
+ * convention as `ALL_ROOM_STATUSES`/`ALL_RESERVATION_STATUSES` above,
+ * extended for the three new `reports` aggregates the AI Management
+ * Assistant's tools consume (`maintenanceSummary()`/`serviceRequestSummary()`).
+ * `MaintenanceStatus`/`ServiceRequestStatus` are re-exported from their own
+ * domain modules already (`src/lib/domain/{maintenanceTransitions,
+ * serviceRequestTransitions}.ts`) — only the plain enumeration arrays are
+ * new here. `ServiceRequestType`'s own array (`SERVICE_REQUEST_TYPES`)
+ * already exists in `src/lib/domain/serviceRequestTypes.ts` (M6d) and is
+ * reused directly, not redefined.
+ */
+const ALL_MAINTENANCE_STATUSES: readonly MaintenanceStatus[] = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"];
+const ALL_MAINTENANCE_PRIORITIES: readonly MaintenancePriority[] = ["LOW", "MEDIUM", "HIGH", "URGENT"];
+const ALL_SERVICE_REQUEST_STATUSES: readonly ServiceRequestStatus[] = [
+  "PENDING",
+  "IN_PROGRESS",
+  "COMPLETED",
+  "CANCELLED",
+];
+
+function zeroedMaintenanceStatusCounts(): Record<MaintenanceStatus, number> {
+  return Object.fromEntries(ALL_MAINTENANCE_STATUSES.map((s) => [s, 0])) as Record<MaintenanceStatus, number>;
+}
+
+function zeroedMaintenancePriorityCounts(): Record<MaintenancePriority, number> {
+  return Object.fromEntries(ALL_MAINTENANCE_PRIORITIES.map((p) => [p, 0])) as Record<MaintenancePriority, number>;
+}
+
+function zeroedServiceRequestStatusCounts(): Record<ServiceRequestStatus, number> {
+  return Object.fromEntries(ALL_SERVICE_REQUEST_STATUSES.map((s) => [s, 0])) as Record<ServiceRequestStatus, number>;
+}
+
+function zeroedServiceRequestTypeCounts(): Record<ServiceRequestType, number> {
+  return Object.fromEntries(SERVICE_REQUEST_TYPES.map((t) => [t, 0])) as Record<ServiceRequestType, number>;
+}
+
 export interface OccupancyByRoomType {
   roomTypeId: string;
   roomTypeName: string;
@@ -464,6 +505,64 @@ export interface TodayArrivalsDepartures {
   date: string;
   arrivals: ArrivalOrDeparture[];
   departures: ArrivalOrDeparture[];
+}
+
+/**
+ * M7a — the three new `reports` aggregates the AI Management Assistant's
+ * read-only tools consume directly (`src/lib/ai/tools/{getHousekeepingQueueSummary,
+ * getMaintenanceSummary,getServiceRequestSummary}.ts`). Each is already the
+ * exact safe, minimal projection those tools return to the model — no
+ * guest email/phone/nationality, no `resolutionNotes`, no `assignedTo`
+ * beyond a name, no raw Prisma row of any kind (docs/DECISIONS.md M7a
+ * design). Centralizing them here (rather than only in the AI tool layer)
+ * follows the same M4-Phase-6 precedent that put the *other* four report
+ * aggregates here specifically "so M7's AI Management Assistant can reuse
+ * them as whitelisted tool functions" — these three exist for that reuse
+ * from the start, not retrofitted.
+ */
+export interface HousekeepingQueueRoom {
+  roomNumber: string;
+  floor: number;
+  roomTypeName: string;
+}
+
+export interface HousekeepingQueueSummary {
+  count: number;
+  rooms: HousekeepingQueueRoom[];
+}
+
+/** A currently-unresolved, blocking (`HIGH`/`URGENT` + `OPEN`/`IN_PROGRESS`) maintenance issue — the same "blocking" definition `BLOCKING_MAINTENANCE_PRIORITIES`/`UNRESOLVED_MAINTENANCE_STATUSES` already establish elsewhere in this file, reused here, not redefined. */
+export interface OpenBlockingMaintenanceIssue {
+  roomNumber: string;
+  description: string;
+  priority: MaintenancePriority;
+  status: MaintenanceStatus;
+  /** Assigned staff member's name only — never email (docs/DECISIONS.md M7a PII rule). `null` when unassigned. */
+  assignedToName: string | null;
+}
+
+export interface MaintenanceSummary {
+  countsByStatus: Record<MaintenanceStatus, number>;
+  countsByPriority: Record<MaintenancePriority, number>;
+  /** Every currently OPEN/IN_PROGRESS HIGH/URGENT issue — never `resolutionNotes` (approved M7a exclusion). */
+  openBlocking: OpenBlockingMaintenanceIssue[];
+}
+
+/** A `PENDING` or `IN_PROGRESS` service request — the only two statuses `pendingAndInProgress` ever includes. */
+export interface ActiveServiceRequestSummaryItem {
+  guestName: string | null;
+  roomNumber: string | null;
+  type: ServiceRequestType;
+  status: ServiceRequestStatus;
+  /** Guest-authored request detail — approved for M7a (the operational instruction staff need to act on the request). */
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface ServiceRequestSummary {
+  countsByStatus: Record<ServiceRequestStatus, number>;
+  countsByType: Record<ServiceRequestType, number>;
+  pendingAndInProgress: ActiveServiceRequestSummaryItem[];
 }
 
 /**
@@ -1642,6 +1741,108 @@ export function withTenant(hotelId: string) {
           date: `${dayStart.getFullYear()}-${String(dayStart.getMonth() + 1).padStart(2, "0")}-${String(dayStart.getDate()).padStart(2, "0")}`,
           arrivals: arrivals.map(toArrivalOrDeparture),
           departures: departures.map(toArrivalOrDeparture),
+        };
+      },
+
+      /**
+       * M7a — the housekeeping queue as a report aggregate: rooms
+       * currently `CLEANING` for this hotel. Reuses the exact same query
+       * `/management/housekeeping` (M5b) already runs — no second
+       * definition of "the queue" — but returns only the fields the AI
+       * Management Assistant's `getHousekeepingQueueSummary` tool is
+       * approved to expose (no guest data of any kind; `Room` has no
+       * direct guest relation regardless).
+       */
+      housekeepingQueueSummary: async (): Promise<HousekeepingQueueSummary> => {
+        const rooms = await prisma.room.findMany({
+          where: { hotelId, status: "CLEANING" },
+          include: { roomType: true },
+          orderBy: [{ floor: "asc" }, { roomNumber: "asc" }],
+        });
+        return {
+          count: rooms.length,
+          rooms: rooms.map((r) => ({ roomNumber: r.roomNumber, floor: r.floor, roomTypeName: r.roomType.name })),
+        };
+      },
+
+      /**
+       * M7a — maintenance counts by status and priority (real
+       * database-level `groupBy`, same reasoning as
+       * `reservationStatusSummary()` — `MaintenanceIssue` is unbounded,
+       * unlike the fixed 52-room inventory `occupancySummary()` reduces in
+       * memory), plus the bounded "open and blocking" list using the
+       * SAME `BLOCKING_MAINTENANCE_PRIORITIES`/`UNRESOLVED_MAINTENANCE_STATUSES`
+       * definition every other blocking-issue check in this file already
+       * shares — never a second, competing definition of "blocking".
+       * `resolutionNotes` is never selected or returned (approved M7a PII/
+       * data-scope rule); `assignedTo` is projected to a name only.
+       */
+      maintenanceSummary: async (): Promise<MaintenanceSummary> => {
+        const [statusGroups, priorityGroups, openBlockingIssues] = await Promise.all([
+          prisma.maintenanceIssue.groupBy({ by: ["status"], where: { hotelId }, _count: true }),
+          prisma.maintenanceIssue.groupBy({ by: ["priority"], where: { hotelId }, _count: true }),
+          prisma.maintenanceIssue.findMany({
+            where: { hotelId, priority: BLOCKING_MAINTENANCE_PRIORITIES, status: UNRESOLVED_MAINTENANCE_STATUSES },
+            include: { room: true, assignedTo: true },
+            orderBy: { createdAt: "desc" },
+          }),
+        ]);
+
+        const countsByStatus = zeroedMaintenanceStatusCounts();
+        for (const row of statusGroups) countsByStatus[row.status] = row._count;
+        const countsByPriority = zeroedMaintenancePriorityCounts();
+        for (const row of priorityGroups) countsByPriority[row.priority] = row._count;
+
+        return {
+          countsByStatus,
+          countsByPriority,
+          openBlocking: openBlockingIssues.map((issue) => ({
+            roomNumber: issue.room.roomNumber,
+            description: issue.description,
+            priority: issue.priority,
+            status: issue.status,
+            assignedToName: issue.assignedTo?.name ?? null,
+          })),
+        };
+      },
+
+      /**
+       * M7a — service-request counts by status and type (real
+       * `groupBy`, same reasoning as above), plus the bounded
+       * `PENDING`/`IN_PROGRESS` list the AI Management Assistant's
+       * `getServiceRequestSummary` tool exposes. `notes` IS included
+       * (approved M7a exception — the guest-authored operational
+       * instruction staff need to act on the request), but nothing else
+       * from `Guest`/`Reservation` beyond name/room number — never email,
+       * phone, nationality, dates, price, or payment method.
+       */
+      serviceRequestSummary: async (): Promise<ServiceRequestSummary> => {
+        const [statusGroups, typeGroups, activeRequests] = await Promise.all([
+          prisma.serviceRequest.groupBy({ by: ["status"], where: { hotelId }, _count: true }),
+          prisma.serviceRequest.groupBy({ by: ["type"], where: { hotelId }, _count: true }),
+          prisma.serviceRequest.findMany({
+            where: { hotelId, status: { in: ["PENDING", "IN_PROGRESS"] } },
+            include: { guest: true, reservation: { include: { room: true } } },
+            orderBy: { createdAt: "desc" },
+          }),
+        ]);
+
+        const countsByStatus = zeroedServiceRequestStatusCounts();
+        for (const row of statusGroups) countsByStatus[row.status] = row._count;
+        const countsByType = zeroedServiceRequestTypeCounts();
+        for (const row of typeGroups) countsByType[row.type] = row._count;
+
+        return {
+          countsByStatus,
+          countsByType,
+          pendingAndInProgress: activeRequests.map((request) => ({
+            guestName: request.guest?.name ?? null,
+            roomNumber: request.reservation?.room.roomNumber ?? null,
+            type: request.type,
+            status: request.status,
+            notes: request.notes,
+            createdAt: request.createdAt.toISOString(),
+          })),
         };
       },
     },

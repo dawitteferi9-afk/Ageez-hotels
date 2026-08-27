@@ -4,6 +4,96 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-27 — M7 Phase a (read-only management AI tool boundary) implementation decisions
+**Status:** Approved (Product Owner design review with 13 corrective
+decisions, then a corrected-plan approval, before implementation started —
+see the design-review conversation; these are the concrete choices this
+phase's implementation required within that already-approved plan)
+**Decision:**
+1. **`getManagementAssistantTools({hotelId, role})`
+   (`src/lib/ai/tools/managementAssistantTools.ts`) is a third, structurally
+   separate tool registry** — never merged with, and never importing or
+   imported by, `getAnonymousConciergeTools()`/`getVerifiedConciergeTools()`
+   (M6). Confirmed by a full-repository check that none of the three
+   registries share a tool name or an import edge. `{hotelId, role}` are
+   supplied only via this function's own parameter, bound via closure into
+   every tool's `execute()` — never a client/model-supplied value, and
+   never cached across turns (a future M7b Server Action calls
+   `requireStaffAccess()` fresh once per chat message and rebuilds the
+   registry each time).
+2. **Two independent authorization layers per tool, not one.** Registry
+   construction (`getStaffDirectory` pushed onto the array only for
+   `role === "OWNER_ADMIN" || role === "MANAGER"`) is the first; every
+   tool's own `execute()` independently re-checking `hasPermission(role,
+   module, "view")` (or the exact role check, for `getStaffDirectory`)
+   against the SAME closure-bound `role` before querying is the second.
+   This mirrors M6c's "a tool must never trust an outer check alone" rule,
+   adapted from token re-verification (which defends against a *bearer
+   credential* going stale across many turns without the server being
+   touched again) to RBAC re-verification (which, since `role` is already
+   guaranteed fresh every single turn by the calling Server Action's own
+   `requireStaffAccess()`, is a cheap in-memory check, not a second
+   database round trip — but a real, independently unit-tested safeguard
+   against a hypothetical registry-construction bug, not decorative).
+3. **Authorization failure returns a typed `{available: false}`, never an
+   empty list/zero count** — added mid-design specifically so "you're not
+   authorized" and "there are genuinely zero records" stay distinguishable
+   at every layer: the tool's own return shape, the deterministic mock
+   provider's reply wording, and the system prompt's own instruction to
+   the model. `isManagementToolUnavailable()`
+   (`src/lib/ai/providers/mock.ts`) checks this discriminant once, shared
+   by all six tools' summarizers, so every unauthorized reply is worded
+   identically regardless of which tool or which rule failed.
+4. **`getStaffDirectory` is the concrete "view permission ≠ AI
+   disclosure" example the design review asked for.** `staff`/"view" is
+   `ALL_ROLES` at the page level (the existing Staff list already shows
+   every role every staff member's name+email), but the AI tool is
+   OWNER_ADMIN/MANAGER-only and projects to `{name, role}` only — email is
+   never returned by any M7 tool, full stop, regardless of what the
+   underlying page shows.
+5. **Three new `withTenant().reports` methods
+   (`housekeepingQueueSummary()`/`maintenanceSummary()`/
+   `serviceRequestSummary()`) were added, not left as ad hoc queries
+   inside the AI tool layer** — following the exact M4 Phase 6 precedent
+   ("Built as `src/lib/tenant` aggregation functions so M7's AI Management
+   Assistant can reuse them as whitelisted tool functions instead of
+   duplicating aggregation logic"). `maintenanceSummary()`'s "blocking"
+   definition reuses the existing `BLOCKING_MAINTENANCE_PRIORITIES`/
+   `UNRESOLVED_MAINTENANCE_STATUSES` constants verbatim — never a second,
+   competing definition. All three are pure reads; zero mutation path;
+   zero Prisma schema change. Three of the six AI tool files
+   (`getTodayArrivalsDepartures`/`getHousekeepingQueueSummary`/
+   `getMaintenanceSummary`/`getServiceRequestSummary`) are thin
+   pass-throughs over these report methods; `getOperationalSnapshot`
+   composes four report calls (the three pre-existing plus
+   `guestCount()`); `getStaffDirectory` calls
+   `withTenant().staffUsers.findMany()` and narrows further than that
+   method's own already-safe `STAFF_USER_SAFE_SELECT` projection, dropping
+   `email`/`id`/`hotelId`/timestamps too.
+6. **`ServiceRequest.notes` and `MaintenanceIssue.assignedTo` (name only)
+   are included; `MaintenanceIssue.resolutionNotes`, all Guest contact
+   fields, and `StaffUser.email` are excluded** — the exact per-field
+   scope the design review approved, implemented as the literal field set
+   each new report method selects (never a broader `include` narrowed only
+   at display time).
+7. **No rate limiter was added.** M7 sits entirely behind Auth.js + RBAC,
+   a materially different threat model from M6c's unauthenticated
+   booking-verification flow — deferred to M8/deployment hardening per
+   the approved plan, not silently solved or silently ignored.
+8. **No UI, Server Action, or nav change in this phase** — `/management/
+   assistant` (M7b) does not exist yet; M7a is provable and testable
+   entirely at the tool/registry/prompt/mock-provider layer, the same
+   "library layer only, no route" shape M6a used for the guest concierge's
+   own first phase.
+**Rationale:** All eight points are the concrete implementation choices
+the already-approved M7a design left to this phase's own execution — none
+change the approved scope, RBAC matrix, PII rules, or read-only boundary;
+recorded per CLAUDE.md rule 7, following the exact "flag/record rather
+than silently invent or silently omit" standard the M4/M5/M6 phase
+decision entries already established.
+
+---
+
 ## 2026-08-27 — M6 (AI Guest Concierge) closed out as Complete
 **Status:** Approved (Product Owner closeout — a dedicated integration
 audit, final security review, and cross-milestone regression pass, not a

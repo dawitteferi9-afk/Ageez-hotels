@@ -17,10 +17,15 @@
      can build a proposal; it can never execute the write. See
      `docs/DECISIONS.md`'s M6d entry and "Verified guest ServiceRequest
      creation (M6d)" below.
-2. **AI Management Assistant** (M7, not yet implemented) — internal,
-   answers questions like occupied room count, rooms needing cleaning,
-   open maintenance issues, today's arrivals, outstanding operational
-   issues.
+2. **AI Management Assistant** (M7, in progress — Phase a: tool boundary
+   complete, no UI yet) — internal, authenticated-staff-only, structurally
+   separate from the guest concierge. Answers live operational questions
+   (occupied room count, rooms needing cleaning, open HIGH/URGENT
+   maintenance issues, today's arrivals/departures, pending service
+   requests, the staff directory) strictly from tool output — **read-only
+   in v0.1, with no mutation or mutation-proposal capability of any kind**.
+   See `docs/DECISIONS.md`'s M7a entry and "AI Management Assistant tools
+   (M7a)" below.
 
 ## Hard architectural rules (non-negotiable, apply to both assistants)
 - AI never accesses the database directly and never generates SQL.
@@ -41,6 +46,18 @@
     tools" list. **`confirmServiceRequestAction` (the actual
     ServiceRequest-creating mutation) is a plain Server Action, never a
     member of any tool registry — the model has no way to invoke it.**
+  - AI Management Assistant (M7, structurally separate from both guest
+    tiers above): six read-only tools in
+    `src/lib/ai/tools/managementAssistantTools.ts`
+    (`getOperationalSnapshot`/`getTodayArrivalsDepartures`/
+    `getHousekeepingQueueSummary`/`getMaintenanceSummary`/
+    `getServiceRequestSummary`/`getStaffDirectory`), bound to the
+    authenticated staff member's `{hotelId, role}` via closure — never a
+    client/model-supplied value. `getStaffDirectory` is omitted from the
+    registry entirely for FRONT_DESK/HOUSEKEEPING/MAINTENANCE. Every tool
+    independently re-verifies its own RBAC boundary inside `execute()`,
+    not just at registry construction, and returns `{ available: false }`
+    (never an empty list/zero count) on failure. No mutation tool exists.
 - No arbitrary server function execution — the whitelist is closed, not
   pattern-matched.
 - The AI must not fabricate hotel policies, prices, availability, room
@@ -101,6 +118,61 @@ unchanged M6c `getServiceRequestStatus` read tool. No status change,
 cancellation, or edit of an existing request is reachable by the guest at
 any tier — staff-only, via the unchanged M4 `updateStatus()`.
 
+## AI Management Assistant tools (M7a)
+The AI Management Assistant is the authenticated, staff-facing operational
+AI — structurally separate from the guest concierge above (a different
+registry, a different system prompt, no shared authorization path in
+either direction: a guest's verified-context token grants no M7 access,
+and an authenticated staff session grants no access to another guest's
+M6 verified-tier data). **Strictly read-only in v0.1 — no mutation tool,
+proposal tool, or mutation-confirmation infrastructure exists anywhere in
+M7.**
+
+`getManagementAssistantTools({hotelId, role})`
+(`src/lib/ai/tools/managementAssistantTools.ts`) exposes exactly six
+tools, built fresh from a `requireStaffAccess()` result the caller
+obtains once per turn — never a client-supplied `hotelId`/`role`/`staffId`:
+
+| Tool | Roles | Returns |
+|---|---|---|
+| `getOperationalSnapshot` | all | Occupancy, reservation-status counts, total guests, today's arrival/departure counts |
+| `getTodayArrivalsDepartures` | all | Today's arrivals/departures — guest name, room, status |
+| `getHousekeepingQueueSummary` | all | Rooms currently needing cleaning |
+| `getMaintenanceSummary` | all | Maintenance counts + open HIGH/URGENT issues (never `resolutionNotes`) |
+| `getServiceRequestSummary` | all | PENDING/IN_PROGRESS service requests — guest name, room, type, status, notes |
+| `getStaffDirectory` | OWNER_ADMIN/MANAGER only | Staff name + role (never email) |
+
+Two independent authorization layers, not one: (1) **registry
+construction** — `getStaffDirectory` is only added to the array for
+OWNER_ADMIN/MANAGER, so the model cannot even discover it exists for the
+other three roles; (2) **tool-level re-check** — every tool's own
+`execute()` independently re-verifies `hasPermission(role, module,
+"view")` (or, for `getStaffDirectory`, the exact role check) against the
+same closure-bound `role` before querying, mirroring M6c's "a tool must
+never trust an outer check alone" rule.
+
+**Authorization failure is never represented as empty data.** Every tool
+returns either `{available: true, ...data}` or `{available: false}` — the
+latter only on a failed RBAC re-check, never for a legitimate zero
+count/empty list. The system prompt and the deterministic mock provider
+both treat these as different situations: `{available: false}` always
+produces the same fixed, non-disclosing "I don't have access to that
+information" (never which rule failed, never a tool name); a real empty
+result (e.g. zero open maintenance issues) produces an honest, distinct
+"there are currently none" sentence.
+
+Field projections are purpose-built per tool, never a raw Prisma row: no
+guest email/phone/nationality anywhere, no staff email, no
+`resolutionNotes`, no payment/price detail. Three of the six tools are
+thin pass-throughs over new `withTenant().reports` methods
+(`housekeepingQueueSummary()`/`maintenanceSummary()`/
+`serviceRequestSummary()`, `src/lib/tenant/index.ts`) that already return
+the exact safe projection — added alongside the existing M4 Phase 6
+report methods (`occupancySummary()`/`reservationStatusSummary()`/
+`guestCount()`/`todayArrivalsDepartures()`), all reused as-is by
+`getOperationalSnapshot`. No schema migration was needed. See
+`docs/DECISIONS.md`'s M7a entry and `docs/SECURITY.md`.
+
 ## Provider abstraction
 `src/lib/ai/provider.ts` defines the vendor-neutral `AiProvider` interface
 (`converse({systemPrompt, history, tools}) -> {reply, toolCalls}`) that
@@ -124,8 +196,15 @@ copied text, so a price change is reflected immediately. A verified
 guest's own reservation/service-request facts come from live
 `Reservation`/`ServiceRequest` rows via
 `getReservationSummary()`/`getServiceRequestStatus()` — also never copied
-text. A new tenant gets its own `AiKnowledgeDocument`/`RoomType` rows and
-the same tool functions — no new assistant code per hotel.
+text. The Management Assistant's operational facts (M7a) come from live
+`Room`/`Reservation`/`Guest`/`MaintenanceIssue`/`ServiceRequest`/
+`StaffUser` rows via `withTenant().reports.*`, likewise never copied
+text; it does **not** read `AiKnowledgeDocument` at all in v0.1 — that
+table remains the guest concierge's own knowledge source, not shared with
+M7 (no policy-question capability was requested or built for staff). A
+new tenant gets its own `AiKnowledgeDocument`/`RoomType`/operational rows
+and the same tool functions for both assistants — no new assistant code
+per hotel.
 
 ## Verified guest context (M6c)
 See `docs/SECURITY.md`'s "Verified guest context" section for the full
@@ -155,8 +234,11 @@ Both the tool-function whitelist pattern and the knowledge-document
 pattern are designed to be reusable across hotels: a new tenant gets its
 own knowledge documents and the same tool functions (scoped to its own
 `hotelId`), not new assistant code. `buildAnonymousConciergeSystemPrompt()`/
-`buildVerifiedConciergeSystemPrompt()` are identical for every hotel —
-only the tenant identity data passed into them changes.
+`buildVerifiedConciergeSystemPrompt()`/`buildManagementAssistantSystemPrompt()`
+are each identical for every hotel — only the tenant/staff identity data
+passed into them changes; this holds for the Management Assistant too,
+built entirely against `{hotelId, role}` parameters, never a hardcoded
+tenant.
 
 ## Scope
 M6 is **Complete**: Phase a (provider/tool library), Phase b (anonymous
@@ -164,5 +246,11 @@ public chat UI), Phase c (verified reservation/service-request context),
 Phase d (confirmed guest service request creation), and Phase e
 (integration audit, final security review, and cross-milestone regression
 closeout — no new capability) are all implemented and verified — see
-`docs/CHANGELOG.md` and `docs/DECISIONS.md`'s M6e entry. The AI
-Management Assistant (M7) has not started.
+`docs/CHANGELOG.md` and `docs/DECISIONS.md`'s M6e entry.
+
+M7 (AI Management Assistant) is **in progress**: Phase a (read-only tool
+boundary — three new tenant/report helpers, all six approved tools, the
+role-aware registry, the system prompt, deterministic mock behavior) is
+implemented and verified — see `docs/CHANGELOG.md`'s M7 Phase a entry and
+`docs/DECISIONS.md`'s M7a entry. No UI exists yet (`/management/assistant`
+is Phase b); M7 as a whole is **not** marked complete.

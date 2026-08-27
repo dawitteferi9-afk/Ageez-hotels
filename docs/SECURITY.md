@@ -302,6 +302,67 @@ silently claimed solved:
   unique/idempotency-key constraint), which needs separate Product Owner
   approval and was not added here.
 
+### AI Management Assistant tools (M7a)
+The AI Management Assistant is the authenticated, staff-facing operational
+AI, structurally separate from the guest concierge above (`docs/AI_SPEC.md`'s
+"AI Management Assistant tools" section has the full tool/projection
+table). Security-relevant invariants:
+- **Reuses existing Auth.js staff authentication — no second AI auth
+  system.** `{hotelId, role}` come from a `requireStaffAccess()` result
+  the caller (a future M7b Server Action) obtains fresh once per chat
+  turn — the same DB-reload-every-call primitive every other protected
+  management read/mutation already uses. A role change or hotel
+  reassignment takes effect on the very next message, identically to
+  every other protected page.
+- **Two independent authorization layers per tool**, not one:
+  (1) **registry construction** — `getManagementAssistantTools({hotelId,
+  role})` only includes `getStaffDirectory` for OWNER_ADMIN/MANAGER,
+  omitting it entirely (not merely denying it) for FRONT_DESK/
+  HOUSEKEEPING/MAINTENANCE; (2) **tool-level re-check** — every tool's own
+  `execute()` independently re-verifies `hasPermission(role, module,
+  "view")` (or the exact role check, for `getStaffDirectory`) against the
+  same closure-bound `role` before querying, never trusting registry
+  construction alone — the same "a tool must never trust an outer check
+  alone" rule M6c's per-tool token re-verification already established,
+  adapted from token staleness to RBAC re-verification.
+- **`view` permission on a module does not automatically mean the AI may
+  expose that module's data.** `getStaffDirectory` is the concrete
+  example: `staff`/"view" is `ALL_ROLES` at the page level (every role
+  already sees every staff member's name+email in the Staff list UI), but
+  the AI tool is OWNER_ADMIN/MANAGER-only and never returns email at all
+  — a dedicated, narrower M7 safe-read layer, not a mirror of page-level
+  RBAC.
+- **Authorization failure is never represented as empty/zero data.**
+  Every tool returns `{available: true, ...data}` or `{available: false}`
+  — the latter only from a failed RBAC re-check. `{available: false}`
+  always produces the identical, non-disclosing "I don't have access to
+  that information" reply (never which rule failed, never a tool name,
+  never whether more records exist) — the system prompt and the
+  deterministic mock provider both enforce this. A genuine empty
+  result (e.g. zero open maintenance issues) is reported honestly and
+  distinctly — the two are never worded the same way.
+- **No mutation exists.** No tool writes to the database; no
+  proposal/confirmation infrastructure of any kind exists in M7a — a
+  stricter posture than M6d's propose-then-confirm design, since no
+  approved requirement calls for any M7 write yet. If M7 mutations are
+  ever approved, they would require the identical structural guarantee
+  M6d already established: no LLM-authorized write, a closed proposal
+  tool with zero write path, a separate deterministic confirm Server
+  Action never in any tool registry, and the existing RBAC/state-machine
+  functions remaining the only mutation authority.
+- **PII minimization:** no tool returns guest email/phone/nationality, a
+  staff member's email, `MaintenanceIssue.resolutionNotes`, or any
+  payment/price detail — every tool returns a purpose-built projection,
+  never a raw Prisma row.
+- **No rate limiter was added in M7a** — M7 sits entirely behind Auth.js
+  + RBAC (unlike M6c's unauthenticated booking-verification limiter,
+  which exists specifically because that flow is reachable pre-auth).
+  Production-grade cost/abuse protection is deferred to M8/deployment
+  hardening unless a concrete problem appears; no Redis/KV or other
+  external infrastructure was introduced.
+- **No schema change.** The three new `withTenant().reports` methods
+  read existing columns only.
+
 ## Secrets
 `.env.example` contains placeholders only. Real secrets belong in
 `.env.local` (gitignored) or the hosting platform's secret manager, never

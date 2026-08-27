@@ -237,6 +237,172 @@ describe("reports.todayArrivalsDepartures", () => {
   });
 });
 
+describe("reports.housekeepingQueueSummary", () => {
+  it("matches real CLEANING rooms for this hotel only", async () => {
+    const room = await prisma.room.create({
+      data: { hotelId: hotelA.hotel.id, roomTypeId: hotelA.roomType.id, roomNumber: "HK01", floor: 90, status: "CLEANING" },
+    });
+
+    const summary = await withTenant(hotelA.hotel.id).reports.housekeepingQueueSummary();
+    const realCount = await prisma.room.count({ where: { hotelId: hotelA.hotel.id, status: "CLEANING" } });
+
+    expect(summary.count).toBe(realCount);
+    expect(summary.rooms.some((r) => r.roomNumber === room.roomNumber)).toBe(true);
+    expect(summary.rooms.find((r) => r.roomNumber === room.roomNumber)).toEqual({
+      roomNumber: "HK01",
+      floor: 90,
+      roomTypeName: hotelA.roomType.name,
+    });
+  });
+
+  it("does not include another hotel's cleaning rooms", async () => {
+    await prisma.room.create({
+      data: { hotelId: hotelB.hotel.id, roomTypeId: hotelB.roomType.id, roomNumber: "HKB01", floor: 90, status: "CLEANING" },
+    });
+    const summaryA = await withTenant(hotelA.hotel.id).reports.housekeepingQueueSummary();
+    expect(summaryA.rooms.some((r) => r.roomNumber === "HKB01")).toBe(false);
+  });
+
+  it("never includes any guest data — no email-shaped or guest-name-shaped field anywhere in the projection", async () => {
+    const summary = await withTenant(hotelA.hotel.id).reports.housekeepingQueueSummary();
+    expect(Object.keys(summary)).toEqual(["count", "rooms"]);
+    for (const room of summary.rooms) {
+      expect(Object.keys(room).sort()).toEqual(["floor", "roomNumber", "roomTypeName"]);
+    }
+  });
+});
+
+describe("reports.maintenanceSummary", () => {
+  it("openBlocking includes only unresolved HIGH/URGENT issues, never resolutionNotes, assignedTo reduced to a name", async () => {
+    const room = await prisma.room.create({
+      data: { hotelId: hotelA.hotel.id, roomTypeId: hotelA.roomType.id, roomNumber: "MT01", floor: 91, status: "AVAILABLE" },
+    });
+    const maintenanceStaff = hotelA.staffByRole.MAINTENANCE;
+
+    const blocking = await prisma.maintenanceIssue.create({
+      data: {
+        hotelId: hotelA.hotel.id,
+        roomId: room.id,
+        description: "Blocking AC failure",
+        priority: "URGENT",
+        status: "OPEN",
+        assignedToId: maintenanceStaff.id,
+      },
+    });
+    await prisma.maintenanceIssue.create({
+      data: { hotelId: hotelA.hotel.id, roomId: room.id, description: "Minor cosmetic issue", priority: "LOW", status: "OPEN" },
+    });
+    await prisma.maintenanceIssue.create({
+      data: {
+        hotelId: hotelA.hotel.id,
+        roomId: room.id,
+        description: "Already resolved issue",
+        priority: "HIGH",
+        status: "RESOLVED",
+        resolutionNotes: "Replaced the part.",
+      },
+    });
+
+    const summary = await withTenant(hotelA.hotel.id).reports.maintenanceSummary();
+
+    expect(summary.openBlocking.some((i) => i.description === blocking.description)).toBe(true);
+    expect(summary.openBlocking.some((i) => i.description === "Minor cosmetic issue")).toBe(false);
+    expect(summary.openBlocking.some((i) => i.description === "Already resolved issue")).toBe(false);
+
+    const blockingEntry = summary.openBlocking.find((i) => i.description === blocking.description);
+    expect(blockingEntry?.assignedToName).toBe(maintenanceStaff.name);
+    expect(Object.keys(blockingEntry!).sort()).toEqual(
+      ["assignedToName", "description", "priority", "roomNumber", "status"].sort()
+    );
+
+    // resolutionNotes never appears anywhere in the returned summary.
+    const serialized = JSON.stringify(summary);
+    expect(serialized).not.toContain("Replaced the part");
+    expect(serialized).not.toMatch(/resolutionNotes/i);
+  });
+
+  it("countsByStatus/countsByPriority match real groupBy aggregates for this hotel", async () => {
+    const [statusGroups, priorityGroups] = await Promise.all([
+      prisma.maintenanceIssue.groupBy({ by: ["status"], where: { hotelId: hotelA.hotel.id }, _count: true }),
+      prisma.maintenanceIssue.groupBy({ by: ["priority"], where: { hotelId: hotelA.hotel.id }, _count: true }),
+    ]);
+    const summary = await withTenant(hotelA.hotel.id).reports.maintenanceSummary();
+
+    for (const row of statusGroups) expect(summary.countsByStatus[row.status]).toBe(row._count);
+    for (const row of priorityGroups) expect(summary.countsByPriority[row.priority]).toBe(row._count);
+  });
+
+  it("does not include another hotel's maintenance issues", async () => {
+    const roomB = await prisma.room.create({
+      data: { hotelId: hotelB.hotel.id, roomTypeId: hotelB.roomType.id, roomNumber: "MTB01", floor: 91, status: "AVAILABLE" },
+    });
+    await prisma.maintenanceIssue.create({
+      data: { hotelId: hotelB.hotel.id, roomId: roomB.id, description: "HotelB blocking issue", priority: "URGENT", status: "OPEN" },
+    });
+
+    const summaryA = await withTenant(hotelA.hotel.id).reports.maintenanceSummary();
+    expect(summaryA.openBlocking.some((i) => i.description === "HotelB blocking issue")).toBe(false);
+  });
+});
+
+describe("reports.serviceRequestSummary", () => {
+  it("pendingAndInProgress includes only PENDING/IN_PROGRESS requests, with guest name + room number + notes", async () => {
+    const request = await prisma.serviceRequest.create({
+      data: {
+        hotelId: hotelA.hotel.id,
+        guestId: hotelA.guest.id,
+        reservationId: hotelA.reservation.id,
+        type: "LAUNDRY",
+        status: "PENDING",
+        notes: "Two shirts, please.",
+      },
+    });
+    await prisma.serviceRequest.create({
+      data: { hotelId: hotelA.hotel.id, guestId: hotelA.guest.id, type: "OTHER", status: "COMPLETED", notes: "Already done" },
+    });
+
+    const summary = await withTenant(hotelA.hotel.id).reports.serviceRequestSummary();
+
+    const entry = summary.pendingAndInProgress.find((r) => r.notes === "Two shirts, please.");
+    expect(entry).toBeDefined();
+    expect(entry?.guestName).toBe(hotelA.guest.name);
+    expect(entry?.roomNumber).toBe(hotelA.room.roomNumber);
+    expect(entry?.type).toBe(request.type);
+    expect(entry?.status).toBe("PENDING");
+    expect(summary.pendingAndInProgress.some((r) => r.status === "COMPLETED")).toBe(false);
+    expect(summary.pendingAndInProgress.some((r) => r.notes === "Already done")).toBe(false);
+  });
+
+  it("never includes guest email/phone/nationality or a raw ServiceRequest row", async () => {
+    const summary = await withTenant(hotelA.hotel.id).reports.serviceRequestSummary();
+    const serialized = JSON.stringify(summary);
+    if (hotelA.guest.email) expect(serialized).not.toContain(hotelA.guest.email);
+    expect(Object.keys(summary)).toEqual(["countsByStatus", "countsByType", "pendingAndInProgress"]);
+    for (const item of summary.pendingAndInProgress) {
+      expect(Object.keys(item).sort()).toEqual(["createdAt", "guestName", "notes", "roomNumber", "status", "type"].sort());
+    }
+  });
+
+  it("countsByStatus/countsByType match real groupBy aggregates for this hotel", async () => {
+    const [statusGroups, typeGroups] = await Promise.all([
+      prisma.serviceRequest.groupBy({ by: ["status"], where: { hotelId: hotelA.hotel.id }, _count: true }),
+      prisma.serviceRequest.groupBy({ by: ["type"], where: { hotelId: hotelA.hotel.id }, _count: true }),
+    ]);
+    const summary = await withTenant(hotelA.hotel.id).reports.serviceRequestSummary();
+
+    for (const row of statusGroups) expect(summary.countsByStatus[row.status]).toBe(row._count);
+    for (const row of typeGroups) expect(summary.countsByType[row.type]).toBe(row._count);
+  });
+
+  it("does not include another hotel's service requests", async () => {
+    await prisma.serviceRequest.create({
+      data: { hotelId: hotelB.hotel.id, guestId: hotelB.guest.id, type: "OTHER", status: "PENDING", notes: "HotelB request" },
+    });
+    const summaryA = await withTenant(hotelA.hotel.id).reports.serviceRequestSummary();
+    expect(summaryA.pendingAndInProgress.some((r) => r.notes === "HotelB request")).toBe(false);
+  });
+});
+
 describe("reports — RBAC (all five roles may view)", () => {
   it("all five roles are authorized for reports/view", async () => {
     for (const role of ALL_STAFF_ROLES) {
