@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { getCurrentTenantHotel } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
 import { ConciergeChat } from "@/components/guest/concierge-chat";
-import { sendConciergeMessageAction, verifyReservationContextAction } from "./actions";
+import { sendConciergeMessageAction, verifyReservationContextAction, confirmServiceRequestAction } from "./actions";
 
 export const metadata: Metadata = {
   title: "Concierge",
@@ -30,6 +30,7 @@ export default async function ConciergePage() {
           hotelName={hotel.name}
           action={sendConciergeMessageAction}
           verifyAction={verifyReservationContextAction}
+          confirmAction={confirmServiceRequestAction}
         />
       </Container>
     </section>

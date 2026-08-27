@@ -47,6 +47,32 @@ function serviceRequestStatusTool(
   };
 }
 
+/** M6d — a test double for `proposeServiceRequest`; `execute` defaults to the REAL validation behavior (as a spy) unless overridden. */
+function proposeServiceRequestTool(
+  overrideExecute?: (input: unknown) => Promise<unknown>
+): AiToolDefinition {
+  const defaultExecute = vi.fn(async (input: unknown) => {
+    const { type, notes } = input as { type: string; notes?: string };
+    const VALID = ["AIRPORT_TRANSFER", "LAUNDRY", "ROOM_SERVICE", "RESTAURANT", "OTHER"];
+    const upper = String(type).toUpperCase();
+    if (!VALID.includes(upper)) return { valid: false };
+    const labels: Record<string, string> = {
+      AIRPORT_TRANSFER: "Airport Transfer",
+      LAUNDRY: "Laundry",
+      ROOM_SERVICE: "Room Service",
+      RESTAURANT: "Restaurant",
+      OTHER: "Other",
+    };
+    return { valid: true, type: upper, label: labels[upper], notes: notes?.trim() || null };
+  });
+  return {
+    name: "proposeServiceRequest",
+    description: "test double",
+    inputSchema: {},
+    execute: overrideExecute ? vi.fn(overrideExecute) : defaultExecute,
+  };
+}
+
 describe("createMockProvider — grounded knowledge replies", () => {
   it("calls getHotelKnowledge and returns its content for a policies-shaped question", async () => {
     const tool = knowledgeTool({ found: true, category: "policies", content: "Check-in is 2:00 PM." });
@@ -269,6 +295,132 @@ describe("createMockProvider — verified-tier personalized questions", () => {
     expect(result.reply).toBe(
       "I can't look up personal booking, room, or request details in this chat yet — that requires verifying who you are first, and that verification isn't available in this version. Please contact the front desk with your booking reference for help with your reservation or request."
     );
+  });
+});
+
+describe("createMockProvider — verified-tier service request creation intent (M6d)", () => {
+  it("calls proposeServiceRequest for a recognized creation-intent phrase, and never claims submission", async () => {
+    const propose = proposeServiceRequestTool();
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Please arrange an airport transfer for tomorrow morning." }],
+      tools: [propose],
+    });
+
+    expect(propose.execute).toHaveBeenCalledWith({
+      type: "AIRPORT_TRANSFER",
+      notes: "Please arrange an airport transfer for tomorrow morning.",
+    });
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.reply).toContain("Airport Transfer");
+    expect(result.reply).toMatch(/Confirm Request/);
+    expect(result.reply).not.toMatch(/submitted|created|booked|has been sent|is on its way/i);
+  });
+
+  it("recognizes laundry, room service, and restaurant creation intents by their own keywords", async () => {
+    const provider = createMockProvider();
+
+    const laundry = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "I need to request laundry — please collect two shirts for laundry." }],
+      tools: [proposeServiceRequestTool()],
+    });
+    expect(laundry.reply).toContain("Laundry");
+
+    const roomService = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Can you order room service for me?" }],
+      tools: [proposeServiceRequestTool()],
+    });
+    expect(roomService.reply).toContain("Room Service");
+
+    const restaurant = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "I'd like to reserve a table for two tonight." }],
+      tools: [proposeServiceRequestTool()],
+    });
+    expect(restaurant.reply).toContain("Restaurant");
+  });
+
+  it("falls back to OTHER for a generic 'special request' phrase with no specific-type keyword", async () => {
+    const propose = proposeServiceRequestTool();
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [
+        { role: "user", content: "I have a special request that doesn't fit the usual categories — could you help arrange it?" },
+      ],
+      tools: [propose],
+    });
+
+    expect(propose.execute).toHaveBeenCalledWith(expect.objectContaining({ type: "OTHER" }));
+    expect(result.reply).toContain("Other");
+  });
+
+  it("does not treat an ordinary informational question about a service as a creation request", async () => {
+    const propose = proposeServiceRequestTool();
+    const knowledge = knowledgeTool({ found: true, category: "services", content: "We offer laundry service." });
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Do you have laundry service?" }],
+      tools: [propose, knowledge],
+    });
+
+    expect(propose.execute).not.toHaveBeenCalled();
+    expect(result.reply).toBe("We offer laundry service.");
+  });
+
+  it("still returns the status reply (not a creation proposal) for 'has my request been completed' — status check takes priority", async () => {
+    const propose = proposeServiceRequestTool();
+    const reservation = reservationSummaryTool({ found: true });
+    const serviceRequests = serviceRequestStatusTool([
+      { type: "LAUNDRY", status: "COMPLETED", notes: null, createdAt: "2026-09-10T10:00:00.000Z" },
+    ]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Has my request been completed?" }],
+      tools: [propose, reservation, serviceRequests],
+    });
+
+    expect(propose.execute).not.toHaveBeenCalled();
+    expect(result.reply).toContain("COMPLETED");
+  });
+
+  it("gives a safe generic decline, never a confirmable card, when the proposal tool reports invalid (e.g. the token no longer resolves)", async () => {
+    const propose = proposeServiceRequestTool(async () => ({ valid: false }));
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Please arrange an airport transfer for tomorrow morning." }],
+      tools: [propose],
+    });
+
+    expect(result.reply).not.toMatch(/Confirm Request/);
+    expect(result.reply).toMatch(/couldn't prepare|front desk/i);
+  });
+
+  it("is skipped entirely when proposeServiceRequest is absent (anonymous tier) — no new anonymous capability", async () => {
+    const knowledge = knowledgeTool({ found: false });
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Please arrange an airport transfer for tomorrow morning." }],
+      tools: [knowledge],
+    });
+
+    // Falls through to the ordinary "I don't have that information" path —
+    // no proposeServiceRequest tool exists to call, and no "Confirm
+    // Request" language leaks into an anonymous reply.
+    expect(result.reply).not.toMatch(/Confirm Request/);
   });
 });
 

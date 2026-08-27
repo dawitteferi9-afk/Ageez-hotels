@@ -96,10 +96,19 @@ describe("buildVerifiedConciergeSystemPrompt", () => {
     expect(verified).not.toMatch(/cannot access any guest's personal or reservation information/i);
   });
 
-  it("still refuses to create/modify/cancel a reservation or service request in this mode", () => {
+  it("still refuses to book/modify/cancel a reservation, or to itself change/cancel/complete a service request", () => {
     const prompt = buildVerifiedConciergeSystemPrompt(HOTEL);
     expect(prompt.toLowerCase()).toMatch(/cannot book, modify, or cancel/);
-    expect(prompt.toLowerCase()).toMatch(/cannot create, change, or cancel a service request/);
+    expect(prompt.toLowerCase()).toMatch(/cannot yourself change, cancel, or complete a service request/);
+  });
+
+  it("M6d: may propose (never submit) a NEW service request via proposeServiceRequest, and must never claim one was submitted", () => {
+    const prompt = buildVerifiedConciergeSystemPrompt(HOTEL);
+    expect(prompt).toContain("proposeServiceRequest");
+    expect(prompt.toLowerCase()).toMatch(/cannot submit it yourself/);
+    expect(prompt.toLowerCase()).toMatch(/confirm request/);
+    expect(prompt.toLowerCase()).toMatch(/never say the request has been submitted/);
+    expect(prompt.toLowerCase()).toMatch(/a plain conversational reply is never approval/);
   });
 
   it("never reveals verification/token mechanics if asked how it works", () => {

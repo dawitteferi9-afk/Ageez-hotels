@@ -1,5 +1,167 @@
 # Changelog
 
+## M6 — AI Guest Concierge, Phase d (confirmed guest service request creation) (2026-08-27)
+The first guest-facing M6 mutation: a verified guest may create ONE new
+`ServiceRequest` for their own reservation, but only through a
+deterministic propose -> review -> explicit "Confirm Request" click ->
+server-revalidated write flow. The LLM can build a proposal; it can never
+execute the write — there is no code path from a model tool call to
+`prisma.serviceRequest.create()` anywhere in this phase. M6e (integration/
+closeout) and M7 remain untouched; M6 as a whole is still **not** marked
+complete.
+- **Existing `ServiceRequestType` enum used as-is, no migration:**
+  `AIRPORT_TRANSFER`, `LAUNDRY`, `ROOM_SERVICE`, `RESTAURANT`, `OTHER`
+  (`prisma/schema.prisma`, unchanged). Guest-facing labels ("Airport
+  Transfer", "Laundry", "Room Service", "Restaurant", "Other") and
+  case-insensitive validation/normalization now live in one new pure
+  module, `src/lib/domain/serviceRequestTypes.ts`
+  (`normalizeServiceRequestType()`, `serviceRequestTypeLabel()`,
+  `normalizeServiceRequestNotes()` — 500-char cap, same as the chat
+  input's own `maxLength`), used by BOTH the proposal tool and the confirm
+  Server Action so an invalid/hallucinated type is rejected identically on
+  both sides, never invented or guessed.
+- **New guest-authority domain entry point,
+  `withTenant().serviceRequests.createForVerifiedGuest()`
+  (`src/lib/tenant/index.ts`), structurally distinct from the M4
+  `createForStaff()`** — never reused as the guest boundary. Accepts only
+  `{reservationId, guestId, type, notes}`; `hotelId` is bound via the
+  `withTenant(hotelId)` closure, never a parameter. Performs its own
+  fresh, independent tenant-scoped checks regardless of what any caller
+  already verified: loads the reservation scoped to `hotelId`, confirms
+  its `guestId` matches the supplied one (a real reservation belonging to
+  a *different* guest fails identically to a nonexistent one —
+  `RecordNotFoundError`, no existence leak), loads the guest scoped to
+  `hotelId`, and revalidates `type` (new `InvalidServiceRequestTypeError`
+  if it isn't one of the five existing enum values). Every created row
+  gets the schema-default `PENDING` status, no `assignedToId` (the model
+  doesn't exist on `ServiceRequest`), and no way for the guest to supply
+  either.
+- **Non-mutating proposal tool, `proposeServiceRequest`
+  (`src/lib/ai/tools/proposeServiceRequest.ts`):** no `@/lib/tenant` or
+  Prisma import at all — it cannot write to the database even in
+  principle. Converts a model-supplied `{type, notes}` into a validated
+  `{valid: true, type, label, notes}` or `{valid: false}`. Added to the
+  verified-tier registry (`getVerifiedConciergeTools()`,
+  `src/lib/ai/tools/verifiedConciergeTools.ts`) alongside the existing two
+  M6c read tools — never to the anonymous registry, so an anonymous guest
+  has no way to reach it. Like the two M6c tools, its `execute()`
+  independently re-verifies the raw signed token
+  (`resolveVerifiedReservationContext()`) on every call — defense in
+  depth, not a single upfront check.
+- **Deterministic confirmation UI
+  (`ServiceRequestProposalCard`, `src/components/guest/concierge-chat.tsx`):**
+  when `sendConciergeMessageAction()` extracts a valid
+  `proposeServiceRequest` tool-call result from that turn's `toolCalls`
+  into `ConciergeChatState.proposal` (application state, never chat
+  prose — a turn that produced no proposal always clears any prior
+  pending one, so a stale card can never linger once the guest asks
+  something else), the chat renders a real card showing the exact
+  guest-facing type/notes with "Confirm Request"/"Cancel" buttons. Cancel
+  is a pure client-side discard (no server call, nothing created).
+  Confirm submits a SEPARATE form bound to `confirmServiceRequestAction`
+  — the button is disabled for the duration of a pending submission
+  (`useActionState`'s own `isPending`), and each proposal card is
+  `key`ed by the chat turn index so a later, different proposal never
+  inherits an earlier one's confirm/error state.
+- **`confirmServiceRequestAction` (`src/app/(guest)/concierge/actions.ts`)
+  — the ONLY place a guest-created `ServiceRequest` row is ever written,
+  and NEVER added to any AI tool registry** (the model has no way to
+  invoke it; a plain "yes"/"okay" typed in chat has no code path here at
+  all). On every call: resolves the raw token from `formData` (never
+  trusts a client-supplied `hotelId`/`reservationId`/`guestId`/`status`/
+  `assignedToId` — this action's own `formData` handling never reads any
+  of those fields), re-verifies it fresh
+  (`resolveVerifiedReservationContext()` — full signature/expiry/current-
+  tenant/DB-ownership pipeline, independently of whatever the chat turn
+  that produced the proposal already checked), revalidates the
+  client-resubmitted `type`/`notes` server-side, then calls
+  `createForVerifiedGuest()` with `context.reservationId`/`guestId` only.
+  Returns only `{status, requestType, requestStatus}` or
+  `{status: "error", error}` — never a raw Prisma row or internal id.
+  Rate-limited under its own key
+  (`confirmServiceRequestRateLimitKey()`, `src/lib/ai/rateLimiter.ts`) —
+  reuses the exact same in-memory, per-process, demo/local-only
+  `checkRateLimit()` mechanism the M6c booking-verification limiter
+  already uses (5 attempts/10 min), not new infrastructure; that file's
+  own doc comment now notes both call sites share the mechanism under
+  independent key prefixes. Double-submit protection is client-side only
+  (the disabled Confirm button + the card being replaced by a success
+  state on success) — there is no DB-level idempotency constraint on
+  `ServiceRequest` for a genuine race, an explicitly accepted, documented
+  v0.1 limitation (no schema change was in this phase's approved scope).
+- **Mock provider (`src/lib/ai/providers/mock.ts`):** a new
+  creation-intent check (`SERVICE_REQUEST_CREATE_TRIGGER` — an action
+  verb — combined with either a specific-type keyword or a generic
+  "special/service request" phrase, deliberately requiring BOTH so an
+  ordinary informational question like "Do you have laundry service?" is
+  never misread as a creation request) runs after the existing
+  `PERSONAL_INFO_PATTERN` status-query check and before the room-type/
+  knowledge branches. Calls `proposeServiceRequest` when present (verified
+  tier only) and answers strictly from its output — a valid proposal
+  tells the guest to review the card and press Confirm Request
+  themselves, never that anything was submitted; an invalid one (or a
+  token that no longer resolves) gets a safe generic decline. Absent the
+  tool (anonymous tier), the block is skipped entirely — no new anonymous
+  capability.
+- **System prompt (`buildVerifiedConciergeSystemPrompt()`,
+  `src/lib/ai/prompt.ts`):** may call `proposeServiceRequest`; explicitly
+  told it cannot submit one itself, that a conversational "yes"/"okay"/
+  "do it" is never approval, and to tell the guest to review the card and
+  press Confirm Request. Still refuses to itself change/cancel/complete a
+  service request or book/modify/cancel a reservation. This is
+  belt-and-suspenders on top of the real structural guarantee (no tool
+  the model can call ever writes to the database) — never the only
+  defense.
+- **PII minimization unchanged:** the model only ever receives the
+  guest-authored request text and the tool's own validated `{type, label,
+  notes}` — never booking email/phone, nationality, a raw `Guest`/
+  `Reservation` row, token contents, or staff data (same M6c invariant,
+  untouched).
+- **Tests added:** `tests/unit/serviceRequestTypes.test.ts`,
+  `tests/unit/ai/proposeServiceRequest.test.ts`, extended
+  `tests/unit/ai/verifiedConciergeTools.test.ts` (registry now exposes
+  three tools; `proposeServiceRequest`'s own validation/re-verification/
+  input-ignoring behavior), extended `tests/unit/ai/mockProvider.test.ts`
+  (creation-intent recognition, OTHER fallback, informational-question and
+  status-query non-collision, invalid-proposal decline, anonymous-tier
+  absence), extended `tests/unit/ai/conciergeAction.test.ts` (proposal
+  surfacing/clearing, anonymous never receives the tool), new
+  `tests/unit/ai/conciergeConfirmAction.test.ts` (happy path, no/stale
+  token, type revalidation, client-supplied-id rejection, write failure,
+  rate limiting), new
+  `tests/integration/serviceRequestCreateForVerifiedGuest.test.ts` (real
+  DB: authorized creation, every enum type, invalid-type rejection,
+  cross-tenant/nonexistent/wrong-guest rejection, all creating zero rows),
+  extended `tests/e2e/concierge.spec.ts` (proposal card -> typed "yes"
+  creates nothing -> Cancel creates nothing -> Confirm Request creates
+  exactly one real row, read back through the existing M6c status tool;
+  folded into the existing consolidated verification test to stay inside
+  the shared per-process rate limiter's budget, per that test's own
+  documented rationale; plus a new standalone anonymous-tier test proving
+  no card/capability leaks pre-verification), extended the "no leaked
+  internals" e2e test.
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (**205/205**); `npm run test:integration`
+  (**173/173**); `npm run build` (only `DATABASE_URL`/`AUTH_SECRET`/
+  `AUTH_URL`/`CONCIERGE_TOKEN_SECRET`/`NEXT_PUBLIC_APP_URL` exported, no
+  `NODE_ENV`) — clean. Full Playwright suite, `--workers=1`: **74/74**
+  (a first full run hit 2 failures — one a pre-existing, undocumented-until-now
+  data-collision in `booking.spec.ts`'s fixed-date-offset inventory test
+  caused by leftover `@example.com` fixture rows from an earlier session's
+  runs, not a regression from this phase; the other this phase's own test
+  bug — `confirmServiceRequestAction`'s Server Action reference name
+  legitimately appears once in the page's Next.js dev-mode hydration
+  payload, exactly like the pre-existing `sendConciergeMessageAction`/
+  `verifyReservationContextAction` references never checked for, so it
+  was removed from the "no leaked tool internals" regex while
+  `proposeServiceRequest`, the actual AI-tool name, stayed and correctly
+  never appears — both fixed, DB cleaned, full suite re-run clean). DB
+  baseline restored afterward (52 rooms AVAILABLE, 0 Guest/Reservation/
+  ServiceRequest/MaintenanceIssue).
+- No schema change, no secrets, no staff/admin mutation, no guest
+  lifecycle mutation (status/cancel/assign remain staff-only), no M6e or
+  M7 work.
+
 ## M6 — AI Guest Concierge, Phase c security correction (2026-08-27)
 A pre-push security review of the Phase c commit (`5dc9cd6`) found two real
 gaps, both fixed here — neither is new scope.

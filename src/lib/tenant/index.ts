@@ -20,6 +20,7 @@ import {
   isAdministrativeClose,
   type MaintenanceStatus,
 } from "@/lib/domain/maintenanceTransitions";
+import { normalizeServiceRequestType } from "@/lib/domain/serviceRequestTypes";
 
 /**
  * Centralized tenant-aware data access (docs/ARCHITECTURE.md,
@@ -78,6 +79,22 @@ export class InvalidTransitionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvalidTransitionError";
+  }
+}
+
+/**
+ * M6d — `serviceRequests.createForVerifiedGuest()`'s server-side
+ * revalidation of `type` (against the existing `ServiceRequestType` enum,
+ * via `normalizeServiceRequestType()`) failed. Distinct from
+ * `InvalidTransitionError` — this is about the create-time input shape, not
+ * a status-lifecycle transition. Never guest-facing verbatim —
+ * `confirmServiceRequestAction` catches this and returns its own generic,
+ * non-disclosing failure message (docs/DECISIONS.md M6d design).
+ */
+export class InvalidServiceRequestTypeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidServiceRequestTypeError";
   }
 }
 
@@ -1108,6 +1125,74 @@ export function withTenant(hotelId: string) {
             notes: input.notes || null,
           },
           include: { guest: true, reservation: true },
+        });
+      },
+
+      /**
+       * M6d — the guest-authority ServiceRequest-creation entry point,
+       * structurally distinct from `createForStaff()` above (never reused
+       * as the guest boundary — docs/DECISIONS.md M6d design: staff and
+       * verified-guest authority must remain structurally separate). Callers
+       * must obtain `reservationId`/`guestId` ONLY from
+       * `resolveVerifiedReservationContext()`'s already-verified,
+       * already-tenant-and-guest-scoped result (`confirmServiceRequestAction`,
+       * `src/app/(guest)/concierge/actions.ts`) — never from raw client
+       * input, and this function performs its OWN fresh, independent
+       * tenant-scoped re-check regardless of what the caller already did
+       * (the same "never trust an earlier check alone" defense-in-depth
+       * rule `resolveVerifiedReservationContext()` itself follows):
+       *   1. Load the reservation scoped to `hotelId` — `RecordNotFoundError`
+       *      if missing/cross-tenant (no existence leak, same convention as
+       *      every other scoped lookup in this file).
+       *   2. Confirm the reservation's own `guestId` equals the supplied
+       *      `guestId` — `RecordNotFoundError` (not a distinct error) if it
+       *      doesn't, so a reservation/guest mismatch is indistinguishable
+       *      from "doesn't exist" to any caller.
+       *   3. Load the guest scoped to `hotelId` — `RecordNotFoundError` if
+       *      missing/cross-tenant.
+       *   4. Revalidate `type` against the existing `ServiceRequestType`
+       *      enum via `normalizeServiceRequestType()` — an invalid/
+       *      hallucinated type throws `InvalidServiceRequestTypeError`
+       *      rather than ever reaching `prisma.serviceRequest.create()`.
+       * `status` is never a parameter — every created row gets the schema
+       * default (`PENDING`), there is no `assignedToId` field on this
+       * model at all, and the guest has no way to supply either. No
+       * transaction wrapper is needed (same reasoning as `createForStaff()`
+       * — one new row, no related-row update alongside it).
+       */
+      createForVerifiedGuest: async (input: {
+        reservationId: string;
+        guestId: string;
+        type: unknown;
+        notes?: string | null;
+      }) => {
+        const reservation = await prisma.reservation.findFirst({
+          where: { id: input.reservationId, hotelId },
+        });
+        if (!reservation || reservation.guestId !== input.guestId) {
+          throw new RecordNotFoundError(
+            `No reservation ${input.reservationId} found for this guest at this hotel.`
+          );
+        }
+
+        const guest = await prisma.guest.findFirst({ where: { id: input.guestId, hotelId } });
+        if (!guest) {
+          throw new RecordNotFoundError(`No guest ${input.guestId} found for this hotel.`);
+        }
+
+        const type = normalizeServiceRequestType(input.type);
+        if (!type) {
+          throw new InvalidServiceRequestTypeError(`"${String(input.type)}" is not a valid service request type.`);
+        }
+
+        return prisma.serviceRequest.create({
+          data: {
+            hotelId,
+            guestId: guest.id,
+            reservationId: reservation.id,
+            type,
+            notes: input.notes || null,
+          },
         });
       },
 

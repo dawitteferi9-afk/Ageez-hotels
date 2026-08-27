@@ -26,6 +26,20 @@ import { test, expect, type Page } from "@playwright/test";
  * disposable fixture hotels. See the one consolidated verification test
  * below for why it deliberately covers success/failure/rate-limiting all
  * in one place rather than several independent tests.
+ *
+ * M6d (proposal -> Confirm Request -> real ServiceRequest row) is folded
+ * INTO that same consolidated verification test, immediately after its
+ * existing personalized-question assertions, rather than given its own
+ * `test()` block — for the identical reason booking verification itself
+ * is consolidated: `checkRateLimit()` (`src/lib/ai/rateLimiter.ts`) is a
+ * single in-memory, per-process counter keyed by client IP, and a local
+ * `npm run dev` with no reverse proxy means every attempt in this whole
+ * Playwright run shares the same "unknown" IP bucket. `confirmServiceRequestAction`
+ * has its own separate 5-per-10-minute budget from `verifyReservationContextAction`
+ * (`confirmServiceRequestRateLimitKey()` vs `verifyReservationRateLimitKey()`),
+ * but is exercised only once here to stay well clear of it. The
+ * already-verified session/token from that test is reused rather than
+ * spending a second verification attempt.
  */
 
 function conciergeLog(page: Page) {
@@ -213,6 +227,48 @@ test("booking verification: success, generic failures, real grounded personal an
   await ask(page, "Has my request been completed?");
   await expect(conciergeLog(page).getByText(/no service requests/i)).toBeVisible();
 
+  // --- M6d: proposal -> (typed "yes" does NOT create) -> Cancel (does NOT
+  // create) -> Confirm Request (creates exactly one real row) ---
+
+  // A creation-intent message produces a real, deterministic confirmation
+  // card — never a claim that anything was already submitted.
+  await ask(page, "Please arrange laundry — collect two shirts.");
+  await expect(page.getByText("Review your service request")).toBeVisible();
+  await expect(page.getByText("Laundry", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm Request" })).toBeVisible();
+  await expect(conciergeLog(page).getByText(/Confirm Request/)).toBeVisible();
+  await expect(conciergeLog(page).getByText(/submitted|has been created/i)).not.toBeVisible();
+
+  // A plain conversational "yes" is never treated as approval — it is just
+  // another chat message (routed through the ordinary AI path, producing
+  // no new proposal), and creates nothing.
+  await ask(page, "yes");
+  await expect(page.getByRole("button", { name: "Confirm Request" })).not.toBeVisible();
+  await ask(page, "Has my request been completed?");
+  await expect(conciergeLog(page).getByText(/no service requests/i).last()).toBeVisible();
+
+  // Re-propose, then Cancel: discards client-side, creates nothing.
+  await ask(page, "Please arrange laundry — collect two shirts.");
+  await expect(page.getByRole("button", { name: "Confirm Request" })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).last().click();
+  await expect(page.getByRole("button", { name: "Confirm Request" })).not.toBeVisible();
+  await ask(page, "Has my request been completed?");
+  await expect(conciergeLog(page).getByText(/no service requests/i).last()).toBeVisible();
+
+  // Re-propose a third time, and this time actually press Confirm Request —
+  // this is the ONLY thing that creates a real ServiceRequest row.
+  await ask(page, "Please arrange laundry — collect two shirts.");
+  await expect(page.getByRole("button", { name: "Confirm Request" })).toBeVisible();
+  await page.getByRole("button", { name: "Confirm Request" }).click();
+  await expect(page.getByText(/Request submitted/)).toBeVisible();
+  await expect(page.getByText(/Laundry \(PENDING\)/)).toBeVisible();
+
+  // The subsequent status query now reflects the REAL created row, read
+  // back through the already-approved M6c getServiceRequestStatus tool —
+  // never invented, never the same "no service requests" reply as before.
+  await ask(page, "Has my request been completed?");
+  await expect(conciergeLog(page).getByText(/LAUNDRY.*PENDING/).last()).toBeVisible();
+
   // Clearing verification returns to the exact M6b anonymous experience.
   await page.getByRole("button", { name: "Clear verification" }).click();
   await ask(page, "What room am I booked in?");
@@ -261,6 +317,23 @@ test("a tampered/invalid verified-context token gets the deterministic verify-ag
   expect(content).not.toMatch(/expired|tampered|signature|tenant/i);
 });
 
+test("M6d: an anonymous (never-verified) guest asking to create a service request gets no confirmation card and creates nothing", async ({
+  page,
+}) => {
+  await page.goto("/concierge");
+
+  await ask(page, "Please arrange laundry — collect two shirts.");
+
+  // proposeServiceRequest is never in the anonymous tool list at all (see
+  // getAnonymousConciergeTools()), so this falls through to ordinary
+  // anonymous handling — no confirmation card, no "Confirm Request" control
+  // anywhere on the page, and no claim anything was prepared or submitted.
+  await expect(page.getByRole("button", { name: "Confirm Request" })).not.toBeVisible();
+  await expect(page.getByText("Review your service request")).not.toBeVisible();
+  const content = await conciergeLog(page).textContent();
+  expect(content).not.toMatch(/submitted|Confirm Request/i);
+});
+
 test("mock-provider mode is deterministic — the same question gets the same answer", async ({ page }) => {
   await page.goto("/concierge");
   await ask(page, "Tell me about the restaurant.");
@@ -283,7 +356,17 @@ test("no concierge response ever exposes provider keys, tool internals, or the r
   await expect(conciergeLog(page).getByText(/2:00 PM/)).toBeVisible();
 
   const html = await page.content();
+  // NOTE: `confirmServiceRequestAction` is deliberately NOT in this list.
+  // Like the pre-existing `sendConciergeMessageAction`/
+  // `verifyReservationContextAction` Server Actions (also never checked for
+  // here), Next.js's dev-mode Server Action reference serialization embeds
+  // its function name once in the page's hydration payload so the client
+  // component can invoke it — this is how EVERY Server Action bound to a
+  // Client Component in this app already works, not a tool-internal leak.
+  // `proposeServiceRequest` (the actual AI-tool name the model calls) IS
+  // checked below, and correctly never appears — it has no client-side
+  // reference at all, only a server-side `AiToolDefinition`.
   expect(html).not.toMatch(
-    /sk-ant-|ANTHROPIC_API_KEY|CONCIERGE_TOKEN_SECRET|inputSchema|toolCalls|getHotelKnowledge|getRoomTypesSummary|getReservationSummary|getServiceRequestStatus|systemPrompt/
+    /sk-ant-|ANTHROPIC_API_KEY|CONCIERGE_TOKEN_SECRET|inputSchema|toolCalls|getHotelKnowledge|getRoomTypesSummary|getReservationSummary|getServiceRequestStatus|proposeServiceRequest|systemPrompt/
   );
 });

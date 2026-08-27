@@ -4,6 +4,107 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-27 — M6 Phase d (confirmed guest service request creation) implementation decisions
+**Status:** Approved-by-continuation (implements the M6d scope handed down
+by the Product Owner — a deterministic propose/confirm flow, LLM never the
+mutation authority — these are the concrete choices this phase's
+implementation required)
+**Decision:**
+1. **`serviceRequests.createForVerifiedGuest()` is structurally distinct
+   from `createForStaff()`, never a shared function with a role flag.**
+   Guest authority comes exclusively from a `resolveVerifiedReservationContext()`-
+   verified `{reservationId, guestId}` pair; it performs its own fresh,
+   independent tenant+guest-ownership re-check regardless of what the
+   caller already verified (same "never trust an earlier check alone"
+   rule `resolveVerifiedReservationContext()` itself follows), and has no
+   `assignedToId`/`status` parameter at all — the schema default (`PENDING`)
+   is the only reachable initial state, and there is still exactly one
+   `ServiceRequest` lifecycle implementation (`updateStatus()`, unchanged,
+   staff-only).
+2. **The proposal tool (`proposeServiceRequest`) is genuinely incapable of
+   writing, not merely policy-restricted from it.** It imports neither
+   `@/lib/tenant` nor `@prisma/client` — the file itself is the proof, not
+   just a code-review claim. `confirmServiceRequestAction` — the only
+   function that ever calls `createForVerifiedGuest()` — is never added to
+   `getVerifiedConciergeTools()` or any other tool registry, so there is
+   no code path from a model tool call to a database write anywhere in
+   this phase. This is the load-bearing guarantee the task's "LLM must
+   NEVER be the authority that executes the write" requirement reduces to
+   structurally, not just via prompt instructions (the prompt update is
+   belt-and-suspenders on top of this, never the only defense).
+3. **The client-displayed proposal is surfaced as typed application state
+   (`ConciergeChatState.proposal`), extracted from that turn's
+   `AiToolCallRecord[]` after `converse()` returns — never parsed or
+   inferred from the model's reply text.** A turn that produced no
+   `proposeServiceRequest` call always sets `proposal: undefined`,
+   replacing (never merging with) whatever the previous turn held — a
+   guest asking something else, or a stale/invalid token, always clears
+   any pending card rather than leaving it silently confirmable later
+   against outdated context.
+4. **Confirm and Cancel are two separate, asymmetric operations by
+   design.** Cancel is a pure client-side state discard — no Server Action
+   call at all, nothing created, nothing to revalidate. Confirm is the
+   only path that reaches the server, and re-does every check
+   `verifyReservationContextAction`'s own token issuance already did once,
+   independently — the client-resubmitted `type`/`notes` (necessarily sent
+   back, since that's what was shown on the card) are explicitly treated
+   as untrusted request data and revalidated server-side via the same
+   `normalizeServiceRequestType()`/`normalizeServiceRequestNotes()` the
+   proposal tool used to build the card in the first place — shared
+   validation logic, not two competing implementations that could drift.
+5. **Rate limiting reuses the exact same `checkRateLimit()` mechanism
+   under a new key prefix (`confirmServiceRequestRateLimitKey()`), not a
+   new limiter.** `src/lib/ai/rateLimiter.ts`'s existing honest demo/
+   local-only scope (in-memory, per-process, resets on redeploy, no
+   protection across horizontally-scaled instances) applies identically
+   here — this phase's own scope boundary explicitly disallowed new
+   distributed infrastructure (Redis/KV), and reusing the mechanism under
+   an independent key namespace is the smallest honest v0.1 approach
+   consistent with the already-approved M6c design, not a new pattern.
+6. **Double-submission is guarded client-side only (disabled Confirm
+   button + a successful confirm replacing the card with a success
+   state), with no DB-level idempotency constraint.** A genuine race
+   (e.g. two rapid, distinct HTTP requests before the client can disable
+   the button) could in principle create two rows for one proposal — a
+   unique/idempotency constraint on `ServiceRequest` would require a
+   schema change, explicitly out of this phase's approved scope. Recorded
+   here as an accepted, documented v0.1 limitation rather than silently
+   built around or silently ignored (CLAUDE.md rule 8).
+7. **Two pre-existing e2e issues were found and fixed during this phase's
+   own full-suite verification, neither a regression from this phase's
+   application code:**
+   - `tests/e2e/booking.spec.ts`'s fixed-date-offset inventory-exhaustion
+     test (`isoDate(30)`/`isoDate(32)`) collided with leftover
+     `overlap-guest-{1,2}@example.com` Presidential Suite reservations at
+     the identical date range, left behind by an earlier session's run of
+     the same test on the same calendar day — the exact class of gotcha
+     this project's own memory notes already document ("fixed day-offsets
+     ... can collide with old leftover rows for the same dates"). Fixed by
+     deleting all leftover `@example.com` guest/reservation/ServiceRequest
+     rows and resetting `Room.status` before re-running; no application or
+     test code changed for this one.
+   - This phase's OWN new assertion in `tests/e2e/concierge.spec.ts`'s
+     "no leaked internals" test incorrectly included
+     `confirmServiceRequestAction` in a regex meant to catch internal
+     AI-tool-name leaks. `confirmServiceRequestAction` is a plain Next.js
+     Server Action passed as a prop to a Client Component, exactly like
+     the pre-existing `sendConciergeMessageAction`/
+     `verifyReservationContextAction` (neither ever checked for) — Next's
+     dev-mode Server Action reference serialization legitimately embeds
+     its function name once in the page's hydration payload so the client
+     can invoke it; this is not a tool-internal or secret leak. Fixed by
+     removing it from the regex (with a comment explaining why); the
+     actual tool-internal name, `proposeServiceRequest`, stayed in the
+     regex and correctly never appears anywhere in the page.
+**Rationale:** All seven points are small, load-bearing implementation
+choices or genuine findings this phase's own verification required,
+following the same "flag/record rather than silently invent or silently
+omit" standard prior M4/M5/M6 decision entries already established
+(CLAUDE.md rule 8) — none expand scope, weaken tenant isolation, or add a
+second mutation path.
+
+---
+
 ## 2026-08-27 — M6c security correction: phone cannot bypass an existing email; a stale token gets its own deterministic reply
 **Status:** Approved (Product Owner pre-push security review of `5dc9cd6`)
 **Decision:**

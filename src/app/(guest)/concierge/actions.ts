@@ -2,12 +2,17 @@
 
 import { headers } from "next/headers";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
-import { getAiProvider, type AiChatTurn } from "@/lib/ai/provider";
+import { getAiProvider, type AiChatTurn, type AiToolCallRecord } from "@/lib/ai/provider";
 import { buildAnonymousConciergeSystemPrompt, buildVerifiedConciergeSystemPrompt } from "@/lib/ai/prompt";
 import { getAnonymousConciergeTools } from "@/lib/ai/tools/anonymousConciergeTools";
 import { getVerifiedConciergeTools } from "@/lib/ai/tools/verifiedConciergeTools";
 import { signVerifiedContextToken, resolveVerifiedReservationContext } from "@/lib/ai/verifiedContext";
-import { checkRateLimit, verifyReservationRateLimitKey } from "@/lib/ai/rateLimiter";
+import { checkRateLimit, verifyReservationRateLimitKey, confirmServiceRequestRateLimitKey } from "@/lib/ai/rateLimiter";
+import {
+  normalizeServiceRequestType,
+  normalizeServiceRequestNotes,
+  serviceRequestTypeLabel,
+} from "@/lib/domain/serviceRequestTypes";
 
 /**
  * M6 Phase b — the anonymous guest concierge's ONLY server-side entry
@@ -51,10 +56,60 @@ import { checkRateLimit, verifyReservationRateLimitKey } from "@/lib/ai/rateLimi
  * (`useActionState` in `concierge-chat.tsx`) — this function is stateless
  * per call and writes nothing to the database. No conversation, message,
  * or token content is persisted or logged anywhere here.
+ *
+ * M6d extends the SAME action further still: when a verified conversation's
+ * turn calls the `proposeServiceRequest` tool, this action extracts its
+ * validated `{type, label, notes}` result into `ConciergeChatState.proposal`
+ * (see `extractServiceRequestProposal()` below) — application state the UI
+ * renders as a confirmation card, never chat prose. This action itself
+ * still never writes a `ServiceRequest` row; the actual mutation only ever
+ * happens via the separate `confirmServiceRequestAction()` further down
+ * this file, wired only to the "Confirm Request" button, never to the AI.
  */
+/**
+ * M6d — a validated, guest-safe ServiceRequest proposal surfaced as
+ * application state, never as chat prose. Extracted from
+ * `AiConverseResult.toolCalls` after `getAiProvider().converse()` returns —
+ * see `extractServiceRequestProposal()` below — never invented from the
+ * model's reply text. Deliberately carries no `reservationId`/`guestId`:
+ * `confirmServiceRequestAction` derives both fresh from the verified token
+ * alone, never from anything this object carries or the client resubmits.
+ */
+export interface ServiceRequestProposalView {
+  /** The raw `ServiceRequestType` enum value — resubmitted (and revalidated) by the Confirm Request form. */
+  type: string;
+  /** Guest-facing label (e.g. "Laundry") for display only. */
+  label: string;
+  notes: string | null;
+}
+
 export interface ConciergeChatState {
   messages: AiChatTurn[];
   error?: string;
+  /**
+   * The pending proposal from the MOST RECENT assistant turn only — always
+   * set (to `undefined` if that turn produced none), never merged with an
+   * earlier turn's proposal, so a stale card can never linger once the
+   * guest asks something else.
+   */
+  proposal?: ServiceRequestProposalView;
+}
+
+/**
+ * M6d — pulls a valid `proposeServiceRequest` tool-call result out of this
+ * turn's `toolCalls`, if one is present, into the guest-safe view the UI
+ * renders as a confirmation card. Never trusts/echoes anything from the
+ * model's own reply text — only the tool's own structured, already-
+ * validated output (`{valid, type, label, notes}` — see
+ * `proposeServiceRequest()`). An invalid proposal (`{valid: false}`) or no
+ * proposal-tool call at all both yield `undefined` — no card renders.
+ */
+function extractServiceRequestProposal(toolCalls: AiToolCallRecord[]): ServiceRequestProposalView | undefined {
+  const call = [...toolCalls].reverse().find((c) => c.name === "proposeServiceRequest");
+  if (!call) return undefined;
+  const result = call.result as { valid: boolean; type?: string; label?: string; notes?: string | null };
+  if (!result.valid || !result.type || !result.label) return undefined;
+  return { type: result.type, label: result.label, notes: result.notes ?? null };
 }
 
 const GENERIC_ERROR =
@@ -128,7 +183,14 @@ export async function sendConciergeMessageAction(
 
   try {
     const result = await getAiProvider().converse({ systemPrompt, history: messagesWithGuestTurn, tools });
-    return { messages: [...messagesWithGuestTurn, { role: "assistant", content: result.reply }] };
+    return {
+      messages: [...messagesWithGuestTurn, { role: "assistant", content: result.reply }],
+      // Always set from THIS turn's tool calls only (`undefined` if this
+      // turn produced none) — replaces, never merges with, whatever
+      // `prevState.proposal` held, so an old pending card never survives a
+      // new message (docs/DECISIONS.md M6d design).
+      proposal: extractServiceRequestProposal(result.toolCalls),
+    };
   } catch {
     // Deliberately not inspecting/forwarding the error — it may carry a
     // provider-specific message or structure. The guest sees the same
@@ -216,5 +278,127 @@ export async function verifyReservationContextAction(
   } catch {
     // CONCIERGE_TOKEN_SECRET missing/misconfigured — never guest-facing.
     return { error: VERIFY_GENERIC_ERROR };
+  }
+}
+
+/**
+ * M6d — the ONLY place a guest-created `ServiceRequest` row is ever
+ * written. This is a plain Server Action wired directly to the "Confirm
+ * Request" button in `concierge-chat.tsx` — it is NEVER added to an AI
+ * tool registry (see `verifiedConciergeTools.ts`'s module comment) and the
+ * model has no way to invoke it. A conversational "yes"/"okay" in the chat
+ * has no code path here at all; only an actual form submission from the
+ * confirmation card does.
+ *
+ * Re-verifies everything fresh on every call, exactly per the M6d design's
+ * required flow — never trusts the client-submitted `type`/`notes` (revalidated
+ * here, and again inside `createForVerifiedGuest()`) and never accepts a
+ * client-supplied `hotelId`/`reservationId`/`guestId`/`status`/`assignedToId`
+ * at all (this action's own `formData` handling never reads any of those
+ * fields — structurally, not just by choice):
+ *   1. Resolve the raw token from `formData` (the same hidden field the
+ *      chat form threads through, not a bearer header).
+ *   2. `resolveVerifiedReservationContext(token)` — the full signature/
+ *      expiry/current-tenant/fresh-DB-ownership pipeline (identical to
+ *      every other verified-tier operation). A stale/expired/tampered/
+ *      wrong-tenant token fails this and returns null — `VERIFY_AGAIN_ERROR`,
+ *      no row created.
+ *   3. Revalidate `type` via `normalizeServiceRequestType()` — an
+ *      unrecognized value (tampering, or a stale proposal from a
+ *      superseded UI render) is rejected with the same generic error, not
+ *      a distinct message that would disclose which check failed.
+ *   4. `withTenant(context.hotelId).serviceRequests.createForVerifiedGuest()`
+ *      — `context.reservationId`/`context.guestId` ONLY, never anything
+ *      from `formData` — performs its own fresh tenant+guest ownership
+ *      lookup independently of step 2 (defense in depth, same rule every
+ *      other verified operation in this codebase follows).
+ *   5. Returns only a safe, deterministic `{status, requestType,
+ *      requestStatus}` or `{status: "error", error}` — never a raw Prisma
+ *      row, an internal id, or exception detail.
+ *
+ * Rate-limited per client IP under its own key
+ * (`confirmServiceRequestRateLimitKey()`), reusing the exact same demo/
+ * local-only limiter `verifyReservationContextAction` already uses — see
+ * `src/lib/ai/rateLimiter.ts` for its honest, documented scope (in-memory,
+ * per-process, not a substitute for a real distributed limiter in
+ * production). This narrows abuse from a scripted loop; it does not by
+ * itself prevent a genuine accidental double-click from creating two rows
+ * — there is no unique/idempotency constraint on `ServiceRequest` for that
+ * (would require a schema change, out of this phase's approved scope). The
+ * primary double-submit guard is client-side: `concierge-chat.tsx` disables
+ * the "Confirm Request" button for the duration of a pending submission via
+ * `useActionState`'s own `isPending` flag, and a successful confirmation
+ * replaces the confirmation card with a success state so the same proposal
+ * cannot be resubmitted at all afterward. This is an accepted, documented
+ * v0.1 limitation, not a silent gap.
+ */
+export interface ConfirmServiceRequestState {
+  status: "idle" | "success" | "error";
+  /** Guest-facing label of the created request (e.g. "Laundry") — set only on success. */
+  requestType?: string;
+  /** The created row's `ServiceRequestStatus` (always the schema default, `PENDING`, in v0.1) — set only on success. */
+  requestStatus?: string;
+  error?: string;
+}
+
+const CONFIRM_GENERIC_ERROR =
+  "We couldn't submit that request. Please try again, or contact the front desk for help.";
+
+const CONFIRM_VERIFY_AGAIN_ERROR =
+  "Your booking verification could not be confirmed. Please verify your booking again, then resend your request.";
+
+const CONFIRM_RATE_LIMIT_ERROR =
+  "Too many requests submitted in a short time. Please wait a while before trying again, or contact the front desk.";
+
+export async function confirmServiceRequestAction(
+  _prevState: ConfirmServiceRequestState,
+  formData: FormData
+): Promise<ConfirmServiceRequestState> {
+  const clientIp = await getClientIpForRateLimit();
+  if (!checkRateLimit(confirmServiceRequestRateLimitKey(clientIp))) {
+    return { status: "error", error: CONFIRM_RATE_LIMIT_ERROR };
+  }
+
+  const tokenRaw = formData.get("token");
+  const token = typeof tokenRaw === "string" ? tokenRaw.trim() : "";
+  if (!token) {
+    return { status: "error", error: CONFIRM_VERIFY_AGAIN_ERROR };
+  }
+
+  // Full token-authorization pipeline, independently re-run — never trusts
+  // that the chat turn which produced this proposal card already checked
+  // this a moment ago.
+  const context = await resolveVerifiedReservationContext(token);
+  if (!context) {
+    return { status: "error", error: CONFIRM_VERIFY_AGAIN_ERROR };
+  }
+
+  // The client necessarily resubmits the proposed type/notes as untrusted
+  // request data (that's what was shown on the card) — revalidate both
+  // here, server-side, rather than trusting them.
+  const type = normalizeServiceRequestType(formData.get("type"));
+  if (!type) {
+    return { status: "error", error: CONFIRM_GENERIC_ERROR };
+  }
+  const notes = normalizeServiceRequestNotes(formData.get("notes"));
+
+  try {
+    const created = await withTenant(context.hotelId).serviceRequests.createForVerifiedGuest({
+      reservationId: context.reservationId,
+      guestId: context.guestId,
+      type,
+      notes,
+    });
+    return {
+      status: "success",
+      requestType: serviceRequestTypeLabel(type),
+      requestStatus: created.status,
+    };
+  } catch {
+    // Deliberately not inspecting/forwarding the error (RecordNotFoundError,
+    // InvalidServiceRequestTypeError, or anything else) — the guest sees
+    // the same safe generic message regardless of cause, matching every
+    // other action in this file.
+    return { status: "error", error: CONFIRM_GENERIC_ERROR };
   }
 }

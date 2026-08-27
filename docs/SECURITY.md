@@ -219,10 +219,69 @@ for the full design. The security-relevant invariants:
   Robust, shared/distributed rate limiting (Redis/KV-backed, or an
   edge/WAF-level limiter) is an explicit, deferred production-deployment
   requirement, not something v0.1 claims to have solved.
-- **No mutation exists yet.** M6c is read-only — no ServiceRequest
-  creation, no reservation modification, no check-in/check-out, no
-  room-status change is reachable from the anonymous concierge at any
-  verification level. That is M6d+ scope.
+- **No reservation/room mutation exists.** No reservation modification,
+  no check-in/check-out, no room-status change is reachable from the
+  concierge at any verification level. The one exception, added in M6d,
+  is described next.
+
+### Verified guest ServiceRequest creation (M6d)
+A verified guest may create ONE new `ServiceRequest` for their own
+reservation — the first (and, in v0.1, only) guest-facing mutation
+reachable from `/concierge`. The security-relevant invariants:
+- **The LLM cannot execute the write, structurally, not just by
+  policy.** The only tool the model may call toward this,
+  `proposeServiceRequest`
+  (`src/lib/ai/tools/proposeServiceRequest.ts`), imports neither
+  `@/lib/tenant` nor `@prisma/client` — it is provably incapable of
+  writing to the database. The function that actually writes,
+  `confirmServiceRequestAction`
+  (`src/app/(guest)/concierge/actions.ts`), is a plain Server Action
+  bound only to the "Confirm Request" button in
+  `src/components/guest/concierge-chat.tsx` — it is never added to
+  `getVerifiedConciergeTools()` or any other AI tool registry, so there
+  is no code path from a model tool call to this action. A conversational
+  "yes"/"okay"/"do it" has no handler at all; only the actual button
+  click submits the form.
+- **The proposal is deterministic application state, not model prose.**
+  `sendConciergeMessageAction()` extracts a validated
+  `{type, label, notes}` from that turn's own `proposeServiceRequest`
+  tool-call result into `ConciergeChatState.proposal` — the confirmation
+  card renders from that typed value, never parsed out of the model's
+  reply text. A turn producing no such tool call always clears any prior
+  pending proposal.
+- **`confirmServiceRequestAction` re-verifies everything fresh, exactly
+  like every other verified-tier operation.** It resolves the raw token
+  from `formData`, re-runs the full `resolveVerifiedReservationContext()`
+  pipeline (signature, expiry, current-tenant match, fresh tenant+guest
+  DB lookup) independently of whatever the chat turn that built the
+  proposal already checked, and revalidates the client-resubmitted
+  `type`/`notes` server-side (`normalizeServiceRequestType()`/
+  `normalizeServiceRequestNotes()`) before ever calling
+  `createForVerifiedGuest()`. It never reads or trusts a client-supplied
+  `hotelId`/`reservationId`/`guestId`/`status`/`assignedToId` — its own
+  `formData` handling has no code path to any of those fields.
+- **Guest authority is a structurally separate entry point from staff
+  authority.** `withTenant().serviceRequests.createForVerifiedGuest()` is
+  never `createForStaff()` reused with a role flag; it performs its own
+  independent tenant+guest-ownership re-check, has no `assignedToId`/
+  `status` parameter at all, and every created row gets the schema
+  default (`PENDING`) — a verified guest cannot set status, assign staff,
+  or transition an existing request (no such path exists for a guest at
+  any tier; `updateStatus()` remains staff-only, unchanged).
+- **Cross-tenant/mismatched-guest rejection is identical to every other
+  verified operation** — a real reservation belonging to a different
+  guest, a cross-tenant reservation, or a nonexistent id all fail with
+  the same `RecordNotFoundError`, no existence leak, no row created.
+- **Rate limiting reuses the M6c limiter's mechanism, not new
+  infrastructure**, under its own key prefix
+  (`confirmServiceRequestRateLimitKey()`) — same honest demo/local-only
+  scope documented above (in-memory, per-process, not distributed-safe).
+- **Double-submission is guarded client-side only** (the Confirm button
+  disables for the duration of a pending submission, and a success
+  response replaces the card so it cannot be resubmitted) — there is no
+  DB-level idempotency constraint on `ServiceRequest`, an accepted,
+  documented v0.1 limitation (adding one would require a schema change,
+  out of this phase's approved scope).
 
 ## Secrets
 `.env.example` contains placeholders only. Real secrets belong in

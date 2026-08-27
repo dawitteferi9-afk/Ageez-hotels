@@ -9,8 +9,14 @@
      ownership of a specific reservation (booking reference + the
      contact used at booking) may additionally ask about THEIR OWN
      reservation and their own service request(s) — never another
-     guest's, never a mutation. See `docs/DECISIONS.md`'s M6c entries for
-     the verification flow, its ambiguity rule, and the token design.
+     guest's. See `docs/DECISIONS.md`'s M6c entries for the verification
+     flow, its ambiguity rule, and the token design.
+   - **Verified-tier mutation** (Phase d, implemented): a verified guest
+     may propose and, ONLY via an explicit "Confirm Request" button click,
+     create ONE new `ServiceRequest` for their own reservation. The model
+     can build a proposal; it can never execute the write. See
+     `docs/DECISIONS.md`'s M6d entry and "Verified guest ServiceRequest
+     creation (M6d)" below.
 2. **AI Management Assistant** (M7, not yet implemented) — internal,
    answers questions like occupied room count, rooms needing cleaning,
    open maintenance issues, today's arrivals, outstanding operational
@@ -24,13 +30,17 @@
   - Anonymous tier: `getHotelKnowledge()` / `getRoomTypesSummary()`
     (`src/lib/ai/tools/anonymousConciergeTools.ts`).
   - Verified tier: `getReservationSummary()` / `getServiceRequestStatus()`
-    (`src/lib/ai/tools/verifiedConciergeTools.ts`) — read-only, bound to a
+    (read-only) and `proposeServiceRequest()` (non-mutating — builds a
+    proposal, never writes) in
+    `src/lib/ai/tools/verifiedConciergeTools.ts` — all three bound to a
     raw signed verified-context token via closure, never to a
     client/model-supplied `hotelId`/`reservationId`/`guestId`. The Server
     Action decides which registry (or both, concatenated) to hand the
     provider based solely on whether a valid verified-context token was
     presented for that request — never a merged, unconditional "all
-    tools" list.
+    tools" list. **`confirmServiceRequestAction` (the actual
+    ServiceRequest-creating mutation) is a plain Server Action, never a
+    member of any tool registry — the model has no way to invoke it.**
 - No arbitrary server function execution — the whitelist is closed, not
   pattern-matched.
 - The AI must not fabricate hotel policies, prices, availability, room
@@ -49,9 +59,47 @@
   operational status/occupancy, `Reservation`/`Guest`/`ServiceRequest`
   data, or any staff/management function. The verified tier adds access
   to exactly one guest's own reservation/service-request summary — never
-  another guest's, never staff/housekeeping/maintenance/occupancy data,
-  never a mutation of any kind (no ServiceRequest creation, no
-  reservation change, no check-in/check-out — that is M6d+ scope).
+  another guest's, never staff/housekeeping/maintenance/occupancy data.
+  The ONLY mutation reachable from `/concierge`, at any verification
+  level, is creating ONE new `ServiceRequest` (M6d) — and even that is
+  never executed by the model; see below. No reservation change, no
+  check-in/check-out, no room-status change, no guest editing/cancelling/
+  reassigning an existing service request is reachable from the AI at
+  any tier — that remains M6e+/M7/staff-only scope.
+
+## Verified guest ServiceRequest creation (M6d)
+A verified guest may create ONE new `ServiceRequest` for their own
+reservation, but only through a deterministic, non-AI-executed flow:
+1. The model may call `proposeServiceRequest({type, notes})` — pure,
+   no `@/lib/tenant`/Prisma import, cannot write to the database even in
+   principle. It validates `type` against the existing `ServiceRequestType`
+   enum (`AIRPORT_TRANSFER`/`LAUNDRY`/`ROOM_SERVICE`/`RESTAURANT`/`OTHER`)
+   and returns `{valid: true, type, label, notes}` or `{valid: false}` —
+   never a new/invented type.
+2. `sendConciergeMessageAction()` extracts a valid result into
+   `ConciergeChatState.proposal` (typed application state, not chat
+   prose) — the chat UI renders it as a real confirmation card showing
+   the exact guest-facing type/notes, with "Confirm Request"/"Cancel"
+   controls.
+3. "Cancel" discards the card client-side; nothing is created. Only an
+   actual click on "Confirm Request" submits the SEPARATE
+   `confirmServiceRequestAction` Server Action — never a chat message,
+   never inferred from "yes"/"okay"/"do it".
+4. `confirmServiceRequestAction` re-verifies the raw token fresh
+   (`resolveVerifiedReservationContext()`), revalidates the
+   client-resubmitted `type`/`notes` server-side, and calls
+   `withTenant(hotelId).serviceRequests.createForVerifiedGuest({reservationId,
+   guestId, type, notes})` — a guest-authority entry point structurally
+   distinct from staff's `createForStaff()`, deriving `reservationId`/
+   `guestId` ONLY from the verified token, never client input. The
+   created row always has the schema-default `PENDING` status; the guest
+   has no way to set status or assign staff.
+`confirmServiceRequestAction` is never in any AI tool registry — there is
+no code path from a model tool call to this write. A verified guest may
+subsequently ask about that request's status through the existing,
+unchanged M6c `getServiceRequestStatus` read tool. No status change,
+cancellation, or edit of an existing request is reachable by the guest at
+any tier — staff-only, via the unchanged M4 `updateStatus()`.
 
 ## Provider abstraction
 `src/lib/ai/provider.ts` defines the vendor-neutral `AiProvider` interface
@@ -112,7 +160,8 @@ only the tenant identity data passed into them changes.
 
 ## Scope
 M6 Phase a (provider/tool library), Phase b (anonymous public chat UI),
-and Phase c (verified reservation/service-request context) are
-implemented and verified — see `docs/CHANGELOG.md`. Chat-driven
-ServiceRequest creation (M6d), M6 integration/closeout (M6e), and the AI
-Management Assistant (M7) are not yet implemented.
+Phase c (verified reservation/service-request context), and Phase d
+(confirmed guest service request creation) are implemented and verified —
+see `docs/CHANGELOG.md`. M6 integration/closeout (M6e) and the AI
+Management Assistant (M7) are not yet implemented. M6 as a whole is
+**not** marked complete.

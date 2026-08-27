@@ -5,7 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import type { ConciergeChatState, VerifyBookingState } from "@/app/(guest)/concierge/actions";
+import type {
+  ConciergeChatState,
+  VerifyBookingState,
+  ConfirmServiceRequestState,
+  ServiceRequestProposalView,
+} from "@/app/(guest)/concierge/actions";
 
 /**
  * M6 Phase b — the anonymous public concierge chat. All hotel-specific
@@ -37,18 +42,25 @@ const STARTER_QUESTIONS = [
 
 type ConciergeAction = (prevState: ConciergeChatState, formData: FormData) => Promise<ConciergeChatState>;
 type VerifyAction = (prevState: VerifyBookingState, formData: FormData) => Promise<VerifyBookingState>;
+type ConfirmAction = (
+  prevState: ConfirmServiceRequestState,
+  formData: FormData
+) => Promise<ConfirmServiceRequestState>;
 
 const initialChatState: ConciergeChatState = { messages: [] };
 const initialVerifyState: VerifyBookingState = {};
+const initialConfirmState: ConfirmServiceRequestState = { status: "idle" };
 
 export function ConciergeChat({
   hotelName,
   action,
   verifyAction,
+  confirmAction,
 }: {
   hotelName: string;
   action: ConciergeAction;
   verifyAction: VerifyAction;
+  confirmAction: ConfirmAction;
 }) {
   const [state, formAction, isPending] = useActionState(action, initialChatState);
   const formRef = useRef<HTMLFormElement>(null);
@@ -101,6 +113,18 @@ export function ConciergeChat({
         <p role="alert" className="rounded border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
           {state.error}
         </p>
+      )}
+
+      {state.proposal && (
+        <ServiceRequestProposalCard
+          // Remounts (discarding any prior Confirm/Cancel result) whenever a
+          // NEW assistant turn produces a proposal — never carries a stale
+          // confirm/error state over from an earlier proposal cycle.
+          key={state.messages.length}
+          proposal={state.proposal}
+          token={token}
+          confirmAction={confirmAction}
+        />
       )}
 
       {state.messages.length === 0 && (
@@ -232,6 +256,88 @@ function VerifyBookingPanel({
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * M6d — the deterministic ServiceRequest confirmation card. The proposal's
+ * exact type/notes are shown to the guest BEFORE any write happens; only an
+ * actual "Confirm Request" click submits `confirmAction` (never a chat
+ * message, never inferred from "yes"/"okay"). "Cancel" is a pure client-side
+ * discard — no server call, nothing created — matching the M6d design's
+ * explicit requirement.
+ *
+ * Deliberately does NOT read `state.proposal` again after mounting — this
+ * component owns exactly one proposal for its lifetime (the parent gives it
+ * a fresh `key` per turn, see `ConciergeChat` above), so its own
+ * `cancelled`/confirm-result state can never leak into a later, different
+ * proposal.
+ */
+function ServiceRequestProposalCard({
+  proposal,
+  token,
+  confirmAction,
+}: {
+  proposal: ServiceRequestProposalView;
+  token: string | undefined;
+  confirmAction: ConfirmAction;
+}) {
+  const [confirmState, confirmFormAction, confirmPending] = useActionState(confirmAction, initialConfirmState);
+  const [cancelled, setCancelled] = useState(false);
+
+  if (cancelled) return null;
+
+  if (confirmState.status === "success") {
+    return (
+      <div className="rounded-lg border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-800">
+        <p role="status" className="font-medium">
+          ✓ Request submitted — {confirmState.requestType} ({confirmState.requestStatus})
+        </p>
+        <p className="mt-1">The front desk will follow up on your request.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-ochre-500/40 bg-parchment-100 p-4">
+      <p className="text-sm font-medium text-basalt-900">Review your service request</p>
+      <dl className="grid gap-1 text-sm text-basalt-800">
+        <div className="flex gap-2">
+          <dt className="font-medium">Type:</dt>
+          <dd>{proposal.label}</dd>
+        </div>
+        {proposal.notes && (
+          <div className="flex gap-2">
+            <dt className="font-medium">Details:</dt>
+            <dd className="whitespace-pre-line">{proposal.notes}</dd>
+          </div>
+        )}
+      </dl>
+
+      {confirmState.status === "error" && (
+        <p role="alert" className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {confirmState.error}
+        </p>
+      )}
+
+      <form action={confirmFormAction} className="flex gap-3">
+        <input type="hidden" name="token" value={token ?? ""} />
+        <input type="hidden" name="type" value={proposal.type} />
+        <input type="hidden" name="notes" value={proposal.notes ?? ""} />
+        <Button type="submit" size="sm" disabled={confirmPending}>
+          {confirmPending ? "Submitting…" : "Confirm Request"}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setCancelled(true)}
+          disabled={confirmPending}
+        >
+          Cancel
+        </Button>
+      </form>
+    </div>
   );
 }
 

@@ -1,7 +1,11 @@
 /**
- * M6c — the approved minimal v0.1 rate limiter for
+ * M6c — the approved minimal v0.1 rate limiter, originally scoped to
  * `verifyReservationContextAction` ONLY (docs/DECISIONS.md M6 design's
- * rate-limit decision). This is an honest, demo/local-scale limiter:
+ * rate-limit decision); M6d reuses the exact same `checkRateLimit()`
+ * mechanism (unchanged below) under its own key prefix for
+ * `confirmServiceRequestAction` (see `confirmServiceRequestRateLimitKey()`)
+ * rather than adding new infrastructure. This is an honest, demo/local-scale
+ * limiter:
  *
  *   - **In-memory, per-process, `Map`-based.** It has no shared storage —
  *     no Redis/KV/external infrastructure was added, per this phase's
@@ -17,10 +21,11 @@
  *     milestone, not something this file claims to solve.
  *   - **Resets on every process restart/redeploy** — acceptable for a v0.1
  *     demo, not for production.
- *   - **Scoped narrowly.** Only `verifyReservationContextAction` calls
- *     this — the anonymous knowledge chat (`sendConciergeMessageAction`)
- *     and the rest of the public site are never rate-limited by this
- *     mechanism.
+ *   - **Scoped narrowly.** Only `verifyReservationContextAction` and (as of
+ *     M6d) `confirmServiceRequestAction` call this, each under its own key
+ *     prefix so their budgets are independent — the anonymous knowledge
+ *     chat (`sendConciergeMessageAction`) and the rest of the public site
+ *     are never rate-limited by this mechanism.
  */
 
 const WINDOW_MS = 10 * 60 * 1000; // 10 minutes
@@ -62,4 +67,20 @@ export function resetRateLimiterForTests(): void {
 /** The fixed action-scoped prefix `verifyReservationContextAction` uses — kept here so the key shape is defined once. */
 export function verifyReservationRateLimitKey(clientIp: string): string {
   return `verifyReservationContext:${clientIp}`;
+}
+
+/**
+ * M6d — reuses this SAME `checkRateLimit()` mechanism (not a new limiter;
+ * the module docstring's honest demo/local-only limitations above apply
+ * identically here: in-memory, per-process, resets on redeploy, no
+ * protection across horizontally-scaled instances) for
+ * `confirmServiceRequestAction`, under its own key prefix so its 5-per-10-
+ * minute budget is independent of `verifyReservationContextAction`'s.
+ * Narrow abuse protection against a script looping the Confirm action, not
+ * a substitute for the client-side disabled-while-pending button (the
+ * primary accidental-double-submit guard — see that Server Action's own
+ * doc comment for the honest limits of both).
+ */
+export function confirmServiceRequestRateLimitKey(clientIp: string): string {
+  return `confirmServiceRequest:${clientIp}`;
 }

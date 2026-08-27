@@ -116,7 +116,7 @@ describe("sendConciergeMessageAction", () => {
 });
 
 describe("sendConciergeMessageAction — M6c verified-context token handling", () => {
-  it("adds the two verified tools and uses the verified prompt when a valid token resolves", async () => {
+  it("adds the three verified-tier tools and uses the verified prompt when a valid token resolves", async () => {
     resolveVerifiedReservationContext.mockResolvedValue(VERIFIED_CONTEXT);
     converse.mockResolvedValue({ reply: "You're in the Executive Room.", toolCalls: [] });
 
@@ -130,6 +130,7 @@ describe("sendConciergeMessageAction — M6c verified-context token handling", (
       "getReservationSummary",
       "getRoomTypesSummary",
       "getServiceRequestStatus",
+      "proposeServiceRequest",
     ]);
     expect(call.systemPrompt).toContain("completed booking verification");
   });
@@ -169,6 +170,74 @@ describe("sendConciergeMessageAction — M6c verified-context token handling", (
     expect(resolveVerifiedReservationContext).not.toHaveBeenCalled();
     const call = converse.mock.calls[0]![0];
     expect(call.tools.map((t: { name: string }) => t.name).sort()).toEqual(["getHotelKnowledge", "getRoomTypesSummary"]);
+  });
+
+  it("M6d: surfaces a valid proposeServiceRequest tool-call result as state.proposal — application state, not chat prose", async () => {
+    resolveVerifiedReservationContext.mockResolvedValue(VERIFIED_CONTEXT);
+    converse.mockResolvedValue({
+      reply: "Please review the card and press Confirm Request.",
+      toolCalls: [
+        {
+          name: "proposeServiceRequest",
+          input: { type: "LAUNDRY", notes: "two shirts" },
+          result: { valid: true, type: "LAUNDRY", label: "Laundry", notes: "two shirts" },
+        },
+      ],
+    });
+
+    const result = await sendConciergeMessageAction(
+      { messages: [] },
+      formDataWith("Please arrange laundry — two shirts.", "valid-token")
+    );
+
+    expect(result.proposal).toEqual({ type: "LAUNDRY", label: "Laundry", notes: "two shirts" });
+  });
+
+  it("M6d: never surfaces a proposal when proposeServiceRequest returned { valid: false }", async () => {
+    resolveVerifiedReservationContext.mockResolvedValue(VERIFIED_CONTEXT);
+    converse.mockResolvedValue({
+      reply: "I couldn't prepare that request.",
+      toolCalls: [{ name: "proposeServiceRequest", input: { type: "SPA" }, result: { valid: false } }],
+    });
+
+    const result = await sendConciergeMessageAction(
+      { messages: [] },
+      formDataWith("Can I get a spa treatment?", "valid-token")
+    );
+
+    expect(result.proposal).toBeUndefined();
+  });
+
+  it("M6d: has no proposal at all when this turn made no tool calls", async () => {
+    resolveVerifiedReservationContext.mockResolvedValue(VERIFIED_CONTEXT);
+    converse.mockResolvedValue({ reply: "Check-in is at 2 PM.", toolCalls: [] });
+
+    const result = await sendConciergeMessageAction({ messages: [] }, formDataWith("When is check-in?", "valid-token"));
+
+    expect(result.proposal).toBeUndefined();
+  });
+
+  it("M6d: a NEW turn's (missing) proposal replaces — never merges with — a prior turn's pending proposal", async () => {
+    resolveVerifiedReservationContext.mockResolvedValue(VERIFIED_CONTEXT);
+    converse.mockResolvedValue({ reply: "Check-in is at 2 PM.", toolCalls: [] });
+
+    const priorState = {
+      messages: [{ role: "user" as const, content: "laundry please" }],
+      proposal: { type: "LAUNDRY", label: "Laundry", notes: null },
+    };
+    const result = await sendConciergeMessageAction(priorState, formDataWith("When is check-in?", "valid-token"));
+
+    expect(result.proposal).toBeUndefined();
+  });
+
+  it("M6d: never surfaces a proposal for an anonymous (unverified) conversation — proposeServiceRequest isn't in that tool list at all", async () => {
+    converse.mockResolvedValue({ reply: "Check-in is at 2 PM.", toolCalls: [] });
+
+    const result = await sendConciergeMessageAction({ messages: [] }, formDataWith("When is check-in?"));
+
+    const call = converse.mock.calls[0]![0];
+    expect(call.tools.map((t: { name: string }) => t.name)).not.toContain("proposeServiceRequest");
+    expect(result.proposal).toBeUndefined();
   });
 
   it("never reads or forwards a guest contact value to the provider, even if one is smuggled into the chat form's FormData", async () => {
