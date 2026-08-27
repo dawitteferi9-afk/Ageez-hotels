@@ -1,5 +1,80 @@
 # Changelog
 
+## M7 — AI Management Assistant, Phase d (adversarial security and intent hardening) (2026-08-27)
+M7c (operational coverage refinement) was formally **skipped** — the M7c
+assessment found the six approved M7 tools already cover every approved
+v0.1 operational use case; no new tool, projection, PII, or schema change
+was justified. M7d is a dedicated adversarial hardening pass over the
+existing read-only Management Assistant — no new capability, no seventh
+tool, no schema change.
+- **Deterministic mock intent hardening** (`src/lib/ai/providers/mock.ts`)
+  — fixes the five demo-fidelity gaps the M7c assessment identified, using
+  only already-approved tool output (no new field, no new tool):
+  - `getOperationalSnapshot` keywords widened to recognize "rooms are
+    available"/"available rooms", "how many guests"/"guest count",
+    "operational summary" (reorder-tolerant sibling of "operations
+    summary"), and "reservation status"/"reservation statuses".
+  - `getServiceRequestSummary` keywords widened to recognize the
+    lowercased-PascalCase compound "servicerequests" (no space — a
+    question phrased "How many ServiceRequests are pending?" collapses to
+    this after lowercasing, which the space-separated "service request(s)"
+    phrases never matched), plus "requests are pending"/"requests in
+    progress", "type of request(s)"/"request types", and "active
+    requests".
+  - `getStaffDirectory` keywords widened to recognize "manager"/
+    "managers"; its summarizer now optionally filters the SAME `{name,
+    role}` list to a matched role (`OWNER_ADMIN` or `MANAGER`) rather than
+    always listing everyone — "Who are the managers?" now answers
+    correctly, honestly reporting "No staff members currently hold the
+    MANAGER role." when none do, never fabricating a name.
+  - `summarizeOperationalSnapshot()` now narrates the tool's own
+    `occupancy.byStatus.AVAILABLE` and `reservationsByStatus` (both
+    already returned by the tool since M7a, previously never mentioned in
+    any mock reply under any phrasing).
+  - `summarizeMaintenanceSummary()` now narrates `assignedToName` per
+    blocking issue (already returned by the tool since M7a) — directly
+    answers "Who is assigned to each blocking maintenance issue?".
+- **Adversarial prompt matrix** — 35 hostile phrases across auth/role
+  escalation, tenant escape, PII extraction, mutation/tool abuse, and
+  system/internal disclosure, tested against the real running app (new
+  e2e test) and the Server Action boundary (extended unit tests). Every
+  case fails safely by construction: the Server Action never reads
+  identity from message text (only from a fresh `requireStaffAccess()`
+  reload), and the mock provider only ever keyword-matches into one of
+  the six read-only tools or a fixed fallback — there is no code path
+  where chat text is interpreted as an instruction to the system.
+- **Explicit tool-layer cross-tenant proof** added for the four tools that
+  previously only inherited isolation transitively from the underlying
+  `withTenant().reports.*` tests (`getTodayArrivalsDepartures`,
+  `getHousekeepingQueueSummary`, `getMaintenanceSummary`,
+  `getServiceRequestSummary`) — self-contained fixture rows created and
+  reverted within the test itself, since both fixture hotels' default
+  data collides on room number/dates.
+- **Provider-failure/malformed-output hardening tests** — a
+  timeout-shaped rejection, a malformed/empty provider response (missing
+  `reply`), and a failed call followed immediately by a successful one
+  (proving no state corruption) are now explicitly covered, alongside the
+  existing raw-exception-never-leaked coverage.
+- **Tests added:** `tests/unit/ai/mockProviderManagementAssistant.test.ts`
+  (12 new — the five phrasing/summarizer fixes plus role-filter edge
+  cases), `tests/unit/ai/managementAssistantAction.test.ts` (4 new —
+  provider-failure/malformed-output hardening),
+  `tests/integration/managementAssistantTools.test.ts` (4 new — explicit
+  cross-tenant non-leakage for the four pass-through tools), extended
+  `tests/e2e/managementAssistant.spec.ts` (the prompt-tampering test
+  replaced with the full 35-phrase adversarial matrix, asserting
+  byte-identical database state — staff count, all 52 rooms' statuses,
+  maintenance/reservation/service-request status — before and after).
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (**307/307**); `npm run test:integration`
+  (**197/197**); `npm run build` (clean, no route change); the M7
+  management-assistant Playwright suite (8/8), then the complete existing
+  Playwright suite (**82/82 passed**, zero regressions). DB baseline
+  confirmed restored before and after.
+- No schema change, no seventh tool, no mutation path, no additional PII,
+  no M6 capability change, no M7e/M8/M9 work. M7 as a whole remains
+  **not** complete — M7e is still the closeout phase.
+
 ## M7b security correction: isolate guest and management mock intent handling (2026-08-27)
 A pre-push security/scope review of `2bed10a` (M7 Phase b) found that
 `src/lib/ai/providers/mock.ts`'s M6 `PERSONAL_INFO_PATTERN` block — which

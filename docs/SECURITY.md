@@ -302,7 +302,7 @@ silently claimed solved:
   unique/idempotency-key constraint), which needs separate Product Owner
   approval and was not added here.
 
-### AI Management Assistant tools (M7a/M7b)
+### AI Management Assistant tools (M7a/M7b/M7d)
 The AI Management Assistant is the authenticated, staff-facing operational
 AI, structurally separate from the guest concierge above (`docs/AI_SPEC.md`'s
 "AI Management Assistant tools" section has the full tool/projection
@@ -383,6 +383,25 @@ table). Security-relevant invariants:
   was introduced.
 - **No schema change.** The three new `withTenant().reports` methods
   read existing columns only.
+- **M7d adversarial hardening (2026-08-27):** a dedicated pass proved,
+  against the real running app, that a 35-phrase hostile-prompt matrix
+  (auth/role escalation, tenant escape, PII extraction, mutation/tool
+  abuse, and system/internal disclosure) cannot change tool access,
+  cannot cross a tenant boundary, cannot extract PII/secrets, cannot
+  write to the database, and cannot elicit an internal-detail
+  disclosure — see `tests/e2e/managementAssistant.spec.ts`'s adversarial
+  prompt matrix test and `tests/unit/ai/managementAssistantAction.test.ts`'s
+  provider-failure/malformed-output tests. This is a **proof pass, not a
+  new defense** — every guarantee it confirms already existed structurally
+  in M7a/M7b (closure-bound `{hotelId, role}`, no tool with a write path,
+  identity never read from message text) and holds identically for the
+  real `anthropic` provider, not just the deterministic mock. M7d also
+  fixed five deterministic-mock demo-fidelity gaps (`getOperationalSnapshot`/
+  `getServiceRequestSummary`/`getStaffDirectory` keyword recognition;
+  `getOperationalSnapshot`/`getMaintenanceSummary` summarizer completeness)
+  — all confined to `src/lib/ai/providers/mock.ts`'s dispatch/narration
+  logic, using only fields the six tools already returned since M7a; no
+  new tool, projection, PII, or schema change.
 
 ## Secrets
 `.env.example` contains placeholders only. Real secrets belong in

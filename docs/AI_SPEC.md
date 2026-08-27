@@ -256,9 +256,12 @@ closeout — no new capability) are all implemented and verified — see
 
 M7 (AI Management Assistant) is **in progress**: Phase a (read-only tool
 boundary — three new tenant/report helpers, all six approved tools, the
-role-aware registry, the system prompt, deterministic mock behavior) and
+role-aware registry, the system prompt, deterministic mock behavior),
 Phase b (the authenticated `/management/assistant` chat UI and its
-`sendManagementAssistantMessageAction()` Server Action boundary) are both
-implemented and verified — see `docs/CHANGELOG.md`'s M7 Phase a and Phase
-b entries and `docs/DECISIONS.md`'s M7a and M7b entries. Phases c/d/e
-remain; M7 as a whole is **not** marked complete.
+`sendManagementAssistantMessageAction()` Server Action boundary), and
+Phase d (adversarial security/tenant-isolation/prompt-injection hardening
+— no new tool or capability) are all implemented and verified — see
+`docs/CHANGELOG.md`'s M7 Phase a, b, and d entries and `docs/DECISIONS.md`'s
+M7a/M7b/M7d entries. Phase c was formally skipped (the M7c assessment
+found no approved operational gap). Phase e (closeout) remains; M7 as a
+whole is **not** marked complete.

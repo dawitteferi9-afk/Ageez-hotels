@@ -129,9 +129,22 @@ describe("createMockProvider — getMaintenanceSummary", () => {
     });
     const result = await ask("Show me urgent maintenance issues.", [tool]);
     expect(result.reply).toContain("1 open HIGH/URGENT issue(s)");
-    expect(result.reply).toContain("Room 104 — AC not cooling (URGENT, OPEN)");
+    expect(result.reply).toContain("Room 104 — AC not cooling (URGENT, OPEN, unassigned)");
     // Never resolutionNotes-shaped content, since the tool never returns it.
     expect(result.reply).not.toMatch(/resolutionNotes/i);
+  });
+
+  it("M7d — narrates assignedToName, a field the tool already returns, when an issue is assigned", async () => {
+    const tool = managementTool("getMaintenanceSummary", {
+      available: true,
+      countsByStatus: { OPEN: 1 },
+      countsByPriority: { URGENT: 1 },
+      openBlocking: [
+        { roomNumber: "104", description: "AC not cooling", priority: "URGENT", status: "OPEN", assignedToName: "Dawit Mekonnen" },
+      ],
+    });
+    const result = await ask("Who is assigned to each blocking maintenance issue?", [tool]);
+    expect(result.reply).toContain("Room 104 — AC not cooling (URGENT, OPEN, assigned to Dawit Mekonnen)");
   });
 
   it("honestly reports no open blocking issues", async () => {
@@ -288,6 +301,150 @@ describe("createMockProvider — M7b correction: M6 PERSONAL_INFO_PATTERN never 
     const result = await ask("Am I OWNER_ADMIN?", restrictedTools);
     assertNeverTheM6Reply(result.reply);
     expect(result.reply).toBe(M7_FALLBACK_REPLY);
+    expect(result.toolCalls).toEqual([]);
+  });
+});
+
+describe("createMockProvider — M7d: demo-fidelity phrasing hardening (M7c-identified gaps)", () => {
+  /**
+   * Each of these phrasings was identified in the M7c gap assessment as a
+   * MOCK-INTENT gap: the underlying tool already returns the necessary
+   * data (no new field, no new tool), but the deterministic mock's
+   * keyword matcher or canned summarizer text didn't recognize/narrate
+   * it. Fixed entirely inside `mock.ts` — this block is the regression
+   * proof.
+   */
+  const snapshotResult = {
+    available: true,
+    date: "2026-08-27",
+    occupancy: { totalRooms: 52, byStatus: { OCCUPIED: 5, AVAILABLE: 47 }, occupancyRate: 10, byRoomType: [] },
+    reservationsByStatus: { CREATED: 0, CONFIRMED: 3, CHECKED_IN: 2, CHECKED_OUT: 0, CANCELLED: 0 },
+    totalGuests: 10,
+    todayArrivalCount: 1,
+    todayDepartureCount: 2,
+  };
+
+  it.each([
+    "How many rooms are available?",
+    "How many guests are currently in the system?",
+    "Give me today's operational summary.",
+    "What reservation statuses do we currently have?",
+  ])("%j now dispatches to getOperationalSnapshot and answers from real tool output", async (question) => {
+    const tool = managementTool("getOperationalSnapshot", snapshotResult);
+    const result = await ask(question, [tool]);
+    expect(tool.execute).toHaveBeenCalledWith({});
+    expect(result.toolCalls).toHaveLength(1);
+  });
+
+  it("narrates AVAILABLE room count and reservationsByStatus, both already returned by the tool", async () => {
+    const tool = managementTool("getOperationalSnapshot", snapshotResult);
+    const result = await ask("How many rooms are available?", [tool]);
+    expect(result.reply).toContain("47 available");
+    expect(result.reply).toContain("CONFIRMED 3");
+    expect(result.reply).toContain("CHECKED_IN 2");
+    // Zero-count statuses are omitted, not padded with noise.
+    expect(result.reply).not.toContain("CREATED 0");
+    expect(result.reply).not.toContain("CANCELLED 0");
+  });
+
+  it("reports 'no reservations on file' honestly when every status count is zero", async () => {
+    const tool = managementTool("getOperationalSnapshot", {
+      ...snapshotResult,
+      reservationsByStatus: { CREATED: 0, CONFIRMED: 0, CHECKED_IN: 0, CHECKED_OUT: 0, CANCELLED: 0 },
+    });
+    const result = await ask("What reservation statuses do we currently have?", [tool]);
+    expect(result.reply).toContain("No reservations on file.");
+  });
+
+  const serviceRequestResult = {
+    available: true,
+    countsByStatus: { PENDING: 2, IN_PROGRESS: 1, COMPLETED: 0, CANCELLED: 0 },
+    countsByType: { LAUNDRY: 1, ROOM_SERVICE: 0, AIRPORT_TRANSFER: 0, RESTAURANT: 0, OTHER: 1 },
+    pendingAndInProgress: [
+      { guestName: "Verify Guest", roomNumber: "205", type: "LAUNDRY", status: "PENDING", notes: "Two shirts" },
+    ],
+  };
+
+  it.each([
+    "How many ServiceRequests are pending?",
+    "Which ServiceRequests are in progress?",
+    "What type of requests are currently open?",
+    "What are the guest instructions for active requests?",
+  ])("%j now dispatches to getServiceRequestSummary and answers from real tool output", async (question) => {
+    const tool = managementTool("getServiceRequestSummary", serviceRequestResult);
+    const result = await ask(question, [tool]);
+    expect(tool.execute).toHaveBeenCalledWith({});
+    expect(result.toolCalls).toHaveLength(1);
+    // Notes were already narrated before M7d — confirming that's still true here.
+    expect(result.reply).toContain("Two shirts");
+  });
+
+  it("'Who is assigned to each blocking maintenance issue?' now narrates assignedToName, already returned by the tool", async () => {
+    const tool = managementTool("getMaintenanceSummary", {
+      available: true,
+      countsByStatus: {},
+      countsByPriority: {},
+      openBlocking: [
+        { roomNumber: "104", description: "AC not cooling", priority: "URGENT", status: "OPEN", assignedToName: "Dawit Mekonnen" },
+        { roomNumber: "108", description: "Leaking faucet", priority: "HIGH", status: "OPEN", assignedToName: null },
+      ],
+    });
+    const result = await ask("Who is assigned to each blocking maintenance issue?", [tool]);
+    expect(tool.execute).toHaveBeenCalledWith({});
+    expect(result.reply).toContain("assigned to Dawit Mekonnen");
+    expect(result.reply).toContain("unassigned");
+  });
+
+  it("'Who are the managers?' now dispatches to getStaffDirectory and filters to MANAGER role only", async () => {
+    const tool = managementTool("getStaffDirectory", {
+      available: true,
+      staff: [
+        { name: "Amanuel Girma", role: "OWNER_ADMIN" },
+        { name: "Selam Bekele", role: "MANAGER" },
+        { name: "Yonas Alemu", role: "FRONT_DESK" },
+      ],
+    });
+    const result = await ask("Who are the managers?", [tool]);
+    expect(tool.execute).toHaveBeenCalledWith({});
+    expect(result.reply).toBe("Selam Bekele (MANAGER).");
+    expect(result.reply).not.toContain("Amanuel Girma");
+    expect(result.reply).not.toContain("Yonas Alemu");
+  });
+
+  it("'Who are the managers?' reports honestly, never fabricating a name, when no one holds that role", async () => {
+    const tool = managementTool("getStaffDirectory", {
+      available: true,
+      staff: [{ name: "Amanuel Girma", role: "OWNER_ADMIN" }],
+    });
+    const result = await ask("Who are the managers?", [tool]);
+    expect(result.reply).toBe("No staff members currently hold the MANAGER role.");
+  });
+
+  it("'Who has OWNER_ADMIN?' still lists everyone when there is only one match (unchanged from before M7d)", async () => {
+    const tool = managementTool("getStaffDirectory", {
+      available: true,
+      staff: [{ name: "Amanuel Girma", role: "OWNER_ADMIN" }],
+    });
+    const result = await ask("Who has OWNER_ADMIN?", [tool]);
+    expect(result.reply).toBe("Amanuel Girma (OWNER_ADMIN).");
+  });
+
+  it("an unfiltered staff-directory question ('Who is on the staff?') still lists every role, not just managers", async () => {
+    const tool = managementTool("getStaffDirectory", {
+      available: true,
+      staff: [
+        { name: "Amanuel Girma", role: "OWNER_ADMIN" },
+        { name: "Selam Bekele", role: "MANAGER" },
+      ],
+    });
+    const result = await ask("Who is on the staff?", [tool]);
+    expect(result.reply).toContain("Amanuel Girma");
+    expect(result.reply).toContain("Selam Bekele");
+  });
+
+  it("role-filtering never applies to a role-restricted staff-directory question that isn't dispatched at all (tool absent)", async () => {
+    const result = await ask("Who are the managers?", []);
+    expect(result.reply).toBe("I don't have that information — please contact the front desk for details.");
     expect(result.toolCalls).toEqual([]);
   });
 });

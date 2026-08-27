@@ -216,7 +216,29 @@ const MANAGEMENT_TOOL_KEYWORDS: Array<{ tool: string; keywords: string[] }> = [
     // Deliberately does NOT include a generic "how many rooms" phrase —
     // "how many rooms need cleaning"/"...are in maintenance" must match
     // the housekeeping/maintenance branches below, not this one.
-    keywords: ["occupancy", "occupied", "operations summary", "hotel operations", "today's summary"],
+    //
+    // M7d — added "rooms are available"/"available rooms" (byStatus.AVAILABLE
+    // is already in the tool's own OccupancySummary.byStatus, just never
+    // phrased for on its own before), "how many guests"/"guest count"
+    // (totalGuests, likewise already returned), "operational summary"
+    // (reorder-tolerant sibling of the existing "operations summary"), and
+    // "reservation status"/"reservation statuses" (reservationsByStatus,
+    // already returned) — all demo-fidelity phrasing gaps identified in the
+    // M7c assessment, none a new field or new tool.
+    keywords: [
+      "occupancy",
+      "occupied",
+      "operations summary",
+      "operational summary",
+      "hotel operations",
+      "today's summary",
+      "rooms are available",
+      "available rooms",
+      "how many guests",
+      "guest count",
+      "reservation status",
+      "reservation statuses",
+    ],
   },
   {
     tool: "getTodayArrivalsDepartures",
@@ -232,11 +254,36 @@ const MANAGEMENT_TOOL_KEYWORDS: Array<{ tool: string; keywords: string[] }> = [
   },
   {
     tool: "getServiceRequestSummary",
-    keywords: ["service request", "service requests", "pending request", "pending requests"],
+    // M7d — added "servicerequests" (the model name, no space — a
+    // question phrased as "How many ServiceRequests are pending?" is
+    // lowercased before matching, which collapses to "servicerequests"
+    // with no space, so the space-separated "service request(s)" phrases
+    // above never matched it), "requests are pending"/"requests in
+    // progress" (space-tolerant equivalents), "type of request(s)"/
+    // "request types" (countsByType, already returned), and "active
+    // requests" (the bounded pendingAndInProgress list itself, whose
+    // notes are already narrated below when reached).
+    keywords: [
+      "service request",
+      "service requests",
+      "servicerequests",
+      "pending request",
+      "pending requests",
+      "requests are pending",
+      "requests in progress",
+      "type of request",
+      "types of request",
+      "request types",
+      "active requests",
+    ],
   },
   {
     tool: "getStaffDirectory",
-    keywords: ["staff", "directory", "who has owner", "who is owner"],
+    // M7d — added "manager"/"managers" so a role-specific question like
+    // "Who are the managers?" reaches the tool at all; the summarizer
+    // below narrates only the matching subset using the SAME {name, role}
+    // data every staff-directory question already returns — no new field.
+    keywords: ["staff", "directory", "who has owner", "who is owner", "manager", "managers"],
   },
 ];
 
@@ -297,7 +344,7 @@ export function createMockProvider(): AiProvider {
 
         const result = await tool.execute({});
         toolCalls.push({ name: tool.name, input: {}, result });
-        return { reply: summarizeManagementToolResult(toolName, result), toolCalls };
+        return { reply: summarizeManagementToolResult(toolName, result, question), toolCalls };
       }
 
       if (/room type|price|suite|how much|nightly rate/.test(question)) {
@@ -390,7 +437,7 @@ function summarizeRoomTypes(result: unknown): string {
  * every management reply shares the exact same non-disclosing wording
  * regardless of which tool or which RBAC rule produced it.
  */
-function summarizeManagementToolResult(toolName: string, result: unknown): string {
+function summarizeManagementToolResult(toolName: string, result: unknown, question: string): string {
   if (isManagementToolUnavailable(result)) return MANAGEMENT_UNAVAILABLE_REPLY;
 
   switch (toolName) {
@@ -405,7 +452,7 @@ function summarizeManagementToolResult(toolName: string, result: unknown): strin
     case "getServiceRequestSummary":
       return summarizeServiceRequestSummary(result);
     case "getStaffDirectory":
-      return summarizeStaffDirectory(result);
+      return summarizeStaffDirectory(result, question);
     default:
       // Structurally unreachable — MANAGEMENT_TOOL_KEYWORDS only ever
       // names the six real tool names above — but fails safely rather
@@ -416,15 +463,30 @@ function summarizeManagementToolResult(toolName: string, result: unknown): strin
 
 function summarizeOperationalSnapshot(result: unknown): string {
   const typed = result as {
-    occupancy: { totalRooms: number; byStatus: { OCCUPIED: number }; occupancyRate: number };
+    occupancy: { totalRooms: number; byStatus: { OCCUPIED: number; AVAILABLE?: number }; occupancyRate: number };
+    reservationsByStatus?: Record<string, number>;
     totalGuests: number;
     todayArrivalCount: number;
     todayDepartureCount: number;
   };
+  const availableText =
+    typeof typed.occupancy.byStatus.AVAILABLE === "number" ? ` ${typed.occupancy.byStatus.AVAILABLE} available.` : "";
+  // M7d — narrates reservationsByStatus, a field the tool already returns
+  // (M7a) but no mock reply previously mentioned under any phrasing. Only
+  // non-zero statuses are listed, matching the terse style every other
+  // summarizer here already uses for count breakdowns.
+  const reservationStatusText = typed.reservationsByStatus
+    ? (() => {
+        const nonZero = Object.entries(typed.reservationsByStatus!).filter(([, count]) => count > 0);
+        return nonZero.length === 0
+          ? " No reservations on file."
+          : ` Reservations by status: ${nonZero.map(([status, count]) => `${status} ${count}`).join(", ")}.`;
+      })()
+    : "";
   return (
     `${typed.occupancy.byStatus.OCCUPIED} of ${typed.occupancy.totalRooms} rooms occupied ` +
-    `(${typed.occupancy.occupancyRate}% occupancy). ${typed.totalGuests} guest(s) on file. ` +
-    `${typed.todayArrivalCount} arrival(s) and ${typed.todayDepartureCount} departure(s) today.`
+    `(${typed.occupancy.occupancyRate}% occupancy).${availableText} ${typed.totalGuests} guest(s) on file. ` +
+    `${typed.todayArrivalCount} arrival(s) and ${typed.todayDepartureCount} departure(s) today.${reservationStatusText}`
   );
 }
 
@@ -452,13 +514,25 @@ function summarizeHousekeepingQueueSummary(result: unknown): string {
 
 function summarizeMaintenanceSummary(result: unknown): string {
   const typed = result as {
-    openBlocking: Array<{ roomNumber: string; description: string; priority: string; status: string }>;
+    openBlocking: Array<{
+      roomNumber: string;
+      description: string;
+      priority: string;
+      status: string;
+      assignedToName: string | null;
+    }>;
   };
   if (typed.openBlocking.length === 0) return "No open HIGH or URGENT maintenance issues right now.";
   return (
     `${typed.openBlocking.length} open HIGH/URGENT issue(s): ` +
     typed.openBlocking
-      .map((issue) => `Room ${issue.roomNumber} — ${issue.description} (${issue.priority}, ${issue.status})`)
+      .map(
+        (issue) =>
+          // M7d — narrates assignedToName, a field the tool already returns
+          // (M7a) but no mock reply previously mentioned.
+          `Room ${issue.roomNumber} — ${issue.description} (${issue.priority}, ${issue.status}, ` +
+          `${issue.assignedToName ? `assigned to ${issue.assignedToName}` : "unassigned"})`
+      )
       .join("; ") +
     "."
   );
@@ -488,8 +562,26 @@ function summarizeServiceRequestSummary(result: unknown): string {
   );
 }
 
-function summarizeStaffDirectory(result: unknown): string {
+/**
+ * M7d — a role a staff-directory question can ask to filter by (e.g. "Who
+ * are the managers?"), matched against the SAME closure-bound `question`
+ * text already used for tool dispatch. Deliberately narrow, same
+ * "fixed phrases, not a classifier" style as every other keyword table in
+ * this file — filters the EXISTING {name, role} list only, never a new
+ * field or a new query.
+ */
+const STAFF_ROLE_FILTER_KEYWORDS: Array<{ role: string; keywords: string[] }> = [
+  { role: "OWNER_ADMIN", keywords: ["owner_admin", "owner admin", "who has owner", "who is owner"] },
+  { role: "MANAGER", keywords: ["manager", "managers"] },
+];
+
+function summarizeStaffDirectory(result: unknown, question: string): string {
   const typed = result as { staff: Array<{ name: string; role: string }> };
   if (typed.staff.length === 0) return "No staff members found.";
-  return typed.staff.map((s) => `${s.name} (${s.role})`).join(", ") + ".";
+
+  const roleFilter = STAFF_ROLE_FILTER_KEYWORDS.find(({ keywords }) => keywords.some((k) => question.includes(k)));
+  const filtered = roleFilter ? typed.staff.filter((s) => s.role === roleFilter.role) : typed.staff;
+
+  if (roleFilter && filtered.length === 0) return `No staff members currently hold the ${roleFilter.role} role.`;
+  return filtered.map((s) => `${s.name} (${s.role})`).join(", ") + ".";
 }

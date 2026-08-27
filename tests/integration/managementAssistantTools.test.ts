@@ -105,6 +105,115 @@ describe("getTodayArrivalsDepartures / getHousekeepingQueueSummary / getMaintena
   });
 });
 
+describe("M7d — explicit cross-tenant non-leakage for the four pass-through tools", () => {
+  /**
+   * `managementAssistantTools.test.ts`'s existing tests already prove each
+   * of these four tools matches `withTenant().reports.*` exactly (already
+   * independently cross-tenant tested in `reports.test.ts`), so isolation
+   * is inherited by construction — but the M7d adversarial-hardening pass
+   * asks for an explicit tool-layer proof, not an inherited one. Both
+   * fixture hotels' default data is either empty-for-today or otherwise
+   * identical (same room number "T01", same reservation dates), so this
+   * block creates its OWN self-contained, hotelA-only distinguishing rows
+   * (a CLEANING room via a real room, a HIGH/OPEN MaintenanceIssue, a
+   * today-arrival reservation, a second PENDING ServiceRequest) and
+   * reverts every one of them in `afterAll` — nothing here touches
+   * `fixtures.ts` or any other test's shared state.
+   */
+  let extraIssueId: string;
+  let extraReservationId: string;
+  let extraGuestId: string;
+  let extraServiceRequestId: string;
+  const originalRoomStatus = "AVAILABLE" as const;
+
+  beforeAll(async () => {
+    await prisma.room.update({ where: { id: hotelA.room.id }, data: { status: "CLEANING" } });
+
+    const issue = await prisma.maintenanceIssue.create({
+      data: {
+        hotelId: hotelA.hotel.id,
+        roomId: hotelA.room.id,
+        description: "M7d isolation-probe issue",
+        priority: "URGENT",
+        status: "OPEN",
+      },
+    });
+    extraIssueId = issue.id;
+
+    const guest = await prisma.guest.create({
+      data: { hotelId: hotelA.hotel.id, name: "M7d Isolation Probe Arrival" },
+    });
+    extraGuestId = guest.id;
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const reservation = await prisma.reservation.create({
+      data: {
+        hotelId: hotelA.hotel.id,
+        guestId: guest.id,
+        roomId: hotelA.room.id,
+        checkIn: todayStart,
+        checkOut: new Date(todayStart.getTime() + 24 * 60 * 60 * 1000),
+        guestCount: 1,
+        status: "CONFIRMED",
+        totalPrice: "100.00",
+        paymentMethod: "PAY_AT_HOTEL",
+      },
+    });
+    extraReservationId = reservation.id;
+
+    const serviceRequest = await prisma.serviceRequest.create({
+      data: {
+        hotelId: hotelA.hotel.id,
+        guestId: guest.id,
+        reservationId: reservation.id,
+        type: "LAUNDRY",
+        status: "PENDING",
+        notes: "M7d isolation probe",
+      },
+    });
+    extraServiceRequestId = serviceRequest.id;
+  });
+
+  afterAll(async () => {
+    await prisma.serviceRequest.delete({ where: { id: extraServiceRequestId } }).catch(() => {});
+    await prisma.reservation.delete({ where: { id: extraReservationId } }).catch(() => {});
+    await prisma.guest.delete({ where: { id: extraGuestId } }).catch(() => {});
+    await prisma.maintenanceIssue.delete({ where: { id: extraIssueId } }).catch(() => {});
+    await prisma.room.update({ where: { id: hotelA.room.id }, data: { status: originalRoomStatus } }).catch(() => {});
+  });
+
+  it("getTodayArrivalsDepartures: hotelA's arrival never appears in hotelB's list", async () => {
+    const a = await getTodayArrivalsDepartures(hotelA.hotel.id);
+    const b = await getTodayArrivalsDepartures(hotelB.hotel.id);
+    expect(a.arrivals.some((x) => x.reservationId === extraReservationId)).toBe(true);
+    expect(b.arrivals.some((x) => x.reservationId === extraReservationId)).toBe(false);
+    expect(JSON.stringify(b)).not.toContain("M7d Isolation Probe Arrival");
+  });
+
+  it("getHousekeepingQueueSummary: hotelA's cleaning room never appears in hotelB's queue", async () => {
+    const a = await getHousekeepingQueueSummary(hotelA.hotel.id);
+    const b = await getHousekeepingQueueSummary(hotelB.hotel.id);
+    expect(a.count).toBeGreaterThan(0);
+    expect(b.rooms.some((r) => r.roomNumber === hotelA.room.roomNumber && r.floor === hotelA.room.floor)).toBe(false);
+  });
+
+  it("getMaintenanceSummary: hotelA's blocking issue never appears in hotelB's summary", async () => {
+    const a = await getMaintenanceSummary(hotelA.hotel.id);
+    const b = await getMaintenanceSummary(hotelB.hotel.id);
+    expect(a.openBlocking.some((i) => i.description === "M7d isolation-probe issue")).toBe(true);
+    expect(b.openBlocking.some((i) => i.description === "M7d isolation-probe issue")).toBe(false);
+    expect(JSON.stringify(b)).not.toContain("M7d isolation-probe issue");
+  });
+
+  it("getServiceRequestSummary: hotelA's extra request never appears in hotelB's summary", async () => {
+    const a = await getServiceRequestSummary(hotelA.hotel.id);
+    const b = await getServiceRequestSummary(hotelB.hotel.id);
+    expect(a.pendingAndInProgress.some((r) => r.notes === "M7d isolation probe")).toBe(true);
+    expect(b.pendingAndInProgress.some((r) => r.notes === "M7d isolation probe")).toBe(false);
+    expect(JSON.stringify(b)).not.toContain("M7d isolation probe");
+  });
+});
+
 describe("getStaffDirectory", () => {
   it("returns every real staff member at this hotel, name + role only", async () => {
     const directory = await getStaffDirectory(hotelA.hotel.id);

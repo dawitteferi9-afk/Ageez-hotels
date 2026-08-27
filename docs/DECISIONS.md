@@ -4,6 +4,65 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-27 — M7c formally skipped; M7 Phase d (adversarial hardening) implementation decisions
+**Status:** Approved (Product Owner decision on the M7c gap assessment;
+M7d design approved before implementation started)
+**Decision:**
+1. **M7c is formally skipped, not silently dropped or silently
+   implemented anyway.** The M7c assessment (see the M7c gap-assessment
+   conversation record) tested the six approved M7 tools against every
+   representative operational question in the approved use-case list and
+   found each one already answerable from an already-approved,
+   already-returned field — every identified gap was confined to
+   `src/lib/ai/providers/mock.ts`'s keyword matching or canned summarizer
+   text, never a missing tool, field, or capability. Recorded here per
+   CLAUDE.md rule 8 (flag a scope question to the Product Owner rather
+   than silently proceeding either way) — the Product Owner's decision to
+   skip is the resolution.
+2. **M7d fixes exactly the five gaps the M7c assessment named, and only
+   those** — no new keyword table, tool, or projection beyond what that
+   assessment's own "minor refinements" list already specified. Each fix
+   is additive to `mock.ts` alone: either a keyword-list widening (dispatch
+   recognizes more phrasings of an already-supported question) or a
+   summarizer-text widening (narrates a field the relevant tool has
+   returned since M7a but no reply ever mentioned). No `withTenant()`
+   method changed, no AI tool file changed, no RBAC matrix entry changed.
+3. **`getStaffDirectory`'s new role-filter is scoped to the tool's own
+   summarizer, after dispatch, using the same `{name, role}` list every
+   staff-directory question already returns** — it does not change which
+   roles the tool is offered to (still OWNER_ADMIN/MANAGER only,
+   unchanged from M7a) or what fields it returns (still never email). A
+   restricted role's question still never reaches this code at all (the
+   tool is absent from their registry, `if (!tool) break;` in the
+   dispatch loop, unchanged from M7a/M7b).
+4. **The adversarial prompt matrix (35 phrases) is a proof pass, not a
+   new defense mechanism** — every category was already structurally
+   guaranteed by M7a/M7b's own design (Server Action never reads identity
+   from message text; mock provider only ever keyword-matches into a
+   closed six-tool allow-list or a fixed fallback; no tool has a write
+   path). M7d adds the explicit regression tests proving each category
+   fails safely, rather than introducing any new safeguard — there was
+   nothing to newly defend against, since a real LLM-backed conversation
+   (the `anthropic` provider) has the identical structural guarantee: no
+   tool it could call has a write path, and its `{hotelId, role}` context
+   is closure-bound from the same `requireStaffAccess()` reload, never
+   from conversation content.
+5. **Explicit tool-layer cross-tenant tests were added for the four
+   tools that previously only inherited isolation transitively** from
+   `reports.test.ts`'s own cross-tenant coverage of the underlying
+   `withTenant().reports.*` methods. Since both integration-test fixture
+   hotels share identical default data (same room number, same
+   reservation dates), genuine distinguishing rows were created and
+   reverted within the new test itself — `tests/integration/fixtures.ts`
+   was not modified, to avoid any effect on the many other test files
+   that share it.
+**Rationale:** M7c's skip and M7d's exact scope are both decisions
+explicitly reserved for the Product Owner by the approved phase plan
+("M7c — ... ONLY if M7b review finds a real approved gap... do not invent
+new tools merely because a phase exists"); recorded per CLAUDE.md rule 7.
+
+---
+
 ## 2026-08-27 — M7b security correction: the M6 personal-information branch no longer intercepts M7 management questions
 **Status:** Approved (Product Owner pre-push security review of `2bed10a`,
 Classification B accepted — user-visible incorrect M7b behavior, no

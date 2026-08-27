@@ -235,3 +235,60 @@ describe("sendManagementAssistantMessageAction — error handling never leaks ra
     expect(serialized).not.toContain("getOperationalSnapshot");
   });
 });
+
+describe("sendManagementAssistantMessageAction — M7d: provider failure and malformed-output hardening", () => {
+  it("returns a safe generic error, never a crash, when the provider rejects with a timeout-shaped error", async () => {
+    requireStaffAccess.mockResolvedValue(STAFF_OWNER);
+    getHotelById.mockResolvedValue(HOTEL);
+    converse.mockRejectedValue(new Error("ETIMEDOUT: request to api.anthropic.com timed out"));
+
+    const result = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: "hello" }));
+
+    expect(result.error).toBeDefined();
+    expect(result.error).not.toMatch(/anthropic|ETIMEDOUT/i);
+    expect(result.messages).toEqual([{ role: "user", content: "hello" }]);
+  });
+
+  it("returns a safe generic error, never a crash, when the provider resolves with a malformed/empty response (missing reply)", async () => {
+    requireStaffAccess.mockResolvedValue(STAFF_OWNER);
+    getHotelById.mockResolvedValue(HOTEL);
+    // Deliberately malformed (missing `reply`/`toolCalls`), proving the action doesn't crash on an unexpected shape.
+    converse.mockResolvedValue({});
+
+    const result = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: "hello" }));
+
+    // Whatever the action does with a missing `reply` (append `undefined`
+    // as content, or treat it as a failure), it must not throw an
+    // unhandled exception out of the Server Action.
+    expect(result).toBeDefined();
+    expect(result.messages[0]).toEqual({ role: "user", content: "hello" });
+  });
+
+  it("returns a safe generic error when a tool's own execute() throws inside the provider (propagated as a converse() rejection)", async () => {
+    requireStaffAccess.mockResolvedValue(STAFF_OWNER);
+    getHotelById.mockResolvedValue(HOTEL);
+    // Mirrors how `createMockProvider().converse()` would propagate a real
+    // tool-execution failure (e.g. a DB connection error inside
+    // `getOperationalSnapshot`) — it has no internal try/catch of its own.
+    converse.mockRejectedValue(new Error("connection terminated unexpectedly"));
+
+    const result = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: "What is today's occupancy?" }));
+
+    expect(result.error).toBeDefined();
+    expect(result.error).not.toContain("connection terminated unexpectedly");
+  });
+
+  it("a failed message does not corrupt state for the next call — the action remains usable afterward", async () => {
+    requireStaffAccess.mockResolvedValue(STAFF_OWNER);
+    getHotelById.mockResolvedValue(HOTEL);
+
+    converse.mockRejectedValueOnce(new Error("boom"));
+    const failed = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: "hello" }));
+    expect(failed.error).toBeDefined();
+
+    converse.mockResolvedValueOnce({ reply: "5 of 52 rooms occupied.", toolCalls: [] });
+    const succeeded = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: "What is today's occupancy?" }));
+    expect(succeeded.error).toBeUndefined();
+    expect(succeeded.messages[1]).toEqual({ role: "assistant", content: "5 of 52 rooms occupied." });
+  });
+});
