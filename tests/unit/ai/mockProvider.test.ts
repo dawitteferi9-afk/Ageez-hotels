@@ -606,3 +606,89 @@ describe("createMockProvider — room type questions", () => {
     expect(result.reply).toBe("I don't have that information — please contact the front desk for details.");
   });
 });
+
+describe("createMockProvider — M7b correction: real M6 behavior is unaffected by the new M7 gate", () => {
+  /**
+   * The M7b pre-push correction added `isM6GuestConversation` (a check for
+   * any of the five M6 guest tool names) purely to SKIP the
+   * `PERSONAL_INFO_PATTERN` block for an M7 conversation — it changes
+   * nothing about what happens when that check is `true`. These three
+   * tests exercise it with the SAME realistic tool wiring the real
+   * `sendConciergeMessageAction()` actually builds
+   * (`[...getAnonymousConciergeTools(), ...getVerifiedConciergeTools()]`
+   * once verified), proving each of the three M6 guarantees the
+   * correction was explicitly required not to weaken.
+   */
+  it("anonymous M6 personalized question still receives the approved verification-required reply (unchanged)", async () => {
+    const knowledge = knowledgeTool({ found: false });
+    const roomTypes = roomTypesTool([]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Is my room ready yet?" }],
+      tools: [knowledge, roomTypes], // realistic anonymous-tier wiring
+    });
+
+    expect(result.reply).toBe(
+      "I can't look up personal booking, room, or request details in this chat yet — that requires verifying who you are first, and that verification isn't available in this version. Please contact the front desk with your booking reference for help with your reservation or request."
+    );
+    expect(result.toolCalls).toEqual([]);
+  });
+
+  it("verified M6 guest personalized question still uses getReservationSummary/getServiceRequestStatus as appropriate (unchanged)", async () => {
+    const knowledge = knowledgeTool({ found: false });
+    const roomTypes = roomTypesTool([]);
+    const reservation = reservationSummaryTool({
+      found: true,
+      bookingReference: "AGZ-99999999",
+      roomNumber: "301",
+      roomTypeName: "Executive Room",
+      checkIn: "2026-09-10",
+      checkOut: "2026-09-12",
+      status: "CONFIRMED",
+      totalPrice: "14000",
+      currency: "ETB",
+      paymentMethod: "PAY_AT_HOTEL",
+    });
+    const serviceRequests = serviceRequestStatusTool([{ type: "LAUNDRY", status: "PENDING", notes: null, createdAt: "2026-08-27T00:00:00.000Z" }]);
+    const provider = createMockProvider();
+    // realistic verified-tier wiring: anonymous + verified, concatenated
+    const tools = [knowledge, roomTypes, reservation, serviceRequests];
+
+    const roomResult = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Is my room ready yet?" }],
+      tools,
+    });
+    expect(reservation.execute).toHaveBeenCalledWith({});
+    expect(roomResult.reply).toContain("AGZ-99999999");
+
+    const requestResult = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Has my request been completed?" }],
+      tools,
+    });
+    expect(serviceRequests.execute).toHaveBeenCalledWith({});
+    expect(requestResult.reply).toContain("LAUNDRY: PENDING");
+  });
+
+  it("M6 ServiceRequest proposal behavior remains unchanged", async () => {
+    const knowledge = knowledgeTool({ found: false });
+    const roomTypes = roomTypesTool([]);
+    const reservation = reservationSummaryTool({ found: true });
+    const serviceRequests = serviceRequestStatusTool([]);
+    const propose = proposeServiceRequestTool();
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "I need to request laundry service, please." }],
+      tools: [knowledge, roomTypes, reservation, serviceRequests, propose], // realistic full verified-tier wiring
+    });
+
+    expect(propose.execute).toHaveBeenCalled();
+    expect(result.reply).toContain('press "Confirm Request"');
+    expect(result.reply).not.toMatch(/submitted|has been created/i);
+  });
+});

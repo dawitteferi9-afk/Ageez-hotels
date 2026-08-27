@@ -4,6 +4,48 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-27 — M7b security correction: the M6 personal-information branch no longer intercepts M7 management questions
+**Status:** Approved (Product Owner pre-push security review of `2bed10a`,
+Classification B accepted — user-visible incorrect M7b behavior, no
+security/data-isolation issue)
+**Decision:**
+1. **`src/lib/ai/providers/mock.ts`'s `PERSONAL_INFO_PATTERN` block is now
+   gated on `isM6GuestConversation`** — `tools` containing any of the five
+   M6 guest tool names (`getHotelKnowledge`/`getRoomTypesSummary` from the
+   anonymous tier; `getReservationSummary`/`getServiceRequestStatus`/
+   `proposeServiceRequest` from the verified tier). The pre-push review
+   proved, by running the real deterministic provider against 8
+   representative authenticated-staff phrasings ("Is my room occupied?",
+   "Am I OWNER_ADMIN?", etc.), that this branch — which predates M7 and
+   was previously gated on nothing but the regex itself — fell through to
+   the M6 guest `PERSONAL_INFO_REPLY` for an M7 conversation, since
+   `reservationTool`/`serviceRequestTool` are always `undefined` for the
+   M7 registry. No data was ever disclosed by this (`toolCalls` was empty
+   in every case tested) — a correctness bug, not an authorization or PII
+   issue. Gating was deliberately chosen over the M6-tool-presence
+   discriminant used for the `proposeServiceRequest` block (`if
+   (proposeTool && ...)`) alone, because a real M6 conversation isn't
+   guaranteed to include every one of the five tool names in every code
+   path exercised by the existing test suite (one pre-existing regression
+   test constructs a verified-tier-only `tools` array with neither
+   anonymous tool present) — the union of all five names is the smallest
+   check that is `true` for every real and tested M6 shape and `false` for
+   every M7 shape (confirmed: zero tool-name overlap between the M6 and M7
+   registries).
+2. **No change to `PERSONAL_INFO_PATTERN` itself, `PERSONAL_INFO_REPLY`'s
+   wording, the inner `reservationTool && serviceRequestTool` verified-tier
+   routing, or `proposeServiceRequest`'s own trigger logic** — the
+   smallest-safe-correction constraint ruled out touching any M6-only
+   logic; only the new gate is additive.
+**Rationale:** A real, user-visible correctness gap between M7b's approved
+scope (a correctly functioning read-only assistant) and what the shared
+mock-provider dispatch actually did, found during the mandatory M7b
+pre-push security review before pushing `2bed10a` — not a new design
+decision, not a scope change. Recorded per CLAUDE.md rule 7. See
+`docs/CHANGELOG.md`'s matching entry for the exact tests added.
+
+---
+
 ## 2026-08-27 — M7 Phase b (Management Assistant UI) implementation decisions and findings
 **Status:** Approved (Product Owner design/plan approval before
 implementation started, per the amended M7a–M7e phase plan; these are the

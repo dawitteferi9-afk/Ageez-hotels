@@ -1,5 +1,44 @@
 # Changelog
 
+## M7b security correction: isolate guest and management mock intent handling (2026-08-27)
+A pre-push security/scope review of `2bed10a` (M7 Phase b) found that
+`src/lib/ai/providers/mock.ts`'s M6 `PERSONAL_INFO_PATTERN` block — which
+predates M7 and checks the guest's most recent message before any other
+dispatch — was never gated on anything but the pattern itself, so a staff
+question that happened to match it (e.g. "Is my room occupied?", "Am I
+OWNER_ADMIN?") fell into the M6-only branch and returned the M6 guest
+`PERSONAL_INFO_REPLY` instead of ever reaching M7 management dispatch.
+Classification B (accepted): user-visible incorrect behavior, no
+authorization/data-isolation issue — `reservationTool`/`serviceRequestTool`
+are always `undefined` for the M7 registry, so no tool was ever called and
+no data was ever disclosed either way.
+- **Fix:** the whole `PERSONAL_INFO_PATTERN` block is now gated on
+  `isM6GuestConversation` — `tools` containing any of the five M6 guest
+  tool names. `true` for every real M6 conversation (anonymous or
+  verified), `false` for every M7 conversation (zero tool-name overlap
+  between the two registries). No change to the pattern itself, its reply
+  wording, verified-tier routing, or `proposeServiceRequest`'s trigger
+  logic.
+- **Tests added:** `tests/unit/ai/mockProviderManagementAssistant.test.ts`
+  — the 8 exact staff phrasings from the review, each asserted to never
+  return the M6 reply and to route to the one topically-appropriate M7
+  tool (or the normal M7 fallback) with no additional tool access gained;
+  `tests/unit/ai/mockProvider.test.ts` — three new regression tests using
+  realistic full anonymous/verified tool wiring proving anonymous M6
+  personalized questions, verified M6 personalized questions
+  (`getReservationSummary`/`getServiceRequestStatus`), and M6d
+  `proposeServiceRequest` creation-intent behavior are all unchanged.
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (**286/286**); `npm run test:integration`
+  (**193/193**, unchanged); `npm run build` (clean, no route change); the
+  M7 management-assistant and M6 concierge E2E suites (20/20), then the
+  complete existing Playwright suite (**82/82 passed**, zero regressions).
+  DB baseline confirmed restored before and after.
+- No schema change, no mutation path, no new M7 capability, no M6
+  anonymous/verified registry change, no M7c/M7d/M7e work, no M8/M9 work.
+  Only `src/lib/ai/providers/mock.ts` and its two directly-related test
+  files changed.
+
 ## M7 — AI Management Assistant, Phase b (Management Assistant UI) (2026-08-27)
 The second M7 phase: the authenticated, staff-facing `/management/assistant`
 chat UI, wired to the M7a read-only tool boundary. No new AI tool, no new

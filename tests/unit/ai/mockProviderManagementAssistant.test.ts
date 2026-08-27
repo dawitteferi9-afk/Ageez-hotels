@@ -207,6 +207,91 @@ describe("createMockProvider — getStaffDirectory", () => {
   });
 });
 
+describe("createMockProvider — M7b correction: M6 PERSONAL_INFO_PATTERN never intercepts M7", () => {
+  /**
+   * Pre-push review finding (Classification B, accepted): these eight
+   * phrasings all matched `PERSONAL_INFO_PATTERN` and, before the
+   * correction, incorrectly fell into the M6-only branch — producing the
+   * M6 guest `PERSONAL_INFO_REPLY` (or, for one, a coincidental partial
+   * match) instead of ever reaching M7 management dispatch, even though
+   * zero data was ever disclosed either way (`reservationTool`/
+   * `serviceRequestTool` are always `undefined` for the M7 registry).
+   * Now: the block is skipped entirely for an M7 conversation, so these
+   * questions reach the normal management-dispatch loop — some happen to
+   * match a real M7 tool's keywords (answered from real tool output,
+   * exactly as any other management question would be), the rest fall to
+   * the ordinary M7 safe fallback. None may ever return the M6 reply, and
+   * none may gain access to a tool beyond what the offered registry (and
+   * that tool's own RBAC re-check) already allows.
+   */
+  const M6_PERSONAL_INFO_REPLY =
+    "I can't look up personal booking, room, or request details in this chat yet — that requires verifying who you are first, and that verification isn't available in this version. Please contact the front desk with your booking reference for help with your reservation or request.";
+  const M7_FALLBACK_REPLY = "I don't have that information — please contact the front desk for details.";
+
+  function fullOwnerAdminToolSet(): AiToolDefinition[] {
+    return [
+      managementTool("getOperationalSnapshot", { available: true, occupancy: { totalRooms: 52, byStatus: { OCCUPIED: 5 }, occupancyRate: 10, byRoomType: [] }, reservationsByStatus: {}, totalGuests: 10, todayArrivalCount: 0, todayDepartureCount: 0 }),
+      managementTool("getTodayArrivalsDepartures", { available: true, date: "2026-08-27", arrivals: [], departures: [] }),
+      managementTool("getHousekeepingQueueSummary", { available: true, count: 1, rooms: [{ roomNumber: "201" }] }),
+      managementTool("getMaintenanceSummary", { available: true, countsByStatus: {}, countsByPriority: {}, openBlocking: [{ roomNumber: "104", description: "AC not cooling", priority: "URGENT", status: "OPEN" }] }),
+      managementTool("getServiceRequestSummary", { available: true, countsByStatus: {}, countsByType: {}, pendingAndInProgress: [] }),
+      managementTool("getStaffDirectory", { available: true, staff: [{ name: "Amanuel Girma", role: "OWNER_ADMIN" }] }),
+    ];
+  }
+
+  function assertNeverTheM6Reply(reply: string) {
+    expect(reply).not.toBe(M6_PERSONAL_INFO_REPLY);
+    expect(reply).not.toMatch(/booking verification|booking reference|verifying who you are/i);
+  }
+
+  it.each([
+    { question: "What is my request status?", expectedTool: null },
+    { question: "Is my room occupied?", expectedTool: "getOperationalSnapshot" },
+    { question: "Am I assigned to any maintenance issue?", expectedTool: "getMaintenanceSummary" },
+    { question: "What requests are assigned to me?", expectedTool: null },
+    { question: "Is my housekeeping queue empty?", expectedTool: "getHousekeepingQueueSummary" },
+    { question: "What room am I responsible for?", expectedTool: null },
+    { question: "What is my role?", expectedTool: null },
+    { question: "Am I OWNER_ADMIN?", expectedTool: null },
+  ])("$question", async ({ question, expectedTool }) => {
+    const tools = fullOwnerAdminToolSet();
+    const result = await ask(question, tools);
+
+    assertNeverTheM6Reply(result.reply);
+
+    if (expectedTool) {
+      // Routes to the one topically-appropriate M7 tool — never more than
+      // one call, never a different tool, never additional access beyond
+      // what the offered registry already grants.
+      expect(result.toolCalls).toHaveLength(1);
+      expect(result.toolCalls[0]!.name).toBe(expectedTool);
+      const calledTool = tools.find((t) => t.name === expectedTool)!;
+      expect(calledTool.execute).toHaveBeenCalledWith({});
+      for (const other of tools) {
+        if (other.name !== expectedTool) expect(other.execute).not.toHaveBeenCalled();
+      }
+    } else {
+      // No M7 tool's keywords match — the normal M7 safe fallback, no
+      // tool call, no fabricated answer.
+      expect(result.reply).toBe(M7_FALLBACK_REPLY);
+      expect(result.toolCalls).toEqual([]);
+      for (const tool of tools) expect(tool.execute).not.toHaveBeenCalled();
+    }
+  });
+
+  it("never gains getStaffDirectory access for a restricted role via this pattern, even though the question matches PERSONAL_INFO_PATTERN", async () => {
+    // FRONT_DESK/HOUSEKEEPING/MAINTENANCE never receive getStaffDirectory
+    // in their registry at all (M7a) — confirm the M6 collision fix can't
+    // change that: the tool is simply absent, so no keyword match can
+    // reach it regardless of phrasing.
+    const restrictedTools = fullOwnerAdminToolSet().filter((t) => t.name !== "getStaffDirectory");
+    const result = await ask("Am I OWNER_ADMIN?", restrictedTools);
+    assertNeverTheM6Reply(result.reply);
+    expect(result.reply).toBe(M7_FALLBACK_REPLY);
+    expect(result.toolCalls).toEqual([]);
+  });
+});
+
 describe("createMockProvider — determinism and no cross-system leakage", () => {
   it("is deterministic — the same question produces the same reply across repeated calls", async () => {
     const tool = managementTool("getOperationalSnapshot", {

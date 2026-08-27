@@ -70,6 +70,31 @@ import type { AiProvider, AiConverseInput, AiConverseResult, AiToolCallRecord } 
  * were ever violated. A management question is recognized by simple,
  * disjoint keyword sets per tool (checked in registry-declaration order),
  * calls that ONE matching tool, and answers strictly from its output:
+ *
+ * M7b correction (pre-push review finding, Classification B): the
+ * `PERSONAL_INFO_PATTERN` check above predates M7 and was never gated on
+ * anything but the pattern itself, so a staff question that happened to
+ * match it (e.g. "Is my room occupied?", "Am I OWNER_ADMIN?") fell into
+ * the M6-only branch below — `reservationTool`/`serviceRequestTool` are
+ * always `undefined` for the M7 registry, so it produced the M6 guest
+ * `PERSONAL_INFO_REPLY` ("...verifying who you are...contact the front
+ * desk with your booking reference...") instead of ever reaching M7
+ * management dispatch. No data was ever disclosed by this (both lookup
+ * tools are undefined, so no tool call happens either way) — this was a
+ * user-visible correctness bug, not an authorization or PII issue. Fixed
+ * by gating the entire `PERSONAL_INFO_PATTERN` block on
+ * `isM6GuestConversation` — `tools` containing ANY of the five M6 guest
+ * tool names (`getHotelKnowledge`/`getRoomTypesSummary` from the anonymous
+ * tier, `getReservationSummary`/`getServiceRequestStatus`/
+ * `proposeServiceRequest` from the verified tier). A real M6 conversation
+ * always includes at least the two anonymous tools (verified adds the
+ * other three on top — see `src/app/(guest)/concierge/actions.ts`'s
+ * `[...anonymous, ...verified]` concatenation), so this is `true` for
+ * every genuine M6 turn, anonymous or verified, and — since none of these
+ * five names is ever offered by `getManagementAssistantTools()` — always
+ * `false` for M7. When `false`, the block is skipped entirely and the
+ * question falls straight through to the management-dispatch loop below,
+ * exactly as if this M6-only branch didn't exist for that turn.
  *   - `{ available: false }` (the tool's own RBAC re-check failed) always
  *     produces the fixed `MANAGEMENT_UNAVAILABLE_REPLY` — never a
  *     different wording per tool, never a hint at which rule failed.
@@ -111,6 +136,21 @@ const PERSONAL_INFO_REPLY =
 
 /** A verified-tier personalized question specifically about a service request, vs. the reservation itself. */
 const SERVICE_REQUEST_PATTERN = /\brequest\b/;
+
+/**
+ * M7b correction — every tool name that can appear ONLY in an M6 guest
+ * conversation (anonymous tier: the first two; verified tier adds the
+ * other three), never in the M7 management registry. Presence of any one
+ * of these is the signal that `PERSONAL_INFO_PATTERN` below is even
+ * applicable to this turn — see this file's module comment.
+ */
+const M6_GUEST_TOOL_NAMES = new Set([
+  "getHotelKnowledge",
+  "getRoomTypesSummary",
+  "getReservationSummary",
+  "getServiceRequestStatus",
+  "proposeServiceRequest",
+]);
 
 const VERIFY_AGAIN_REPLY =
   "I couldn't confirm your booking verification for that — please verify your booking again, or contact the front desk for help.";
@@ -211,7 +251,10 @@ export function createMockProvider(): AiProvider {
       const question = (lastUserTurn?.content ?? "").toLowerCase();
       const toolCalls: AiToolCallRecord[] = [];
 
-      if (PERSONAL_INFO_PATTERN.test(question)) {
+      // M7b correction — see this file's module comment / M6_GUEST_TOOL_NAMES.
+      const isM6GuestConversation = tools.some((t) => M6_GUEST_TOOL_NAMES.has(t.name));
+
+      if (isM6GuestConversation && PERSONAL_INFO_PATTERN.test(question)) {
         const reservationTool = tools.find((t) => t.name === "getReservationSummary");
         const serviceRequestTool = tools.find((t) => t.name === "getServiceRequestStatus");
 
