@@ -4,6 +4,50 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-27 — M8 Phase b: dependency vulnerability findings assessed as not requiring pre-Saturday remediation
+**Status:** Approved as a documented, deferred-risk decision pending
+explicit Product Owner sign-off on the recommendation below (per M8's own
+approved instruction: a critical/high finding must be reported and wait
+for Product Owner approval before any remediation, and no
+`package.json`/lockfile change was made either way)
+**Decision:** `npm audit` found 11 vulnerabilities (3 moderate, 7 high, 1
+critical) in the full dependency tree; 6 (0 moderate, 6 high, 0 critical)
+with `--omit=dev`. Each was individually assessed for exploitability
+against this specific application, not accepted at face value from the
+advisory's own generic severity rating:
+1. **`vitest`/`@vitest/mocker`/`vite`/`vite-node`/`esbuild`** (1 critical,
+   3 moderate) — absent entirely from the `--omit=dev` audit, confirming
+   these are devDependency-tree-only. The critical finding requires the
+   Vitest UI server to be actively listening; no script in
+   `package.json` starts it, and it is never used in this project. The
+   moderate findings require a running local dev server being targeted by
+   a malicious website — not applicable to a deployed build.
+2. **`prisma`/`@prisma/config`/`deepmerge-ts`** (high) — a stack-exhaustion
+   DoS in the Prisma CLI's own config-merging logic (`db:generate`/
+   `db:migrate`/`prisma validate`), never in the `@prisma/client` runtime
+   query path the deployed app actually executes against guest/staff
+   requests.
+3. **`next`/`postcss`** (high) — CSS-stringify XSS and
+   `sourceMappingURL` path-traversal/file-read, both in `next`'s bundled
+   build-time CSS tooling; this app has no runtime code path that
+   processes untrusted/user-supplied CSS.
+4. **`next`/`sharp`** (high) — libvips CVEs in `next`'s optional image
+   pipeline; confirmed by a repository-wide search that `next/image` is
+   never imported anywhere in `src/`, so this vulnerable code path is
+   never invoked by this app regardless of configuration.
+**Rationale:** None of the 11 findings are practically exploitable
+through any code path this application actually executes, in development
+or in a production deployment of the current build. Recommending no
+remediation before the Saturday demonstration; deferring to post-demo
+dependency hardening (M8j) where a real production deployment target's
+exact `npm ci --omit=dev` tree can be re-audited and any remaining item
+addressed deliberately, including the semver-major upgrades (`vitest@4`,
+`next@16`) `npm audit fix --force` would otherwise apply automatically.
+Recorded per CLAUDE.md rule 7 and the explicit instruction not to modify
+`package.json`/lockfiles without a separate approval step.
+
+---
+
 ## 2026-08-27 — M7 (AI Management Assistant) closed out as Complete
 **Status:** Approved (Product Owner closeout — a dedicated integration
 audit, final security review, and cross-milestone regression pass, not a

@@ -1,5 +1,47 @@
 # Changelog
 
+## M8 — Testing + Security Hardening, Phase b (pre-demo XSS/CSRF regression + dependency audit) (2026-08-27)
+Second pre-demo M8 checkpoint (following M8a's auth/RBAC/tenant/server-trust
+regression audit). Verification/documentation only — **no application
+source changed**, no defect found.
+- **XSS:** repository-wide inspection confirmed zero
+  `dangerouslySetInnerHTML`, zero raw-HTML/`innerHTML` injection point,
+  zero markdown renderer anywhere in `src/`. Added
+  `tests/e2e/xssRegression.spec.ts` (5 tests) — `<script>alert('xss')</script>`,
+  `<img src=x onerror=alert('xss')>`, and `<svg onload=alert('xss')>`
+  injected through guest name (public booking → management guest/
+  reservation pages), MaintenanceIssue description, ServiceRequest notes,
+  M6 guest chat text, and M7 staff chat text — each with a
+  `page.on("dialog")` guard that fails the test if the payload ever
+  executes, plus an assertion the literal text renders. All five pass;
+  zero dialogs fired.
+- **CSRF:** empirically verified Next.js's built-in Server Action
+  Origin-check by capturing a real, authenticated mutation POST and
+  replaying it with a forged cross-origin `Origin` header — rejected
+  (`HTTP 500`, `"Invalid Server Actions request."`) before any
+  application code runs, zero rows created; the same replay with the
+  real origin succeeds normally. Added `tests/e2e/csrfRegression.spec.ts`
+  (1 test) proving this. No custom CSRF infrastructure added — the
+  framework protection already provides it.
+- **Dependency audit:** `npm audit` — 11 findings (3 moderate, 7 high, 1
+  critical) full tree; 6 findings (0 moderate, 6 high, 0 critical) with
+  `--omit=dev`. All assessed as not practically exploitable against this
+  application (devDependency-only tooling never shipped/reachable in
+  production, or `next`'s bundled dependencies for features — runtime CSS
+  processing, `next/image` — this app doesn't use). No remediation before
+  Saturday; deferred to post-demo dependency hardening. No
+  `package.json`/lockfile change made. Full detail in `docs/SECURITY.md`'s
+  M8b entry.
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (**326/326**, unchanged); `npm run
+  test:integration` (**199/199**, unchanged); `npm run build` (clean, no
+  route change); the new XSS/CSRF Playwright coverage (6/6), then the
+  complete existing Playwright suite (**88/88 passed** — 82 pre-existing
+  + 6 new, zero regressions). DB baseline confirmed restored before and
+  after.
+- No schema change, no dependency/version change, no mutation behavior
+  change, no M6/M7 capability change, no M8c+ or M9 work.
+
 ## M7 — AI Management Assistant, Phase e (final integration audit and closeout) (2026-08-27)
 The final M7 phase — an integration audit, final security review, and
 cross-milestone regression pass across M7a/M7b/M7d as one system (M7c was

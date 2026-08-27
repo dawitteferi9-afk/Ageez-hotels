@@ -423,8 +423,78 @@ table). Security-relevant invariants:
 committed. `ANTHROPIC_API_KEY`, `CONCIERGE_TOKEN_SECRET`, and any DB
 credentials must never reach client-side code.
 
-## Deferred to M8 (Testing + Security milestone)
-- Formal review of every tenant-scoped query path
+## M8 — Testing + Security Hardening (in progress, staged pre-demo/post-demo per Product Owner decision)
+M8 is a hardening/verification milestone, not a feature milestone — it
+independently re-audits and adds regression coverage for the already-built
+v0.1 system rather than adding capability. Staged: **pre-demo** phases
+(M8a–M8e) target the Saturday hotel demonstration without introducing
+distributed infrastructure; **post-demo** phases (M8f+) resume toward
+genuine multi-instance production readiness.
+
+### M8a — Auth/RBAC/tenant/server-trust regression + tampering audit
+Test-only; no application source changed; no defect found. Added
+mid-session role-change regression (promotion/demotion take effect on the
+very next `requireStaffAccess()` call, no re-login) and direct
+Server-Action tampering tests for `createStaffAction`/`editStaffAction`/
+`manageIssueAction`/`checkInReservationAction`/`checkOutReservationAction`
+proving a smuggled `hotelId`/`staffId`/`role`/record-id field in
+`FormData` cannot override server-derived identity. See
+`docs/DECISIONS.md`'s M8a entry.
+
+### M8b — XSS/CSRF regression tests + dependency vulnerability audit
+**XSS:** re-confirmed (repository-wide inspection, not assumed) zero
+`dangerouslySetInnerHTML`, zero raw-HTML/`innerHTML` injection point, zero
+markdown renderer anywhere in `src/` — every free-text field renders
+through plain JSX interpolation, which React escapes by default. Added
+permanent regression tests injecting `<script>alert('xss')</script>`,
+`<img src=x onerror=alert('xss')>`, and `<svg onload=alert('xss')>`
+through five real production surfaces (guest name via public booking →
+management guest/reservation pages; MaintenanceIssue description;
+ServiceRequest notes; M6 guest chat text; M7 staff chat text) — each test
+arms a `page.on("dialog")` guard that fails the test if the payload ever
+executes, and asserts the literal payload text is visible (rendered as
+text, not stripped/executed). No defect found.
+
+**CSRF:** Next.js App Router Server Actions carry their own built-in
+Origin-check — verified empirically (not assumed) by capturing a real,
+authenticated `createStaffAction` POST and replaying the identical
+request with only the `Origin` header forged to a cross-origin value: the
+framework rejects it (`HTTP 500`, `"Invalid Server Actions request."`)
+before any application code — including `requireStaffAccess()` — runs,
+and no database row is created; the same replay with the real `Origin`
+succeeds normally. No custom CSRF token system was added — the framework
+protection already provides it. See `tests/e2e/csrfRegression.spec.ts`'s
+own module comment for the full investigation and its one stated
+limitation (a captured-request replay rather than a full second-origin
+browser navigation — assessed as proving the identical boundary).
+
+**Dependency audit (`npm audit`, this date):** 11 findings (3 moderate, 7
+high, 1 critical) full tree; **6 findings (0 moderate, 6 high, 0
+critical)** with `--omit=dev`. Assessed none as practically exploitable
+against this application as built and deployed:
+- `vitest`/`@vitest/mocker`/`vite`/`vite-node`/`esbuild` (1 critical, 3
+  moderate) — devDependency-only (absent from the `--omit=dev` audit);
+  the critical finding requires the Vitest UI server actively listening,
+  which no script in this project starts; the moderate findings are
+  dev-server-only.
+- `prisma`/`@prisma/config`/`deepmerge-ts` (high) — a stack-exhaustion DoS
+  in the Prisma CLI's own config-merging code (`db:generate`/`db:migrate`/
+  `validate`), never in the Prisma Client query path the running app
+  actually uses.
+- `next`/`postcss` (high) — CSS-stringify XSS and sourceMappingURL
+  path-traversal in `next`'s bundled build-time CSS tooling; this app
+  never processes untrusted CSS at runtime.
+- `next`/`sharp` (high) — libvips CVEs in `next`'s optional image
+  pipeline; `next/image` is never imported anywhere in `src/` (confirmed
+  by repository-wide search), so this code path is never invoked
+  regardless of `next.config.ts`'s `remotePatterns` setting.
+
+No `package.json`/lockfile change was made. Recommendation: no
+remediation required before Saturday; revisit as part of post-demo
+dependency hardening (M8j).
+
+## Deferred (post-demo M8 / future)
 - Row-Level Security policy design/audit
-- Auth session/role edge-case testing
-- Dependency/secret-scanning pass before any public deployment
+- Formal review of every tenant-scoped query path beyond M7e/M8a's own audits
+- Distributed rate limiting / durable idempotency (see M7's own design-package discussion)
+- Dependency-update policy and any remediation from the M8b audit above
