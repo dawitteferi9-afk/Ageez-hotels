@@ -269,8 +269,20 @@ test("booking verification: success, generic failures, real grounded personal an
   await ask(page, "Has my request been completed?");
   await expect(conciergeLog(page).getByText(/LAUNDRY.*PENDING/).last()).toBeVisible();
 
-  // Clearing verification returns to the exact M6b anonymous experience.
+  // Pre-push security-review correction A: a pending proposal card must not
+  // remain confirmable after "Clear verification" — propose once more, then
+  // clear verification instead of confirming, and the whole card (both the
+  // review text and the Confirm Request button) must disappear immediately.
+  // (The server was already proven safe against a stale/no-token confirm —
+  // see requirement B, covered in tests/unit/ai/conciergeConfirmAction.test.ts —
+  // this proves the UI no longer offers a now-unconfirmable card at all.)
+  await ask(page, "Please arrange laundry — collect two shirts.");
+  await expect(page.getByRole("button", { name: "Confirm Request" })).toBeVisible();
   await page.getByRole("button", { name: "Clear verification" }).click();
+  await expect(page.getByRole("button", { name: "Confirm Request" })).not.toBeVisible();
+  await expect(page.getByText("Review your service request")).not.toBeVisible();
+
+  // Clearing verification returns to the exact M6b anonymous experience.
   await ask(page, "What room am I booked in?");
   await expect(conciergeLog(page).getByText(/verification isn't available in this version/).last()).toBeVisible();
 

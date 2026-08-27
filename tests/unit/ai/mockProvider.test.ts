@@ -424,6 +424,159 @@ describe("createMockProvider — verified-tier service request creation intent (
   });
 });
 
+describe("createMockProvider — pre-push security-review correction: 'I want <type>' and '<type> request' intent coverage (M6d)", () => {
+  it("'I want room service.' produces a ROOM_SERVICE proposal when verified", async () => {
+    const propose = proposeServiceRequestTool();
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "I want room service." }],
+      tools: [propose],
+    });
+
+    expect(propose.execute).toHaveBeenCalledWith({ type: "ROOM_SERVICE", notes: "I want room service." });
+    expect(result.reply).toContain("Room Service");
+    expect(result.reply).toMatch(/Confirm Request/);
+  });
+
+  it("'Please make a restaurant request.' produces a RESTAURANT proposal when verified", async () => {
+    const propose = proposeServiceRequestTool();
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Please make a restaurant request." }],
+      tools: [propose],
+    });
+
+    expect(propose.execute).toHaveBeenCalledWith({ type: "RESTAURANT", notes: "Please make a restaurant request." });
+    expect(result.reply).toContain("Restaurant");
+    expect(result.reply).toMatch(/Confirm Request/);
+  });
+
+  it("neither corrected phrase is reachable anonymously (no new anonymous capability)", async () => {
+    const provider = createMockProvider();
+    const knowledge = knowledgeTool({ found: false });
+
+    for (const question of ["I want room service.", "Please make a restaurant request."]) {
+      const result = await provider.converse({
+        systemPrompt: "irrelevant",
+        history: [{ role: "user", content: question }],
+        tools: [knowledge],
+      });
+      expect(result.reply).not.toMatch(/Confirm Request/);
+    }
+  });
+
+  it("does NOT broaden the trigger so far that 'I want to know ...'-shaped informational questions become proposals", async () => {
+    const propose = proposeServiceRequestTool();
+    const knowledge = knowledgeTool({ found: true, category: "services", content: "Room service is available 24 hours." });
+    const provider = createMockProvider();
+
+    const informationalWithWant = [
+      "I want to know if you offer room service.",
+      "I want to know about the restaurant.",
+      "I want to ask about airport transfer options.",
+    ];
+
+    for (const question of informationalWithWant) {
+      const result = await provider.converse({
+        systemPrompt: "irrelevant",
+        history: [{ role: "user", content: question }],
+        tools: [propose, knowledge],
+      });
+      expect(propose.execute).not.toHaveBeenCalled();
+      expect(result.reply).not.toMatch(/Confirm Request/);
+    }
+  });
+
+  it("still does not treat similar informational room-service/restaurant questions (without 'want') as creation requests", async () => {
+    const propose = proposeServiceRequestTool();
+    const knowledge = knowledgeTool({ found: true, category: "services", content: "Some informational answer." });
+    const provider = createMockProvider();
+
+    const informational = [
+      "Do you have room service?",
+      "Do you offer restaurant reservations?",
+      "What time does room service stop?",
+      "Is there a restaurant on site?",
+    ];
+
+    for (const question of informational) {
+      const result = await provider.converse({
+        systemPrompt: "irrelevant",
+        history: [{ role: "user", content: question }],
+        tools: [propose, knowledge],
+      });
+      expect(propose.execute).not.toHaveBeenCalled();
+      expect(result.reply).not.toMatch(/Confirm Request/);
+    }
+  });
+
+  it("a real 'I want to <action>' request still works via its own action verb, unaffected by the 'want to' exclusion", async () => {
+    const propose = proposeServiceRequestTool();
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "I want to book a table for two tonight." }],
+      tools: [propose],
+    });
+
+    expect(propose.execute).toHaveBeenCalledWith({ type: "RESTAURANT", notes: "I want to book a table for two tonight." });
+    expect(result.reply).toContain("Restaurant");
+  });
+
+  it("the three originally-approved anchor phrases are unaffected by this correction (no regression)", async () => {
+    const provider = createMockProvider();
+
+    const airport = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Please arrange airport transfer." }],
+      tools: [proposeServiceRequestTool()],
+    });
+    expect(airport.reply).toContain("Airport Transfer");
+
+    const laundry = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Please send laundry service." }],
+      tools: [proposeServiceRequestTool()],
+    });
+    expect(laundry.reply).toContain("Laundry");
+
+    const other = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [
+        { role: "user", content: "I have a special request that doesn't fit the usual categories — could you help arrange it?" },
+      ],
+      tools: [proposeServiceRequestTool()],
+    });
+    expect(other.reply).toContain("Other");
+  });
+
+  it("the three originally-required informational anchors still produce no proposal (no regression)", async () => {
+    const provider = createMockProvider();
+    const knowledge = knowledgeTool({ found: true, content: "Some informational answer." });
+
+    const anchors = [
+      "Do you have laundry service?",
+      "What food does the restaurant serve?",
+      "Do you provide airport transfer?",
+    ];
+    for (const question of anchors) {
+      const propose = proposeServiceRequestTool();
+      const result = await provider.converse({
+        systemPrompt: "irrelevant",
+        history: [{ role: "user", content: question }],
+        tools: [propose, knowledge],
+      });
+      expect(propose.execute).not.toHaveBeenCalled();
+      expect(result.reply).not.toMatch(/Confirm Request/);
+    }
+  });
+});
+
 describe("createMockProvider — room type questions", () => {
   it("calls getRoomTypesSummary and summarizes it for a pricing question", async () => {
     const tool = roomTypesTool([{ name: "Executive Room", capacity: 3, basePrice: "7000", currency: "ETB" }]);

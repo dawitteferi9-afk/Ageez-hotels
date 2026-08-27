@@ -125,6 +125,18 @@ describe("confirmServiceRequestAction — no token / stale token", () => {
     expect(createForVerifiedGuest).not.toHaveBeenCalled();
   });
 
+  it("pre-push security-review correction B: creates nothing when the token field is an EMPTY STRING — exactly what the real hidden input submits after 'Clear verification' sets token to undefined (concierge-chat.tsx's `value={token ?? \"\"}`)", async () => {
+    const result = await confirmServiceRequestAction(
+      { status: "idle" },
+      formDataWith({ token: "", type: "LAUNDRY", notes: "stale proposal after clearing" })
+    );
+
+    expect(result.status).toBe("error");
+    expect(result.error).toMatch(/verify your booking again/i);
+    expect(resolveVerifiedReservationContext).not.toHaveBeenCalled();
+    expect(createForVerifiedGuest).not.toHaveBeenCalled();
+  });
+
   it("creates nothing when the token no longer resolves (expired/tampered/wrong-tenant — all collapse to null)", async () => {
     resolveVerifiedReservationContext.mockResolvedValue(null);
 

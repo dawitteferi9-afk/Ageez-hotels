@@ -103,16 +103,32 @@ const VERIFY_AGAIN_REPLY =
  * (a fixed word/phrase list, same style as `KNOWLEDGE_CATEGORY_KEYWORDS`)
  * rather than a general intent classifier — this is a deterministic mock,
  * not a real model.
+ *
+ * `i want` (pre-push security-review correction) is deliberately guarded
+ * by a negative lookahead excluding `i want to ...` — a guest saying "I
+ * want room service" is requesting it (direct object, no "to"), but "I
+ * want to know/ask/find out/see/check ..." is almost always an
+ * INFORMATIONAL question in that shape, not a request; any genuine "I
+ * want to <verb>" request (e.g. "I want to book a table") still matches
+ * via its own action verb (`book`) already in this list, so nothing is
+ * lost by excluding the "want to" shape here specifically.
  */
 const SERVICE_REQUEST_CREATE_TRIGGER =
-  /\b(request|book|arrange|order|schedule|need|reserve|please send|please collect|can i get|could i get)\b/;
+  /\b(request|book|arrange|order|schedule|need|reserve|please send|please collect|can i get|could i get|i want(?!\s+to\b))\b/;
 
-/** Specific-type keyword -> `ServiceRequestType`, checked together with `SERVICE_REQUEST_CREATE_TRIGGER` above. */
+/**
+ * Specific-type keyword -> `ServiceRequestType`, checked together with
+ * `SERVICE_REQUEST_CREATE_TRIGGER` above. `"restaurant request"` (pre-push
+ * security-review correction) covers phrasing like "please make a
+ * restaurant request" that doesn't name a table/reservation specifically —
+ * still requires the trigger word `request` above, so a bare "restaurant"
+ * mention elsewhere never matches this on its own.
+ */
 const SERVICE_REQUEST_TYPE_KEYWORDS: Record<string, string[]> = {
   AIRPORT_TRANSFER: ["airport transfer", "airport pickup", "airport shuttle", "ride to the airport"],
   LAUNDRY: ["laundry", "dry clean", "dry cleaning"],
   ROOM_SERVICE: ["room service", "food to my room", "breakfast to my room"],
-  RESTAURANT: ["restaurant reservation", "book a table", "reserve a table", "table for"],
+  RESTAURANT: ["restaurant reservation", "book a table", "reserve a table", "table for", "restaurant request"],
 };
 
 /** No specific type keyword matched, but the guest is clearly asking for *something* — maps to `OTHER`, never a guessed specific type. */

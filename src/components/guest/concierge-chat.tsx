@@ -115,7 +115,17 @@ export function ConciergeChat({
         </p>
       )}
 
-      {state.proposal && (
+      {/*
+        Pre-push security-review correction: also require `token` here, not
+        just `state.proposal`. Server-side, confirming with no token was
+        always safely rejected (`confirmServiceRequestAction` re-verifies
+        the token fresh regardless) — but without this guard, pressing
+        "Clear verification" only cleared `token`, leaving a now-unconfirmable
+        proposal card visibly rendered and looking confirmable. Requiring
+        both means clearing verification immediately hides the card too, so
+        the UI never shows a proposal the server can no longer honor.
+      */}
+      {state.proposal && token && (
         <ServiceRequestProposalCard
           // Remounts (discarding any prior Confirm/Cancel result) whenever a
           // NEW assistant turn produces a proposal — never carries a stale
