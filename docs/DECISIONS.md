@@ -4,6 +4,81 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-27 — M7 (AI Management Assistant) closed out as Complete
+**Status:** Approved (Product Owner closeout — a dedicated integration
+audit, final security review, and cross-milestone regression pass, not a
+new implementation phase; same bar as the M4 and M6 closeout entries
+above/below)
+**Decision:** M7 is marked **Complete** in `docs/V0.1_SCOPE.md`. Phase a
+(read-only tool boundary), Phase b (authenticated chat UI), Phase d
+(adversarial hardening, plus its own targeted malformed-provider-reply
+correction), and Phase e (this closeout) are implemented, verified, and
+pushed (`9bc99cd`/`2bed10a`/`14af6bb`/`b2a6b44`/`450abfc`). Phase c was
+formally skipped — the M7c assessment found every approved v0.1
+operational use case already answerable from an already-approved,
+already-returned field; no tool/projection gap existed. This closeout
+added **no new capability, no schema change, and no code defect fix** —
+verification and documentation only.
+
+**Integration audit — the complete flow traced as one system:**
+authenticated staff → `/management/assistant` →
+`sendManagementAssistantMessageAction()` → `requireStaffAccess("dashboard",
+"view")` (fresh `StaffUser` DB reload every message, never a
+client-supplied `hotelId`/`role`/`staffId`) → `buildManagementAssistantSystemPrompt()`
++ `getManagementAssistantTools({hotelId, role})` (rebuilt fresh every
+message, never cached) → `getAiProvider().converse()` → one of exactly
+six read-only tools → `withTenant(hotelId)` → a purpose-built safe
+projection → a deterministic or real-provider reply, hardened against a
+malformed/empty one (M7d correction) → a plain `{role, content}`
+transcript. Confirmed structurally the ONLY entry point into this
+registry (`getManagementAssistantTools` has no other caller in
+application code) and the ONLY caller of `getAiProvider()` alongside M6's
+own concierge action — no third/alternate AI path exists anywhere.
+
+**Six-tool registry re-confirmed exactly:** `getOperationalSnapshot`,
+`getTodayArrivalsDepartures`, `getHousekeepingQueueSummary`,
+`getMaintenanceSummary`, `getServiceRequestSummary`, `getStaffDirectory`
+— no seventh tool, no generic query/SQL tool, no merged "all AI tools"
+registry exists anywhere in the codebase (re-confirmed by grep, not
+assumed). Zero tool-name overlap with either M6 registry in either
+direction.
+
+**PII allowlist re-verified field-by-field** directly against each tool's
+TypeScript interface (not inferred): arrivals/departures
+(`reservationId`/`guestName`/`roomNumber`/`status`), housekeeping
+(`roomNumber`/`floor`/`roomTypeName`), maintenance
+(`roomNumber`/`description`/`priority`/`status`/`assignedToName`),
+service requests (`guestName`/`roomNumber`/`type`/`status`/`notes`/
+`createdAt`), staff directory (`name`/`role`) — an exact match to the
+approved allowlist, no field surplus or deficit. `resolutionNotes`, all
+`Guest` contact fields, and `StaffUser.email`/`passwordHash` remain
+absent from every interface.
+
+**Tenant isolation re-run live** against real integration fixtures for
+all six tools (38/38 passing, including the four explicit cross-tenant
+tests added in M7d) — Hotel A never reflects Hotel B's counts, guests,
+rooms, issues, requests, or staff. Every tool `inputSchema` remains
+`{type:"object", properties:{}, additionalProperties:false}` — the model
+cannot supply `hotelId`/`role`/`staffId`/authorization flags to any call.
+
+**Zero-mutation guarantee re-confirmed** by a fresh repository-wide grep
+(one match: the Anthropic SDK's own `messages.create()` conversational
+API call, not a database write) and by the live 35-phrase adversarial
+matrix (M7d) re-run against the real running app with real before/after
+database state — byte-identical throughout.
+
+**No blocking or correctness defect was found during this audit.** Every
+invariant re-tested — RBAC/auth, tenant isolation, PII minimization,
+read-only enforcement, adversarial/prompt-injection resistance,
+grounded-answer behavior, the `{available:false}` vs. genuine-empty
+distinction, and provider-failure/malformed-output hardening — held
+exactly as designed. M7e therefore made no application source change.
+**Rationale:** A verification-and-documentation closeout pass, per
+CLAUDE.md's milestone-discipline requirement for a closing report before
+a multi-phase milestone is marked done. Recorded per CLAUDE.md rule 7.
+
+---
+
 ## 2026-08-27 — M7c formally skipped; M7 Phase d (adversarial hardening) implementation decisions
 **Status:** Approved (Product Owner decision on the M7c gap assessment;
 M7d design approved before implementation started)

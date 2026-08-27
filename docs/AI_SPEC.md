@@ -17,9 +17,8 @@
      can build a proposal; it can never execute the write. See
      `docs/DECISIONS.md`'s M6d entry and "Verified guest ServiceRequest
      creation (M6d)" below.
-2. **AI Management Assistant** (M7, in progress — Phase a: tool boundary,
-   Phase b: authenticated `/management/assistant` chat UI, both complete
-   and verified) — internal, authenticated-staff-only, structurally
+2. **AI Management Assistant** (M7, **Complete**) — internal,
+   authenticated-staff-only, structurally
    separate from the guest concierge. Answers live operational questions
    (occupied room count, rooms needing cleaning, open HIGH/URGENT
    maintenance issues, today's arrivals/departures, pending service
@@ -254,14 +253,14 @@ Phase d (confirmed guest service request creation), and Phase e
 closeout — no new capability) are all implemented and verified — see
 `docs/CHANGELOG.md` and `docs/DECISIONS.md`'s M6e entry.
 
-M7 (AI Management Assistant) is **in progress**: Phase a (read-only tool
+M7 (AI Management Assistant) is **Complete**: Phase a (read-only tool
 boundary — three new tenant/report helpers, all six approved tools, the
 role-aware registry, the system prompt, deterministic mock behavior),
 Phase b (the authenticated `/management/assistant` chat UI and its
-`sendManagementAssistantMessageAction()` Server Action boundary), and
-Phase d (adversarial security/tenant-isolation/prompt-injection hardening
-— no new tool or capability) are all implemented and verified — see
-`docs/CHANGELOG.md`'s M7 Phase a, b, and d entries and `docs/DECISIONS.md`'s
-M7a/M7b/M7d entries. Phase c was formally skipped (the M7c assessment
-found no approved operational gap). Phase e (closeout) remains; M7 as a
-whole is **not** marked complete.
+`sendManagementAssistantMessageAction()` Server Action boundary), Phase d
+(adversarial security/tenant-isolation/prompt-injection hardening — no
+new tool or capability), and Phase e (final integration audit and
+closeout — no new capability, documentation-only) are all implemented and
+verified — see `docs/CHANGELOG.md`'s M7 Phase a, b, d, and e entries and
+`docs/DECISIONS.md`'s M7a/M7b/M7d entries. Phase c was formally skipped
+(the M7c assessment found no approved operational gap).

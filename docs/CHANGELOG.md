@@ -1,5 +1,72 @@
 # Changelog
 
+## M7 — AI Management Assistant, Phase e (final integration audit and closeout) (2026-08-27)
+The final M7 phase — an integration audit, final security review, and
+cross-milestone regression pass across M7a/M7b/M7d as one system (M7c was
+formally skipped, no implementation exists for it). **No new capability,
+no code defect, and no schema change** — verification and documentation
+only. M7 is now marked **Complete**.
+- Traced the complete request flow end to end and confirmed it is the
+  ONLY entry point into the M7 registry and the only other caller of
+  `getAiProvider()` besides M6's own concierge action.
+- Re-confirmed the exact six-tool registry, the two-layer authorization
+  pattern, and zero cross-registry contamination with M6 (grep-verified,
+  not assumed).
+- Re-verified the PII allowlist field-by-field directly against every
+  tool's TypeScript interface — exact match to the approved list, no
+  surplus or deficit field.
+- Re-ran tenant isolation live against real integration fixtures for all
+  six tools (38/38 passing).
+- Re-confirmed the zero-mutation guarantee via a fresh repository-wide
+  grep and the live 35-phrase adversarial matrix against the real running
+  app, with real before/after database state.
+- Re-ran grounded-answer, `{available:false}`-vs-empty, and
+  provider-failure/malformed-output behavior (all already covered by the
+  M7a/M7b/M7d test suites, re-executed live as part of this closeout).
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (**312/312**); `npm run test:integration`
+  (**197/197**, including the tenant-isolation re-run above); `npm run
+  build` (clean, no route change); the M7 management-assistant + M6
+  concierge Playwright suite (20/20), then the complete existing
+  Playwright suite (**82/82 passed**, zero regressions). DB baseline
+  confirmed restored before and after.
+- No blocking or correctness defect was found — this closeout's only
+  changes are to `README.md`, `docs/V0.1_SCOPE.md`, `docs/AI_SPEC.md`,
+  `docs/SECURITY.md`, `docs/DECISIONS.md`, and this file.
+- See `docs/DECISIONS.md`'s M7 closeout entry for the full integration
+  audit detail.
+
+## M7 phase d correction: harden malformed provider replies (2026-08-27)
+A pre-push security review of `b2a6b44` (M7 Phase d) found that
+`sendManagementAssistantMessageAction()` treated ANY resolved
+`converse()` call as successful, even when `result.reply` was
+`undefined`/`null`/`""`/whitespace-only — concretely reachable in the
+real Anthropic provider (`return { reply: textBlock?.text ?? "", ... }`
+when the model responds with no text block, not just a contrived test).
+This produced a silently blank assistant chat bubble instead of the
+intended safe generic retry message. Classification B (accepted):
+correctness/UX issue, no security or capability expansion.
+- **Fix:** after `converse()` resolves, the reply is treated as usable
+  only when it is a non-blank string (`typeof result?.reply !== "string"
+  || result.reply.trim().length === 0` now throws, re-entering the SAME
+  existing catch block — no new error class, no new user-facing message).
+  A valid non-empty reply and a thrown provider error are both completely
+  unaffected.
+- **Tests added:** `tests/unit/ai/managementAssistantAction.test.ts` — the
+  four malformed-reply shapes (`undefined`/`null`/`""`/whitespace-only),
+  each asserted to produce the exact existing generic error and no
+  assistant turn at all; a valid-reply regression test; and a
+  malformed-then-valid sequence proving no persistent state corruption.
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (**312/312**); `npm run test:integration`
+  (**197/197**, unchanged); `npm run build` (clean, no route change); the
+  M7 management-assistant Playwright suite (8/8), then the complete
+  existing Playwright suite (82/82 passed). DB baseline confirmed
+  restored before and after.
+- No schema change, no mutation path, no new tool/capability, no M6
+  change. Only `src/app/management/(protected)/assistant/actions.ts` and
+  its test file changed.
+
 ## M7 — AI Management Assistant, Phase d (adversarial security and intent hardening) (2026-08-27)
 M7c (operational coverage refinement) was formally **skipped** — the M7c
 assessment found the six approved M7 tools already cover every approved

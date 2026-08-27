@@ -302,7 +302,7 @@ silently claimed solved:
   unique/idempotency-key constraint), which needs separate Product Owner
   approval and was not added here.
 
-### AI Management Assistant tools (M7a/M7b/M7d)
+### AI Management Assistant tools (M7 — Complete: M7a/M7b/M7d, M7c skipped, M7e closeout)
 The AI Management Assistant is the authenticated, staff-facing operational
 AI, structurally separate from the guest concierge above (`docs/AI_SPEC.md`'s
 "AI Management Assistant tools" section has the full tool/projection
@@ -402,6 +402,20 @@ table). Security-relevant invariants:
   — all confined to `src/lib/ai/providers/mock.ts`'s dispatch/narration
   logic, using only fields the six tools already returned since M7a; no
   new tool, projection, PII, or schema change.
+- **M7e closeout (2026-08-27):** a final independent integration audit
+  re-verified M7a + M7b + M7d as one system — the complete request flow,
+  the exact six-tool registry (no seventh tool, no merged "all tools"
+  registry), the two-layer authorization pattern, tenant isolation
+  (re-run live against real fixtures for all six tools), the exact
+  per-field PII allowlist (verified field-by-field against every tool's
+  interface), the zero-mutation guarantee (fresh grep plus the live
+  35-phrase adversarial matrix with before/after database state),
+  grounded-answer behavior, the `{available:false}` vs. genuine-empty
+  distinction, and malformed-provider-output hardening. No blocking
+  defect was found — M7e made no application source change, only
+  documentation. M7 is closed as v0.1-complete: authenticated,
+  tenant-scoped, RBAC-aware, strictly read-only, no arbitrary database
+  access, no individual-record lookup tool, no schema additions.
 
 ## Secrets
 `.env.example` contains placeholders only. Real secrets belong in
