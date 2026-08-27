@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import {
   requireStaffAccess,
+  withTenant,
   UnauthenticatedError,
   ForbiddenError,
 } from "../../src/lib/tenant";
@@ -89,5 +90,53 @@ describe("requireStaffAccess — RBAC, loaded fresh from the database", () => {
     await expect(
       requireStaffAccess("staff", "mutate", { getSession: sessionFor(hotelA.staffByRole.MANAGER.id) })
     ).rejects.toThrow(ForbiddenError);
+  });
+});
+
+describe("M8a — a role change takes effect on the very next call, mid-session (no caching)", () => {
+  /**
+   * `editStaffAction`'s own module comment claims "a role change...
+   * takes effect immediately on the next request regardless of session
+   * staleness" — this proves it, rather than trusting the comment. A real
+   * StaffUser starts as FRONT_DESK (denied reservations/mutate... no,
+   * FRONT_DESK IS permitted reservations/mutate — use staff/mutate,
+   * OWNER_ADMIN-only, as the clearest before/after signal instead), is
+   * promoted to OWNER_ADMIN mid-"session" (the same injected staffId,
+   * simulating one staff member's browser session spanning the change),
+   * and the very next `requireStaffAccess()` call — with no cache to
+   * invalidate, no re-login required — reflects the new role.
+   */
+  it("promoting FRONT_DESK -> OWNER_ADMIN mid-session grants staff/mutate on the next call, no re-login", async () => {
+    const staffId = hotelA.staffByRole.FRONT_DESK.id;
+    const session = sessionFor(staffId);
+
+    await expect(requireStaffAccess("staff", "mutate", { getSession: session })).rejects.toThrow(ForbiddenError);
+
+    await withTenant(hotelA.hotel.id).staffUsers.update(staffId, { role: "OWNER_ADMIN" });
+
+    const afterPromotion = await requireStaffAccess("staff", "mutate", { getSession: session });
+    expect(afterPromotion.role).toBe("OWNER_ADMIN");
+
+    // Restore — this hotel's fixture invariants (exactly one of each role) are relied on by other tests in this file/suite.
+    await withTenant(hotelA.hotel.id).staffUsers.update(staffId, { role: "FRONT_DESK" });
+  });
+
+  it("demoting OWNER_ADMIN mid-session revokes staff/mutate on the very next call", async () => {
+    // A second OWNER_ADMIN is required so the owner-safety rule doesn't block this demotion.
+    const second = await withTenant(hotelA.hotel.id).staffUsers.create({
+      name: "M8a Second Owner",
+      email: "m8a-second-owner@requirestaffaccess-test.example",
+      role: "OWNER_ADMIN",
+      password: "irrelevant-not-used-to-authenticate",
+    });
+    const session = sessionFor(second.id);
+
+    await expect(requireStaffAccess("staff", "mutate", { getSession: session })).resolves.toMatchObject({
+      role: "OWNER_ADMIN",
+    });
+
+    await withTenant(hotelA.hotel.id).staffUsers.update(second.id, { role: "FRONT_DESK" });
+
+    await expect(requireStaffAccess("staff", "mutate", { getSession: session })).rejects.toThrow(ForbiddenError);
   });
 });
