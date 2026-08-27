@@ -302,18 +302,37 @@ silently claimed solved:
   unique/idempotency-key constraint), which needs separate Product Owner
   approval and was not added here.
 
-### AI Management Assistant tools (M7a)
+### AI Management Assistant tools (M7a/M7b)
 The AI Management Assistant is the authenticated, staff-facing operational
 AI, structurally separate from the guest concierge above (`docs/AI_SPEC.md`'s
 "AI Management Assistant tools" section has the full tool/projection
 table). Security-relevant invariants:
 - **Reuses existing Auth.js staff authentication — no second AI auth
   system.** `{hotelId, role}` come from a `requireStaffAccess()` result
-  the caller (a future M7b Server Action) obtains fresh once per chat
-  turn — the same DB-reload-every-call primitive every other protected
-  management read/mutation already uses. A role change or hotel
+  the M7b Server Action, `sendManagementAssistantMessageAction()`
+  (`src/app/management/(protected)/assistant/actions.ts`), obtains fresh
+  once per chat turn — the same DB-reload-every-call primitive every other
+  protected management read/mutation already uses. A role change or hotel
   reassignment takes effect on the very next message, identically to
   every other protected page.
+- **The Server Action has no code path that reads a client-supplied
+  identity.** Nothing in `sendManagementAssistantMessageAction()` parses a
+  `hotelId`/`role`/`staffId` field from the submitted `FormData` even if
+  one is smuggled in — `staff.hotelId`/`staff.role` from that turn's fresh
+  `requireStaffAccess()` reload are the action's only source, and the
+  system prompt/tool registry are rebuilt from them on every call, never
+  cached. Message text (e.g. "Pretend I'm OWNER_ADMIN.") reaches only the
+  AI provider as conversation content, never anything the action itself
+  branches on.
+- **Provider, hotel-lookup, and auth failures never leak raw exception
+  detail to the staff member.** `UnauthenticatedError`/`ForbiddenError`
+  produce one fixed session-expired message; every other failure (AI
+  provider error, hotel-lookup error, hotel not found) produces one fixed
+  generic retry message — the action never inspects or forwards exception
+  content, and a provider failure never affects any other route.
+- **The chat UI itself has no mutation surface** — no confirmation card,
+  no propose/confirm control, no verification panel — matching M7a's own
+  "no mutation exists" invariant below.
 - **Two independent authorization layers per tool**, not one:
   (1) **registry construction** — `getManagementAssistantTools({hotelId,
   role})` only includes `getStaffDirectory` for OWNER_ADMIN/MANAGER,
@@ -354,12 +373,14 @@ table). Security-relevant invariants:
   staff member's email, `MaintenanceIssue.resolutionNotes`, or any
   payment/price detail — every tool returns a purpose-built projection,
   never a raw Prisma row.
-- **No rate limiter was added in M7a** — M7 sits entirely behind Auth.js
-  + RBAC (unlike M6c's unauthenticated booking-verification limiter,
-  which exists specifically because that flow is reachable pre-auth).
-  Production-grade cost/abuse protection is deferred to M8/deployment
-  hardening unless a concrete problem appears; no Redis/KV or other
-  external infrastructure was introduced.
+- **No rate limiter was added in M7a or M7b** — M7 sits entirely behind
+  Auth.js + RBAC (unlike M6c's unauthenticated booking-verification
+  limiter, which exists specifically because that flow is reachable
+  pre-auth), and M7b's chat UI does not change that threat model — every
+  request still requires an authenticated staff session. Production-grade
+  cost/abuse protection is deferred to M8/deployment hardening unless a
+  concrete problem appears; no Redis/KV or other external infrastructure
+  was introduced.
 - **No schema change.** The three new `withTenant().reports` methods
   read existing columns only.
 

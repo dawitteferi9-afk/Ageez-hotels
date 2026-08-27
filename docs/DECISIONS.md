@@ -4,6 +4,61 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-27 — M7 Phase b (Management Assistant UI) implementation decisions and findings
+**Status:** Approved (Product Owner design/plan approval before
+implementation started, per the amended M7a–M7e phase plan; these are the
+concrete choices this phase's implementation required within that already-
+approved plan, plus one discovered-but-deferred finding)
+**Decision:**
+1. **`sendManagementAssistantMessageAction()` re-runs
+   `requireStaffAccess("dashboard", "view")` fresh on every single message,
+   never once at page load and reused** — a role change or hotel
+   reassignment takes effect on the very next message. `dashboard`/"view"
+   is `ALL_ROLES`, the same entry gate M7a's `getOperationalSnapshot`
+   tool-level re-check already uses, restated here as the whole
+   assistant's access gate.
+2. **No `hotelId`/`role`/`staffId` field is ever read from the incoming
+   `FormData`** — the action has no code path that could even parse one if
+   an attacker smuggled it in; `staff.hotelId`/`staff.role` from the fresh
+   `requireStaffAccess()` reload are the only source, mirroring every
+   other management Server Action's own pattern.
+3. **The chat UI has no verification panel, confirmation card, or mutation
+   control of any kind** — M7 has no mutation capability at any layer in
+   v0.1 (M7a's own decision record), so unlike the guest concierge
+   (M6c/M6d), there is no "propose" state to build a UI for.
+4. **Provider and hotel-lookup failures return one of exactly two fixed,
+   generic strings** (a session-expired message for
+   `UnauthenticatedError`/`ForbiddenError`, a generic retry message for
+   everything else) — the raw exception is never inspected for content and
+   never forwarded, matching M6's own `sendConciergeMessageAction()`
+   precedent.
+5. **Conversation state is browser-only (`useActionState`), never
+   persisted** — refreshing the page starts a fresh conversation, the same
+   "no distinguishing need found" decision M6 already made for the guest
+   concierge, extended here without re-litigating it.
+6. **Discovered-but-deferred finding, not fixed this phase:**
+   `src/lib/ai/providers/mock.ts`'s M6b `PERSONAL_INFO_PATTERN` check runs
+   unconditionally before the M7 `MANAGEMENT_TOOL_KEYWORDS` dispatch loop.
+   If a staff message happened to match that pattern (e.g. contains "my
+   request"/"am i"/"is my"), the mock provider would incorrectly evaluate
+   the M6b-only `if (reservationTool && serviceRequestTool)` branch
+   (structurally false for M7, since those tools don't exist in the
+   management registry) and could return the M6b guest-facing
+   `PERSONAL_INFO_REPLY` instead of continuing to M7 handling, rather than
+   a clean pass-through. Confirmed none of M7b's suggested questions or
+   test phrases trigger this collision — this is exactly the class of
+   issue the approved phase plan reserves for M7d's dedicated adversarial-
+   hardening pass, so it is recorded here rather than silently fixed
+   (which would be redesigning M7d's scope) or silently omitted.
+**Rationale:** All six points are the concrete implementation choices the
+already-approved M7b design left to this phase's own execution, plus one
+genuine finding surfaced during implementation that changes no approved
+scope, RBAC matrix, PII rule, or read-only boundary but must be flagged
+per CLAUDE.md rule 8 rather than silently resolved outside its assigned
+phase; recorded per CLAUDE.md rule 7.
+
+---
+
 ## 2026-08-27 — M7 Phase a (read-only management AI tool boundary) implementation decisions
 **Status:** Approved (Product Owner design review with 13 corrective
 decisions, then a corrected-plan approval, before implementation started —

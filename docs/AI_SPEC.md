@@ -17,15 +17,21 @@
      can build a proposal; it can never execute the write. See
      `docs/DECISIONS.md`'s M6d entry and "Verified guest ServiceRequest
      creation (M6d)" below.
-2. **AI Management Assistant** (M7, in progress — Phase a: tool boundary
-   complete, no UI yet) — internal, authenticated-staff-only, structurally
+2. **AI Management Assistant** (M7, in progress — Phase a: tool boundary,
+   Phase b: authenticated `/management/assistant` chat UI, both complete
+   and verified) — internal, authenticated-staff-only, structurally
    separate from the guest concierge. Answers live operational questions
    (occupied room count, rooms needing cleaning, open HIGH/URGENT
    maintenance issues, today's arrivals/departures, pending service
    requests, the staff directory) strictly from tool output — **read-only
    in v0.1, with no mutation or mutation-proposal capability of any kind**.
-   See `docs/DECISIONS.md`'s M7a entry and "AI Management Assistant tools
-   (M7a)" below.
+   `sendManagementAssistantMessageAction()`
+   (`src/app/management/(protected)/assistant/actions.ts`) is the only
+   browser/AI boundary: it re-authenticates via `requireStaffAccess()`
+   fresh on every message (never trusting the JWT or any client-supplied
+   identity) before rebuilding the Phase a tool registry and system prompt.
+   See `docs/DECISIONS.md`'s M7a and M7b entries and "AI Management
+   Assistant tools (M7a)" below.
 
 ## Hard architectural rules (non-negotiable, apply to both assistants)
 - AI never accesses the database directly and never generates SQL.
@@ -250,7 +256,9 @@ closeout — no new capability) are all implemented and verified — see
 
 M7 (AI Management Assistant) is **in progress**: Phase a (read-only tool
 boundary — three new tenant/report helpers, all six approved tools, the
-role-aware registry, the system prompt, deterministic mock behavior) is
-implemented and verified — see `docs/CHANGELOG.md`'s M7 Phase a entry and
-`docs/DECISIONS.md`'s M7a entry. No UI exists yet (`/management/assistant`
-is Phase b); M7 as a whole is **not** marked complete.
+role-aware registry, the system prompt, deterministic mock behavior) and
+Phase b (the authenticated `/management/assistant` chat UI and its
+`sendManagementAssistantMessageAction()` Server Action boundary) are both
+implemented and verified — see `docs/CHANGELOG.md`'s M7 Phase a and Phase
+b entries and `docs/DECISIONS.md`'s M7a and M7b entries. Phases c/d/e
+remain; M7 as a whole is **not** marked complete.

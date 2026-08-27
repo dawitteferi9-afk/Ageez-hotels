@@ -1,5 +1,71 @@
 # Changelog
 
+## M7 — AI Management Assistant, Phase b (Management Assistant UI) (2026-08-27)
+The second M7 phase: the authenticated, staff-facing `/management/assistant`
+chat UI, wired to the M7a read-only tool boundary. No new AI tool, no new
+`withTenant()` method, no schema change — this phase is entirely the
+Server Action / UI wiring layer on top of M7a.
+- **New route `/management/assistant`**
+  (`src/app/management/(protected)/assistant/page.tsx`) — gated by
+  `requireStaffAccess("dashboard", "view")` (`ALL_ROLES`), same pattern as
+  every other management page. Added to `ManagementNav` (`src/components/
+  management/nav.tsx`) — visible to all five roles; nav visibility is not
+  the authorization boundary, exactly like every other module's link.
+- **`sendManagementAssistantMessageAction()`**
+  (`src/app/management/(protected)/assistant/actions.ts`) — the assistant's
+  only server-side entry point. On every message: re-runs
+  `requireStaffAccess("dashboard", "view")` (fresh `StaffUser` reload, never
+  trusts the JWT or any client-supplied `hotelId`/`role`/`staffId`),
+  resolves the hotel via `getHotelById(staff.hotelId)`, rebuilds the M7a
+  system prompt and `getManagementAssistantTools({hotelId, role})` fresh
+  from that reload, then calls `getAiProvider().converse(...)`. Returns
+  only a plain `{role, content}` transcript plus an optional generic error
+  string — never the raw exception, system prompt, tool names, or provider
+  response shape. `UnauthenticatedError`/`ForbiddenError` produce a
+  session-expired message; any other failure (provider, hotel lookup)
+  produces the same generic retry message. Stateless per call — no
+  database write, no persistence; conversation history lives only in
+  browser React state (`useActionState`) for the component's lifetime.
+- **`AssistantChat`** (`src/components/management/assistant-chat.tsx`) —
+  strictly read-only chat UI: no verification panel, no confirmation card,
+  no mutation control of any kind (M7 has no mutation capability at any
+  layer). Role-aware suggested starter questions (6 for OWNER_ADMIN/
+  MANAGER, 4 for FRONT_DESK, 3 each for HOUSEKEEPING/MAINTENANCE), hotel/
+  staff-aware welcome message, `role="log" aria-live="polite"` transcript.
+- **Tests added:** `tests/unit/ai/managementAssistantAction.test.ts` (14
+  tests — happy path, exact tool set per role, no M6 tool ever present,
+  client-supplied identity structurally ignored, prompt-injection text in
+  the message has no effect, blank-message no-op, every error path returns
+  a safe generic message, return value never contains tool-call detail),
+  new `tests/e2e/managementAssistant.spec.ts` (8 tests against the live
+  seeded hotel and real staff logins — all five roles, real grounded data
+  for all six tools, staff-directory omission for non-OWNER_ADMIN/MANAGER
+  roles, prompt-tampering attempts produce no access change/leak/mutation,
+  a full PII round confirms no guest email/phone/nationality, staff email,
+  or `MaintenanceIssue.resolutionNotes` ever appears, and no M6/internal
+  detail ever appears in a reply or the page HTML).
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (**274/274**); `npm run test:integration`
+  (**193/193**, unchanged — no new integration tests this phase); `npm run
+  build` (clean; new route `/management/assistant`, 2.17 kB, only route
+  change); `npx playwright test --workers=1` run twice — once isolated on
+  the new `tests/e2e/managementAssistant.spec.ts` (8/8 passed), then the
+  complete existing suite (**82/82 passed**, zero regressions across auth,
+  public booking, walk-in reservations, M4 management, M5 check-out/
+  housekeeping/maintenance, and M6 concierge). DB baseline (52 rooms
+  AVAILABLE, 0 Guest/Reservation/ServiceRequest/MaintenanceIssue) confirmed
+  restored before and after.
+- **Known-but-deferred finding (recorded, not fixed this phase — see
+  docs/DECISIONS.md):** `src/lib/ai/providers/mock.ts`'s M6b
+  `PERSONAL_INFO_PATTERN` check runs unconditionally before the M7 tool
+  dispatch loop; a staff message that happened to match it would
+  incorrectly fall into an M6-only branch instead of M7 handling. None of
+  M7b's suggested questions or tests trigger this; the dedicated
+  adversarial-hardening pass is scoped to M7d.
+- No schema change, no secrets, no mutation path, no M6 registry changes,
+  no M7c/M7d/M7e work, no M8/M9 work. M7 as a whole remains **not**
+  complete — only M7a and M7b are done.
+
 ## M7 — AI Management Assistant, Phase a (read-only management AI tool boundary) (2026-08-27)
 The first M7 phase: the complete read-only tool boundary for the
 authenticated, staff-facing AI Management Assistant — no UI yet

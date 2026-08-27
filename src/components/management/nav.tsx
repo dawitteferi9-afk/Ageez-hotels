@@ -9,14 +9,20 @@ import { cn } from "@/lib/utils";
  * `SiteHeader` philosophy of keeping navigation a Server Component.
  *
  * Every approved M4 module is now implemented — Dashboard/Reservations/
- * Rooms/Guests/Housekeeping/Maintenance/Services/Reports/Staff. No RBAC
- * check gates the nav items themselves: every module grants at least
- * "View" to every role (Maintenance also gives everyone "Report"), so nav
- * visibility isn't a security boundary — `requireStaffAccess()` on each
- * page is (see src/lib/tenant). Staff's own "Mutate" (create/edit) is
- * OWNER_ADMIN-only, but the "Staff" nav link itself is shown to everyone,
- * same as every other module's link — the list page itself is view-only
- * for non-owners, not hidden.
+ * Rooms/Guests/Housekeeping/Maintenance/Services/Reports/Staff — plus, as
+ * of M7b, "AI Assistant" (`/management/assistant`). No RBAC check gates
+ * the nav items themselves: every module grants at least "View" to every
+ * role (Maintenance also gives everyone "Report"), so nav visibility
+ * isn't a security boundary — `requireStaffAccess()` on each page is (see
+ * src/lib/tenant). Staff's own "Mutate" (create/edit) is OWNER_ADMIN-only,
+ * but the "Staff" nav link itself is shown to everyone, same as every
+ * other module's link — the list page itself is view-only for non-owners,
+ * not hidden. "AI Assistant" follows the identical pattern: the link is
+ * shown to all five roles (the assistant itself is `dashboard`/"view" —
+ * `ALL_ROLES`), but which of its six tools actually answer a question is
+ * separately RBAC-enforced server-side inside
+ * `getManagementAssistantTools()` (M7a) — nav visibility here still isn't
+ * that boundary, exactly like every other link in this list.
  */
 const NAV_LINKS = [
   { href: "/management", label: "Dashboard" },
@@ -28,6 +34,7 @@ const NAV_LINKS = [
   { href: "/management/services", label: "Services" },
   { href: "/management/reports", label: "Reports" },
   { href: "/management/staff", label: "Staff" },
+  { href: "/management/assistant", label: "AI Assistant" },
 ] as const;
 
 const DISABLED_LINKS = [] as const;
