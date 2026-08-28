@@ -4,6 +4,38 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-28 — M8 Phase d: minimal pre-demo security headers via `next.config.ts`, not `middleware.ts`
+**Status:** Approved and implemented
+**Decision:** Added `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, and `Referrer-Policy:
+strict-origin-when-cross-origin` globally (`source: "/:path*"`) using
+Next.js's own `headers()` function in `next.config.ts`, rather than
+extending the existing `middleware.ts`. `middleware.ts` is Auth.js's
+`auth` export, scoped only to `/management/:path*`
+(`config.matcher`) for session gating — using it for headers would
+require wrapping that export and would still miss every guest-facing
+route, which also needs these headers. `next.config.ts`'s `headers()` is
+the framework-native mechanism for exactly this, requires no wrapping of
+existing auth logic, and applies uniformly to guest pages, all of
+`/management/*`, and API routes in one place. No CSP was added: doing so
+correctly requires verifying every route's actual script/style/resource
+sources first, and a CSP relaxed with broad `unsafe-inline`/
+`unsafe-eval` merely to stop it breaking pages would be worse than no
+CSP at all — deferred to a dedicated milestone rather than rushed for
+the pre-demo window. No HSTS/forced-HTTPS (out of approved M8d scope;
+also inappropriate for a `next dev` demo environment without a fixed,
+verified HTTPS deployment target).
+**Rationale:** Baseline defense-in-depth headers a real deployment should
+never ship without, achievable as a genuinely minimal, low-risk,
+single-file change with no interaction with auth/RBAC, tenant isolation,
+or the AI boundary work done in M8a-c. Verified with a live dev server
+(raw `curl` + a dedicated Playwright spec) on one public and one
+`/management/*` route, plus a regression spot-check of the existing auth
+and concierge Playwright suites to confirm the new headers don't alter
+any existing redirect/rendering behavior.
+
+---
+
 ## 2026-08-28 — M8 Phase c: AI input/output bounds, plus an M7 auth-boundary-ordering correction found during Product Owner review
 **Status:** Approved and implemented
 **Decision:**

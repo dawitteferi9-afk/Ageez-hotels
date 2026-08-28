@@ -1,5 +1,36 @@
 # Changelog
 
+## M8 — Testing + Security Hardening, Phase d (pre-demo minimal security headers) (2026-08-28)
+Fourth pre-demo M8 checkpoint. Adds three baseline HTTP security headers
+globally, via `next.config.ts`'s own `headers()` config — a single,
+central, framework-native mechanism, entirely separate from
+`middleware.ts` (left untouched; it only gates `/management/*` for
+auth).
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY` (clickjacking protection)
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- Applied to every route (`source: "/:path*"`) — guest pages,
+  `/management/*`, and API routes alike.
+- **No CSP**: not verified across the whole app in this pass, and adding
+  one loosened with broad `unsafe-inline`/`unsafe-eval` just to keep
+  pages working would defeat the point — deferred to a dedicated
+  milestone. No HSTS, no forced HTTPS.
+- Added `tests/e2e/securityHeaders.spec.ts` (3 tests): confirms all three
+  headers on a public route (`/`) and on a `/management/*` route
+  (`/management/login`, the one management page reachable without an
+  authenticated session), plus confirms `Content-Security-Policy` is
+  absent (proving no CSP was silently introduced).
+- **Verified:** `npx prisma validate` (unaffected, not re-run — no schema
+  touched); `npm run typecheck` (clean); `npm run lint` (0 warnings);
+  `npm run test` (**352/352**, unchanged); raw `curl` against a live dev
+  server confirmed the three headers on `/`; the new
+  `securityHeaders.spec.ts` (3/3 passed); a regression spot-check of
+  `tests/e2e/auth.spec.ts` + `tests/e2e/concierge.spec.ts` (**17/17
+  passed**) confirmed no existing behavior (including the
+  `/management/*` auth-redirect flow) was affected by the new headers.
+- No schema change, no dependency/version change, no HSTS/forced-HTTPS,
+  no rate-limiting/idempotency work, no AI change, no M8e/M9 work.
+
 ## M8 — Testing + Security Hardening, Phase c (pre-demo AI input/output bounds) (2026-08-28)
 Third pre-demo M8 checkpoint. Adds server-side bounds around the M6/M7 AI
 chat surfaces so a malicious or accidental oversized input/output can't
