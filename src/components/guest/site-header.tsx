@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Menu } from "lucide-react";
+import { Menu, Sparkles } from "lucide-react";
 import { Container } from "@/components/ui/container";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -10,10 +10,32 @@ const NAV_LINKS = [
   { href: "/rooms", label: "Rooms & Suites" },
   { href: "/restaurant", label: "Restaurant" },
   { href: "/services", label: "Services" },
-  { href: "/concierge", label: "Concierge" },
   { href: "/about", label: "About" },
   { href: "/contact", label: "Contact" },
 ] as const;
+
+/**
+ * M9b — the Concierge link is rendered separately from the plain
+ * `NAV_LINKS` map (which no longer includes it) with a distinct
+ * pill/icon treatment, so the guest AI capability is immediately
+ * noticeable in navigation rather than reading as an ordinary page link.
+ * Pure presentation — the destination (`/concierge`) and the concierge
+ * page/chat itself are completely untouched.
+ */
+function ConciergeNavLink({ className }: { className?: string }) {
+  return (
+    <Link
+      href="/concierge"
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border border-ochre-500/40 bg-ochre-500/10 px-3 py-1.5 text-sm font-medium text-ochre-700 transition-colors hover:bg-ochre-500/20",
+        className
+      )}
+    >
+      <Sparkles className="h-3.5 w-3.5" aria-hidden />
+      AI Concierge
+    </Link>
+  );
+}
 
 export function SiteHeader({ hotelName }: { hotelName: string }) {
   return (
@@ -33,6 +55,7 @@ export function SiteHeader({ hotelName }: { hotelName: string }) {
               {link.label}
             </Link>
           ))}
+          <ConciergeNavLink />
         </nav>
 
         <Link href="/contact" className={cn(buttonVariants({ size: "sm" }), "hidden md:inline-flex")}>
@@ -55,6 +78,7 @@ export function SiteHeader({ hotelName }: { hotelName: string }) {
                 {link.label}
               </Link>
             ))}
+            <ConciergeNavLink className="mt-1 w-fit" />
           </nav>
         </details>
       </Container>

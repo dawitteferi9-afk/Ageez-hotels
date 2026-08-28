@@ -7,6 +7,7 @@ export const metadata: Metadata = {
   title: "Rooms & Suites",
 };
 
+/** M9b — visual/UX polish only; same queries as before this pass. */
 export default async function RoomsPage() {
   const hotel = await getCurrentTenantHotel();
   const tenant = withTenant(hotel.id);
@@ -20,6 +21,9 @@ export default async function RoomsPage() {
     <section className="py-16">
       <Container className="flex flex-col gap-10">
         <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium uppercase tracking-[0.2em] text-ochre-600">
+            Room Highlights
+          </p>
           <h1 className="font-display text-4xl text-basalt-950">Rooms & Suites</h1>
           <p className="max-w-2xl text-basalt-700">
             {hotel.name} offers {roomTypes.length} room types across{" "}

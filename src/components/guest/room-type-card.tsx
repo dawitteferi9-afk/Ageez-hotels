@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Users } from "lucide-react";
+import { BedDouble, Users } from "lucide-react";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { cn, formatCurrency } from "@/lib/utils";
@@ -14,6 +14,21 @@ export interface RoomTypeCardProps {
   roomCount?: number;
 }
 
+/**
+ * M9b — the reusable guest-facing room presentation. No booking/business
+ * logic here (unchanged from before this pass) — still just a `Link` to
+ * `/rooms/[id]`, same route as always.
+ *
+ * The header block replaces the empty space real room photography would
+ * occupy (M9 UI audit: no image assets exist anywhere in this repo, and
+ * per the approved M9b scope, none were downloaded/added to fill it) —
+ * a generic bed icon on a soft gradient, honestly decorative rather than
+ * pretending to be a photo. Deliberately NOT `rounded-lg`+`border`
+ * together on this inner block (only `rounded-t-lg`, no `border` class)
+ * so it never collides with `tests/e2e/*.spec.ts`'s
+ * `.rounded-lg.border` room-card locator, which must keep matching only
+ * the outer `Card`.
+ */
 export function RoomTypeCard({
   id,
   name,
@@ -24,7 +39,10 @@ export function RoomTypeCard({
   roomCount,
 }: RoomTypeCardProps) {
   return (
-    <Card className="flex flex-col">
+    <Card className="flex flex-col overflow-hidden transition-shadow hover:shadow-md">
+      <div className="flex h-28 items-center justify-center rounded-t-lg bg-gradient-to-br from-ochre-500/15 via-parchment-100 to-basalt-900/5">
+        <BedDouble className="h-9 w-9 text-ochre-600/60" aria-hidden />
+      </div>
       <CardHeader>
         <CardTitle>{name}</CardTitle>
         <CardDescription className="line-clamp-3">{description}</CardDescription>
