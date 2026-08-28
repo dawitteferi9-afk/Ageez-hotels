@@ -1,5 +1,45 @@
 # Changelog
 
+## M8 — Testing + Security Hardening, Phase e (demo reliability + pre-demo closeout) (2026-08-28)
+Fifth pre-demo M8 checkpoint. Adds a safe, idempotent `npm run
+db:restore-baseline` command so the demo database can be reset to a
+known-good state at any point, and closes out the pre-demo hardening
+pass with a documented readiness checklist and accepted limitations.
+- **`prisma/seed/restoreBaseline.ts` (new, `npm run
+  db:restore-baseline`):** restores ONLY the demo tenant
+  ("ageez-grand-hotel") to baseline — all 52 Rooms `AVAILABLE`, the 5
+  fixture StaffUser accounts, 5 RoomTypes, 6 AiKnowledgeDocuments, zero
+  Guest/Reservation/ServiceRequest/MaintenanceIssue rows, and zero extra
+  (residue) StaffUser accounts. Reuses `prisma/seed/index.ts`'s existing
+  upsert logic (refactored into an exported `seedBaseline()`) rather than
+  a second seeding mechanism, and the exact FK-safe deletion order
+  already established in `tests/integration/fixtures.ts`. Idempotent:
+  proven safe to run any number of times with no duplicate rows and no
+  behavior change on an already-clean baseline
+  (`tests/integration/restoreBaseline.test.ts`, 3 new tests).
+- **`docs/DEMO_READINESS.md` (new):** server start / DB restore / login /
+  guest-path reference, key flows to verify before presenting, what to do
+  if demo data gets dirty mid-presentation, and the explicitly accepted
+  pre-demo limitations (M6 ServiceRequest duplicate-confirm/replay
+  protection and booking replay/idempotency are not yet DB-backed —
+  both pre-existing, previously-documented, and deferred to post-demo M8
+  hardening; neither is fixed here).
+- **Verified:** `npx prisma validate` (valid); `npm run typecheck`
+  (clean); `npm run lint` (0 warnings); `npm run test` (**352/352**,
+  unchanged — this phase's new tests are all integration-tier); `npm run
+  test:integration` (**210/210**, up from 207 — the 3 new
+  `restoreBaseline.test.ts` tests); a single controlled full Playwright
+  suite run (`--workers=1`, no retries) — **91/91 passed** in 18.6
+  minutes, no EPIPE/crash. The real `npm run db:restore-baseline` CLI was
+  also run directly (not just via the test) and confirmed correct both
+  against an already-clean baseline and immediately after the full
+  Playwright run (which had left 2 ServiceRequest, 6 Reservation, 6
+  Guest, and 1 MaintenanceIssue row — all removed, all 52 Rooms reset to
+  `AVAILABLE`). DB baseline confirmed restored after all verification.
+- No schema change, no dependency/version change, no Redis/KV, no
+  distributed rate limiting, no DB-backed idempotency, no AuditLog, no
+  production observability/deployment infrastructure, no M9 work.
+
 ## M8 — Testing + Security Hardening, Phase d (pre-demo minimal security headers) (2026-08-28)
 Fourth pre-demo M8 checkpoint. Adds three baseline HTTP security headers
 globally, via `next.config.ts`'s own `headers()` config — a single,

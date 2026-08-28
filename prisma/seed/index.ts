@@ -9,10 +9,16 @@
  * All business facts come from src/config/defaults/seed/ageez-grand-hotel.ts
  * (itself transcribed from the approved docs/PRODUCT_VISION.md) — nothing
  * hotel-specific is hardcoded in this file. Idempotent: safe to re-run,
- * upserts by the unique keys defined in prisma/schema.prisma.
+ * upserts by the unique keys defined in prisma/schema.prisma. Never
+ * touches `Room.status`, or any Guest/Reservation/ServiceRequest/
+ * MaintenanceIssue row — those are live operational state, not seed data
+ * (M8e's `prisma/seed/restoreBaseline.ts` is the dedicated tool for
+ * resetting that state back to the demo baseline; it reuses
+ * `seedBaseline()` below rather than duplicating this upsert logic).
  */
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { fileURLToPath } from "url";
 import {
   hotelFixture,
   roomTypeFixtures,
@@ -23,10 +29,18 @@ import {
 
 const BCRYPT_SALT_ROUNDS = 10;
 
-const prisma = new PrismaClient();
-
-async function main() {
-  const hotel = await prisma.hotel.upsert({
+/**
+ * The actual upsert logic, factored out so `prisma/seed/restoreBaseline.ts`
+ * (M8e) can call the exact same, already-proven baseline-creation code
+ * instead of a second, competing implementation. Takes a `PrismaClient`
+ * parameter (rather than a module-level singleton) so any caller — a
+ * test, or `restoreBaseline.ts`'s own CLI client — can pass its own
+ * instance; this also means merely importing `seedBaseline` (as
+ * `restoreBaseline.ts` and its test do) never opens a database connection
+ * of its own.
+ */
+export async function seedBaseline(client: PrismaClient) {
+  const hotel = await client.hotel.upsert({
     where: { slug: hotelFixture.slug },
     update: { ...hotelFixture, enabledModules: [...hotelFixture.enabledModules] },
     create: { ...hotelFixture, enabledModules: [...hotelFixture.enabledModules] },
@@ -35,7 +49,7 @@ async function main() {
 
   let roomsCreated = 0;
   for (const rt of roomTypeFixtures) {
-    const roomType = await prisma.roomType.upsert({
+    const roomType = await client.roomType.upsert({
       where: { hotelId_name: { hotelId: hotel.id, name: rt.name } },
       update: {
         description: rt.description,
@@ -55,7 +69,7 @@ async function main() {
 
     for (let i = 1; i <= rt.roomCount; i++) {
       const roomNumber = `${rt.floor}${String(i).padStart(2, "0")}`;
-      await prisma.room.upsert({
+      await client.room.upsert({
         where: { hotelId_roomNumber: { hotelId: hotel.id, roomNumber } },
         update: { roomTypeId: roomType.id, floor: rt.floor },
         create: {
@@ -75,7 +89,7 @@ async function main() {
   // same demo password — never store or compare the plaintext directly.
   for (const staff of staffFixtures) {
     const passwordHash = await bcrypt.hash(DEMO_STAFF_PASSWORD, BCRYPT_SALT_ROUNDS);
-    await prisma.staffUser.upsert({
+    await client.staffUser.upsert({
       where: { email: staff.email },
       update: { name: staff.name, role: staff.role, hotelId: hotel.id, passwordHash },
       create: {
@@ -90,7 +104,7 @@ async function main() {
   console.log(`Staff upserted: ${staffFixtures.length}`);
 
   for (const doc of aiKnowledgeFixtures) {
-    await prisma.aiKnowledgeDocument.upsert({
+    await client.aiKnowledgeDocument.upsert({
       where: { hotelId_category: { hotelId: hotel.id, category: doc.category } },
       update: { content: doc.content },
       create: { hotelId: hotel.id, category: doc.category, content: doc.content },
@@ -99,12 +113,20 @@ async function main() {
   console.log(`AI knowledge documents upserted: ${aiKnowledgeFixtures.length}`);
 }
 
-main()
-  .then(async () => {
-    await prisma.$disconnect();
-  })
-  .catch(async (error) => {
-    console.error(error);
-    await prisma.$disconnect();
-    process.exit(1);
-  });
+// Guarded so importing `seedBaseline` (e.g. from
+// `prisma/seed/restoreBaseline.ts`, M8e, or a test) never also triggers
+// this file's own CLI run — or even opens a database connection — as a
+// side effect of the import; only running this file directly (`npm run
+// db:seed`) constructs a `PrismaClient` and calls `seedBaseline()` at all.
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  const prisma = new PrismaClient();
+  seedBaseline(prisma)
+    .then(async () => {
+      await prisma.$disconnect();
+    })
+    .catch(async (error) => {
+      console.error(error);
+      await prisma.$disconnect();
+      process.exit(1);
+    });
+}

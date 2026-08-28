@@ -4,6 +4,51 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-28 — M8 Phase e: `npm run db:restore-baseline` reuses `seedBaseline()`, never a second seeding mechanism
+**Status:** Approved and implemented
+**Decision:** Added `prisma/seed/restoreBaseline.ts` (`npm run
+db:restore-baseline`), scoped to the one demo tenant resolved by
+`hotelFixture.slug` ("ageez-grand-hotel") only. Refactored
+`prisma/seed/index.ts` to export its existing upsert logic as
+`seedBaseline(client: PrismaClient)` (previously inline in `main()`), so
+the restore tool calls the exact same, already-proven baseline-creation
+code rather than a second, competing seeding implementation — per the
+explicit instruction to reuse the safest existing mechanism. The
+FK-safe child-deletion order (`ServiceRequest` → `Reservation` → `Guest`
+→ `MaintenanceIssue`, all before touching what they reference) is the
+same order already established and comment-explained in
+`tests/integration/fixtures.ts`'s `cleanupBySlug()` — not reinvented.
+Residue beyond those four models is also removed: any `StaffUser` row
+for this hotel whose email isn't one of the 5 approved fixtures (e.g. a
+"New Staff Member" created live during a demo run), and every `Room`'s
+`status` is reset to `AVAILABLE` (deliberately NOT folded into
+`seedBaseline()`'s own upsert, so a plain `npm run db:seed` never
+silently un-occupies a real in-progress reservation — only this
+dedicated restore tool touches `Room.status`). Both `index.ts` and
+`restoreBaseline.ts` now guard their `PrismaClient` construction and CLI
+execution behind an `import.meta.url` entrypoint check, so importing
+`seedBaseline`/`restoreBaseline` (from the other file, or from
+`tests/integration/restoreBaseline.test.ts`) never opens a database
+connection or triggers a real run as a side effect of the import.
+**Rationale:** A demo that can be reset to a known-good state in seconds,
+using only the existing, already-tested seeding/cleanup mechanisms, is
+far lower-risk before a live presentation than any new bespoke reset
+system would be. Tested directly against the real demo hotel row (not a
+disposable fixture hotel, unlike every other integration test) because
+restoring that specific row to baseline is the tool's entire purpose —
+safe because the tool's own contract guarantees the hotel ends up back
+at baseline regardless of what was dirtied beforehand
+(`tests/integration/restoreBaseline.test.ts` proves both a
+dirty-hotel restore and back-to-back idempotent re-runs). No schema
+change. Two pre-existing, previously-documented limitations — M6
+ServiceRequest duplicate-confirm/replay protection and booking
+replay/idempotency not being DB-backed — are explicitly NOT addressed
+here (both need a schema change) and are recorded as accepted pre-demo
+limitations in the new `docs/DEMO_READINESS.md`, deferred to post-demo
+M8 hardening.
+
+---
+
 ## 2026-08-28 — M8 Phase d: minimal pre-demo security headers via `next.config.ts`, not `middleware.ts`
 **Status:** Approved and implemented
 **Decision:** Added `X-Content-Type-Options: nosniff`,

@@ -16,6 +16,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed/index.ts",
+    "db:restore-baseline": "tsx prisma/seed/restoreBaseline.ts",
     "db:studio": "prisma studio"
   },
   "dependencies": {
