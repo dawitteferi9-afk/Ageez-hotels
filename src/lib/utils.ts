@@ -21,3 +21,19 @@ export function formatCurrency(amount: { toString(): string } | number, currency
     maximumFractionDigits: 0,
   }).format(value);
 }
+
+/**
+ * M9a — display-format a date consistently across the app. Replaces the
+ * ad hoc `date.toISOString().slice(0, 10)` ("2026-08-28") scattered
+ * across management pages, and the one-off `Intl.DateTimeFormat`
+ * instance on the booking confirmation page (M9 UI audit). Accepts a
+ * `Date` or an ISO string so callers never need to convert first.
+ * `style` follows `Intl.DateTimeFormat`'s own `dateStyle` values;
+ * defaults to `"medium"` ("Aug 28, 2026") — the right density for a
+ * table cell. Pass `"long"` for prose contexts (e.g. "August 28, 2026"
+ * on a confirmation page).
+ */
+export function formatDate(date: Date | string, style: "short" | "medium" | "long" = "medium") {
+  const value = typeof date === "string" ? new Date(date) : date;
+  return new Intl.DateTimeFormat("en-US", { dateStyle: style }).format(value);
+}
