@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { manageIssueAction, type ManageIssueActionState } from "./actions";
@@ -56,36 +57,26 @@ export function ManageIssueForm({
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="assignedToId">Assigned to</Label>
-        <select
-          id="assignedToId"
-          name="assignedToId"
-          defaultValue={currentAssignedToId ?? ""}
-          className="h-10 rounded border border-basalt-700/25 bg-parchment-50 px-3 text-sm text-basalt-950"
-        >
+        <Select id="assignedToId" name="assignedToId" defaultValue={currentAssignedToId ?? ""}>
           <option value="">Unassigned</option>
           {staffOptions.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="status">Status</Label>
-        <select
-          id="status"
-          name="status"
-          defaultValue={currentStatus}
-          className="h-10 rounded border border-basalt-700/25 bg-parchment-50 px-3 text-sm text-basalt-950"
-        >
+        <Select id="status" name="status" defaultValue={currentStatus}>
           <option value={currentStatus}>{currentStatus.replace(/_/g, " ")} (current)</option>
           {allowedNextStatuses.map((s) => (
             <option key={s} value={s}>
               {s.replace(/_/g, " ")}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
       <div className="flex flex-col gap-1.5">

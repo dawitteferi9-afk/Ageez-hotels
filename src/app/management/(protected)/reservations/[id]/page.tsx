@@ -4,7 +4,7 @@ import { requireStaffAccess, withTenant, getHotelById } from "@/lib/tenant";
 import { hasPermission } from "@/lib/auth/rbac";
 import { validateCheckIn, validateCheckOut } from "@/lib/domain/reservationTransitions";
 import { formatBookingReference, nightsBetween } from "@/lib/domain/booking";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
 import { ReservationStatusBadge, RoomStatusBadge } from "@/components/management/status-badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { CheckInButton } from "./check-in-button";
@@ -58,8 +58,8 @@ export default async function ReservationDetailPage({ params }: { params: Promis
             <CardTitle>Stay details</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
-            <Field label="Check-in">{reservation.checkIn.toISOString().slice(0, 10)}</Field>
-            <Field label="Check-out">{reservation.checkOut.toISOString().slice(0, 10)}</Field>
+            <Field label="Check-in">{formatDate(reservation.checkIn)}</Field>
+            <Field label="Check-out">{formatDate(reservation.checkOut)}</Field>
             <Field label="Nights">{nights}</Field>
             <Field label="Guests">{reservation.guestCount}</Field>
             <Field label="Room">
@@ -75,7 +75,7 @@ export default async function ReservationDetailPage({ params }: { params: Promis
             </Field>
             <Field label="Total price">{formatCurrency(reservation.totalPrice, hotel?.currency ?? "ETB")}</Field>
             <Field label="Payment method">{reservation.paymentMethod.replace(/_/g, " ")}</Field>
-            <Field label="Booked on">{reservation.createdAt.toISOString().slice(0, 10)}</Field>
+            <Field label="Booked on">{formatDate(reservation.createdAt)}</Field>
             {reservation.specialRequests && (
               <div className="sm:col-span-2">
                 <Field label="Special requests">{reservation.specialRequests}</Field>

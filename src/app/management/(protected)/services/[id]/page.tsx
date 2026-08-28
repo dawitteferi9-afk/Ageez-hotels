@@ -4,6 +4,7 @@ import { requireStaffAccess, withTenant, getHotelById } from "@/lib/tenant";
 import { hasPermission } from "@/lib/auth/rbac";
 import { allowedNextStatuses } from "@/lib/domain/serviceRequestTransitions";
 import { formatBookingReference } from "@/lib/domain/booking";
+import { formatDate } from "@/lib/utils";
 import { ServiceRequestStatusBadge } from "@/components/management/status-badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ManageServiceRequestForm } from "./manage-service-request-form";
@@ -75,7 +76,7 @@ export default async function ServiceRequestDetailPage({ params }: { params: Pro
             </Field>
             <Field label="Type">{request.type.replace(/_/g, " ")}</Field>
             {request.notes && <Field label="Notes">{request.notes}</Field>}
-            <Field label="Requested on">{request.createdAt.toISOString().slice(0, 10)}</Field>
+            <Field label="Requested on">{formatDate(request.createdAt)}</Field>
           </CardContent>
         </Card>
 

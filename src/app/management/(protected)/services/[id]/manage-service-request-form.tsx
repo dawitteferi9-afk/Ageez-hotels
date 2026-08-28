@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { manageServiceRequestAction, type ManageServiceRequestActionState } from "./actions";
 
@@ -45,20 +46,14 @@ export function ManageServiceRequestForm({
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="status">Status</Label>
-        <select
-          id="status"
-          name="status"
-          defaultValue={currentStatus}
-          disabled={allowedNextStatuses.length === 0}
-          className="h-10 rounded border border-basalt-700/25 bg-parchment-50 px-3 text-sm text-basalt-950"
-        >
+        <Select id="status" name="status" defaultValue={currentStatus} disabled={allowedNextStatuses.length === 0}>
           <option value={currentStatus}>{currentStatus.replace(/_/g, " ")} (current)</option>
           {allowedNextStatuses.map((s) => (
             <option key={s} value={s}>
               {s.replace(/_/g, " ")}
             </option>
           ))}
-        </select>
+        </Select>
         {allowedNextStatuses.length === 0 && (
           <p className="text-xs text-basalt-700">This request is in a final state and cannot be changed further.</p>
         )}

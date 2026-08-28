@@ -3,11 +3,15 @@ import type { Prisma, ReservationStatus } from "@prisma/client";
 import { requireStaffAccess, withTenant, getHotelById } from "@/lib/tenant";
 import { hasPermission } from "@/lib/auth/rbac";
 import { formatBookingReference } from "@/lib/domain/booking";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
 import { ReservationStatusBadge } from "@/components/management/status-badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { FilterBar } from "@/components/management/filter-bar";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +29,12 @@ const STATUS_OPTIONS: ReservationStatus[] = ["CREATED", "CONFIRMED", "CHECKED_IN
  * string from the reservation id) and the schema has no reservation
  * "source" field, so neither is offered as a filter; see M4 Phase 4
  * completion report for why those weren't invented.
+ *
+ * M9f — visual/UX polish only, onto M9a's shared primitives (`Select`,
+ * `FilterBar`, `Table`, `EmptyState`) and `formatDate()`. Same query,
+ * same filters, same "New Reservation" RBAC gate, same "View" link text
+ * (required by `tests/e2e/managementReservationCreate.spec.ts`'s
+ * `row.getByRole("link", {name:"View"})`).
  */
 export default async function ReservationsListPage({
   searchParams,
@@ -70,26 +80,21 @@ export default async function ReservationsListPage({
         )}
       </div>
 
-      <form className="flex flex-wrap items-end gap-4 rounded-lg border border-basalt-700/15 bg-parchment-50 p-4">
+      <FilterBar>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="q">Guest, email, or room number</Label>
           <Input id="q" name="q" type="search" defaultValue={q ?? ""} placeholder="Search…" className="w-64" />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="status">Status</Label>
-          <select
-            id="status"
-            name="status"
-            defaultValue={status ?? ""}
-            className="h-10 rounded border border-basalt-700/25 bg-parchment-50 px-3 text-sm text-basalt-950"
-          >
+          <Select id="status" name="status" defaultValue={status ?? ""}>
             <option value="">All statuses</option>
             {STATUS_OPTIONS.map((s) => (
               <option key={s} value={s}>
                 {s.replace("_", " ")}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <Button type="submit">Filter</Button>
         {(status || q) && (
@@ -97,56 +102,52 @@ export default async function ReservationsListPage({
             Clear
           </Link>
         )}
-      </form>
+      </FilterBar>
 
       {reservations.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-basalt-700/25 p-10 text-center text-sm text-basalt-700">
-          No reservations match these filters.
-        </div>
+        <EmptyState>No reservations match these filters.</EmptyState>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-basalt-700/15">
-          <table className="w-full min-w-[860px] text-left text-sm">
-            <thead className="border-b border-basalt-700/15 bg-parchment-100 text-xs uppercase tracking-wide text-basalt-700">
-              <tr>
-                <th className="px-4 py-3">Booking Ref</th>
-                <th className="px-4 py-3">Guest</th>
-                <th className="px-4 py-3">Room</th>
-                <th className="px-4 py-3">Check-in</th>
-                <th className="px-4 py-3">Check-out</th>
-                <th className="px-4 py-3">Total</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {reservations.map((r) => (
-                <tr key={r.id} className="border-b border-basalt-700/10 last:border-0 hover:bg-parchment-100">
-                  <td className="px-4 py-3 font-medium text-basalt-950">
-                    {hotel ? formatBookingReference(hotel.name, r.id) : r.id.slice(-8).toUpperCase()}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="text-basalt-950">{r.guest.name}</div>
-                    <div className="text-xs text-basalt-700">{r.guest.email}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    {r.room.roomNumber} <span className="text-xs text-basalt-700">({r.room.roomType.name})</span>
-                  </td>
-                  <td className="px-4 py-3">{r.checkIn.toISOString().slice(0, 10)}</td>
-                  <td className="px-4 py-3">{r.checkOut.toISOString().slice(0, 10)}</td>
-                  <td className="px-4 py-3">{formatCurrency(r.totalPrice, hotel?.currency ?? "ETB")}</td>
-                  <td className="px-4 py-3">
-                    <ReservationStatusBadge status={r.status} />
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link href={`/management/reservations/${r.id}`} className="text-sm text-ochre-600 underline">
-                      View
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table className="min-w-[860px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Booking Ref</TableHead>
+              <TableHead>Guest</TableHead>
+              <TableHead>Room</TableHead>
+              <TableHead>Check-in</TableHead>
+              <TableHead>Check-out</TableHead>
+              <TableHead>Total</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {reservations.map((r) => (
+              <TableRow key={r.id}>
+                <TableCell className="font-medium text-basalt-950">
+                  {hotel ? formatBookingReference(hotel.name, r.id) : r.id.slice(-8).toUpperCase()}
+                </TableCell>
+                <TableCell>
+                  <div className="text-basalt-950">{r.guest.name}</div>
+                  <div className="text-xs text-basalt-700">{r.guest.email}</div>
+                </TableCell>
+                <TableCell>
+                  {r.room.roomNumber} <span className="text-xs text-basalt-700">({r.room.roomType.name})</span>
+                </TableCell>
+                <TableCell>{formatDate(r.checkIn)}</TableCell>
+                <TableCell>{formatDate(r.checkOut)}</TableCell>
+                <TableCell>{formatCurrency(r.totalPrice, hotel?.currency ?? "ETB")}</TableCell>
+                <TableCell>
+                  <ReservationStatusBadge status={r.status} />
+                </TableCell>
+                <TableCell className="text-right">
+                  <Link href={`/management/reservations/${r.id}`} className="text-sm text-ochre-600 underline">
+                    View
+                  </Link>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </section>
   );

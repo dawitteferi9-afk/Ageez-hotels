@@ -3,7 +3,11 @@ import type { RoomStatus } from "@prisma/client";
 import { requireStaffAccess, withTenant } from "@/lib/tenant";
 import { RoomStatusBadge } from "@/components/management/status-badge";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { FilterBar } from "@/components/management/filter-bar";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +27,13 @@ const STATUS_OPTIONS: RoomStatus[] = ["AVAILABLE", "RESERVED", "OCCUPIED", "CLEA
  * and the filtered table are derived from it in memory, rather than
  * issuing a second aggregate query — a deliberate scale-appropriate
  * simplification, not a correctness shortcut.
+ *
+ * M9f — visual/UX polish only, onto M9a's shared primitives. The room
+ * number cell stays plain text with no other content in the same cell —
+ * `tests/e2e/management.spec.ts`/`managementMaintenance.spec.ts` both
+ * locate a room's row via `getByRole("cell", {name: roomNumber, exact:
+ * true})`, which requires exactly that. Same `RoomStatus` enum values as
+ * before (no status added or removed) and the same filters/query.
  */
 export default async function RoomsListPage({
   searchParams,
@@ -73,38 +84,28 @@ export default async function RoomsListPage({
         ))}
       </div>
 
-      <form className="flex flex-wrap items-end gap-4 rounded-lg border border-basalt-700/15 bg-parchment-50 p-4">
+      <FilterBar>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="roomTypeId">Room type</Label>
-          <select
-            id="roomTypeId"
-            name="roomTypeId"
-            defaultValue={roomTypeId ?? ""}
-            className="h-10 rounded border border-basalt-700/25 bg-parchment-50 px-3 text-sm text-basalt-950"
-          >
+          <Select id="roomTypeId" name="roomTypeId" defaultValue={roomTypeId ?? ""}>
             <option value="">All room types</option>
             {roomTypes.map((rt) => (
               <option key={rt.id} value={rt.id}>
                 {rt.name}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="status">Status</Label>
-          <select
-            id="status"
-            name="status"
-            defaultValue={status ?? ""}
-            className="h-10 rounded border border-basalt-700/25 bg-parchment-50 px-3 text-sm text-basalt-950"
-          >
+          <Select id="status" name="status" defaultValue={status ?? ""}>
             <option value="">All statuses</option>
             {STATUS_OPTIONS.map((s) => (
               <option key={s} value={s}>
                 {s.replace(/_/g, " ")}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <Button type="submit">Filter</Button>
         {(status || roomTypeId) && (
@@ -112,37 +113,33 @@ export default async function RoomsListPage({
             Clear
           </Link>
         )}
-      </form>
+      </FilterBar>
 
       {filtered.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-basalt-700/25 p-10 text-center text-sm text-basalt-700">
-          No rooms match these filters.
-        </div>
+        <EmptyState>No rooms match these filters.</EmptyState>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-basalt-700/15">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="border-b border-basalt-700/15 bg-parchment-100 text-xs uppercase tracking-wide text-basalt-700">
-              <tr>
-                <th className="px-4 py-3">Room</th>
-                <th className="px-4 py-3">Floor</th>
-                <th className="px-4 py-3">Room Type</th>
-                <th className="px-4 py-3">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((room) => (
-                <tr key={room.id} className="border-b border-basalt-700/10 last:border-0 hover:bg-parchment-100">
-                  <td className="px-4 py-3 font-medium text-basalt-950">{room.roomNumber}</td>
-                  <td className="px-4 py-3">{room.floor}</td>
-                  <td className="px-4 py-3">{room.roomType.name}</td>
-                  <td className="px-4 py-3">
-                    <RoomStatusBadge status={room.status} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table className="min-w-[640px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Room</TableHead>
+              <TableHead>Floor</TableHead>
+              <TableHead>Room Type</TableHead>
+              <TableHead>Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filtered.map((room) => (
+              <TableRow key={room.id}>
+                <TableCell className="font-medium text-basalt-950">{room.roomNumber}</TableCell>
+                <TableCell>{room.floor}</TableCell>
+                <TableCell>{room.roomType.name}</TableCell>
+                <TableCell>
+                  <RoomStatusBadge status={room.status} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </section>
   );

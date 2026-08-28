@@ -5,6 +5,7 @@ import { hasPermission } from "@/lib/auth/rbac";
 import { allowedNextStatuses } from "@/lib/domain/maintenanceTransitions";
 import { MaintenanceStatusBadge, MaintenancePriorityBadge, RoomStatusBadge } from "@/components/management/status-badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { formatDate } from "@/lib/utils";
 import { ManageIssueForm } from "./manage-issue-form";
 
 export const dynamic = "force-dynamic";
@@ -66,7 +67,7 @@ export default async function MaintenanceIssueDetailPage({ params }: { params: P
             <Field label="Description">{issue.description}</Field>
             <Field label="Assigned to">{issue.assignedTo?.name ?? "Unassigned"}</Field>
             {issue.resolutionNotes && <Field label="Resolution / closure notes">{issue.resolutionNotes}</Field>}
-            <Field label="Reported on">{issue.createdAt.toISOString().slice(0, 10)}</Field>
+            <Field label="Reported on">{formatDate(issue.createdAt)}</Field>
           </CardContent>
         </Card>
 

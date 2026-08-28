@@ -5,7 +5,12 @@ import { hasPermission } from "@/lib/auth/rbac";
 import { ServiceRequestStatusBadge } from "@/components/management/status-badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { FilterBar } from "@/components/management/filter-bar";
+import { formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +26,11 @@ const TYPE_OPTIONS: ServiceRequestType[] = ["AIRPORT_TRANSFER", "LAUNDRY", "ROOM
  * other management list. "New Service Request" is shown only for a role
  * with `services`/`mutate` (OWNER_ADMIN/MANAGER/FRONT_DESK) — the page it
  * links to enforces that itself; this is UI convenience only.
+ *
+ * M9f — visual/UX polish only, onto M9a's shared primitives. Same query,
+ * same filters; the exact `"No service requests match these filters."`
+ * empty-state text is required verbatim by
+ * `tests/e2e/managementServices.spec.ts`.
  */
 export default async function ServicesListPage({
   searchParams,
@@ -69,42 +79,32 @@ export default async function ServicesListPage({
         )}
       </div>
 
-      <form className="flex flex-wrap items-end gap-4 rounded-lg border border-basalt-700/15 bg-parchment-50 p-4">
+      <FilterBar>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="q">Guest name or email</Label>
           <Input id="q" name="q" type="search" defaultValue={q ?? ""} placeholder="Search…" className="w-56" />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="status">Status</Label>
-          <select
-            id="status"
-            name="status"
-            defaultValue={status ?? ""}
-            className="h-10 rounded border border-basalt-700/25 bg-parchment-50 px-3 text-sm text-basalt-950"
-          >
+          <Select id="status" name="status" defaultValue={status ?? ""}>
             <option value="">All statuses</option>
             {STATUS_OPTIONS.map((s) => (
               <option key={s} value={s}>
                 {s.replace(/_/g, " ")}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="type">Type</Label>
-          <select
-            id="type"
-            name="type"
-            defaultValue={type ?? ""}
-            className="h-10 rounded border border-basalt-700/25 bg-parchment-50 px-3 text-sm text-basalt-950"
-          >
+          <Select id="type" name="type" defaultValue={type ?? ""}>
             <option value="">All types</option>
             {TYPE_OPTIONS.map((t) => (
               <option key={t} value={t}>
                 {t.replace(/_/g, " ")}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <Button type="submit">Filter</Button>
         {(status || type || q) && (
@@ -112,45 +112,41 @@ export default async function ServicesListPage({
             Clear
           </Link>
         )}
-      </form>
+      </FilterBar>
 
       {requests.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-basalt-700/25 p-10 text-center text-sm text-basalt-700">
-          No service requests match these filters.
-        </div>
+        <EmptyState>No service requests match these filters.</EmptyState>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-basalt-700/15">
-          <table className="w-full min-w-[720px] text-left text-sm">
-            <thead className="border-b border-basalt-700/15 bg-parchment-100 text-xs uppercase tracking-wide text-basalt-700">
-              <tr>
-                <th className="px-4 py-3">Guest</th>
-                <th className="px-4 py-3">Room</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Requested</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {requests.map((request) => (
-                <tr key={request.id} className="border-b border-basalt-700/10 last:border-0 hover:bg-parchment-100">
-                  <td className="px-4 py-3 font-medium text-basalt-950">{request.guest?.name ?? "—"}</td>
-                  <td className="px-4 py-3">{request.reservation?.room.roomNumber ?? "—"}</td>
-                  <td className="px-4 py-3">{request.type.replace(/_/g, " ")}</td>
-                  <td className="px-4 py-3">
-                    <ServiceRequestStatusBadge status={request.status} />
-                  </td>
-                  <td className="px-4 py-3">{request.createdAt.toISOString().slice(0, 10)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <Link href={`/management/services/${request.id}`} className="text-sm text-ochre-600 underline">
-                      View
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table className="min-w-[720px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Guest</TableHead>
+              <TableHead>Room</TableHead>
+              <TableHead>Type</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Requested</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {requests.map((request) => (
+              <TableRow key={request.id}>
+                <TableCell className="font-medium text-basalt-950">{request.guest?.name ?? "—"}</TableCell>
+                <TableCell>{request.reservation?.room.roomNumber ?? "—"}</TableCell>
+                <TableCell>{request.type.replace(/_/g, " ")}</TableCell>
+                <TableCell>
+                  <ServiceRequestStatusBadge status={request.status} />
+                </TableCell>
+                <TableCell>{formatDate(request.createdAt)}</TableCell>
+                <TableCell className="text-right">
+                  <Link href={`/management/services/${request.id}`} className="text-sm text-ochre-600 underline">
+                    View
+                  </Link>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </section>
   );
