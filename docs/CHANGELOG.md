@@ -1,5 +1,35 @@
 # Changelog
 
+## Guest Experience Enhancement — Phase B: Contact page presentation fix (2026-08-29)
+Product Owner-approved, presentation-only phase. Same data as before this
+pass (`hotel.city`/`country`/`contactEmail`/`contactPhone`/`checkInTime`/
+`checkOutTime`, and the `policies` `AiKnowledgeDocument`) — no new fact,
+no schema change.
+- **`src/app/(guest)/contact/page.tsx`:** redesigned around the existing
+  `Card` design-system primitive. Fixes the actual problem: email/phone
+  were previously visible ONLY as the label text of a `mailto:`/`tel:`
+  anchor, which does nothing visible in a browser with no registered
+  mail/phone client — reading as broken in a plain browser review. Each
+  contact row now shows its value as plain, always-useful text first,
+  with the `mailto:`/`tel:` action kept as a separate, clearly optional
+  "Email Us"/"Call Us" enhancement below it — reusing the same
+  plain-text-plus-link pattern `site-footer.tsx` already established.
+  Location and front-desk hours presented in the same card for clearer
+  visual hierarchy.
+- **`tests/e2e/contactPage.spec.ts` (new):** verifies the header's
+  desktop "Contact" link and the mobile hamburger menu's "Contact" entry
+  both reach `/contact` (previously unverified by any automated test),
+  and that the plain-text contact values and their separate mailto:/tel:
+  actions both render correctly.
+- **Verified:** `tsc --noEmit` clean; `next lint` 0 warnings; unit
+  367/367 (unchanged — no unit-testable logic changed); e2e
+  `contactPage.spec.ts` 2/2 (new), `booking.spec.ts` 4/4. Checked for
+  horizontal overflow and visually reviewed at 1440/834/390px — clean at
+  all three; M9h's `lg` header breakpoint untouched and unaffected.
+- No schema change, no dependency change, no change to Auth.js/RBAC/
+  tenant architecture, booking logic, M6/M7, or the header breakpoint
+  architecture.
+
 ## Guest Experience Enhancement — Phase A: AI Concierge suggested-question expansion (2026-08-29)
 Product Owner-approved, content/presentation-only phase of a new
 post-M9 guest-experience enhancement track (audit + phased plan approved
