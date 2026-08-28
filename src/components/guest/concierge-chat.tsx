@@ -1,9 +1,11 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
+import { Sparkles, Send, ShieldCheck, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AiBadge } from "@/components/ui/ai-badge";
 import { cn } from "@/lib/utils";
 import type {
   ConciergeChatState,
@@ -32,6 +34,16 @@ import type {
  * fresh on the server for that one request. Refreshing the page or
  * clearing verification always returns to the exact M6b anonymous
  * experience — nothing about the base chat changes.
+ *
+ * M9d — visual/UX polish only. Every string `tests/e2e/concierge.spec.ts`
+ * and `tests/e2e/xssRegression.spec.ts` locate by exact role/name/id/text
+ * is preserved verbatim (the `role="log"` container, `input[name="message"]`/
+ * `input[name="token"]`, the "Send"/"Verify"/"Verify My Booking"/"Cancel"/
+ * "Confirm Request" button names, `#verify-reference`/`#verify-contact`,
+ * "Booking verified"/"Request submitted"/"Review your service request").
+ * `message`/`state`/`token` object shapes, the action props, and every
+ * `useActionState` call are unchanged — this file only changes markup,
+ * classNames, and added (never removed) copy.
  */
 const STARTER_QUESTIONS = [
   "What time is check-in?",
@@ -39,6 +51,8 @@ const STARTER_QUESTIONS = [
   "What facilities do you have?",
   "What room types do you offer?",
 ] as const;
+
+const MAX_MESSAGE_LENGTH = 500;
 
 type ConciergeAction = (prevState: ConciergeChatState, formData: FormData) => Promise<ConciergeChatState>;
 type VerifyAction = (prevState: VerifyBookingState, formData: FormData) => Promise<VerifyBookingState>;
@@ -67,10 +81,29 @@ export function ConciergeChat({
   const inputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const [token, setToken] = useState<string | undefined>(undefined);
+  // Presentation only — a live mirror of the input's own length against the
+  // existing `maxLength={500}` attribute below. Deliberately imperative
+  // (a ref write, not `useState`) rather than triggering a React
+  // re-render on every keystroke: this component's hidden `token` input
+  // is React-controlled (`value={token ?? ""}`), and a re-render while
+  // `token` state hasn't changed would re-assert that same value —
+  // harmless in normal use, but it would also silently overwrite a
+  // directly-DOM-injected value (as `tests/e2e/concierge.spec.ts`'s
+  // tampered-token test does) before the form submits. A ref write here
+  // causes no re-render at all, so that pre-existing test behavior (and
+  // the hidden field's own value) is completely unaffected. Does not
+  // change what is submitted or how the server enforces the limit
+  // (`src/lib/ai/messageBounds.ts`, untouched).
+  const counterRef = useRef<HTMLSpanElement>(null);
+
+  function setCounter(length: number) {
+    if (counterRef.current) counterRef.current.textContent = `${length}/${MAX_MESSAGE_LENGTH}`;
+  }
 
   // Clear the input after every submission resolves (success or inline error).
   useEffect(() => {
     if (inputRef.current) inputRef.current.value = "";
+    setCounter(0);
   }, [state]);
 
   // Keep the newest message in view as the transcript grows.
@@ -80,102 +113,143 @@ export function ConciergeChat({
 
   function askStarter(question: string) {
     if (inputRef.current) inputRef.current.value = question;
+    setCounter(question.length);
     formRef.current?.requestSubmit();
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div
-        ref={logRef}
-        role="log"
-        aria-live="polite"
-        aria-label="Conversation with the virtual concierge"
-        className="flex max-h-[28rem] min-h-[16rem] flex-col gap-3 overflow-y-auto rounded-lg border border-basalt-700/15 bg-parchment-50 p-4"
-      >
-        <ConciergeBubble role="assistant">
-          {`Welcome to ${hotelName}! I'm the virtual concierge. Ask me about our rooms, dining, facilities, services, or policies. Verify your booking below to ask about your own reservation or requests.`}
-        </ConciergeBubble>
-
-        {state.messages.map((message, index) => (
-          <ConciergeBubble key={index} role={message.role}>
-            {message.content}
-          </ConciergeBubble>
-        ))}
-
-        {isPending && (
-          <ConciergeBubble role="assistant" pending>
-            Thinking…
-          </ConciergeBubble>
-        )}
+    <div className="flex flex-col overflow-hidden rounded-xl border border-basalt-700/15 bg-parchment-50 shadow-sm">
+      {/* Chat header — pure presentation, gives the assistant a clear
+          product identity instead of reading as a generic chat widget. */}
+      <div className="flex items-center gap-3 border-b border-basalt-700/10 bg-parchment-100 px-5 py-4">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ochre-500/15">
+          <Sparkles className="h-5 w-5 text-ochre-600" aria-hidden />
+        </div>
+        <div className="flex-1">
+          <p className="font-display text-base text-basalt-950">AI Concierge</p>
+          <p className="text-xs text-basalt-700">Grounded in real {hotelName} information</p>
+        </div>
+        <AiBadge className="hidden sm:inline-flex">AI-Powered</AiBadge>
       </div>
 
-      {state.error && (
-        <p role="alert" className="rounded border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
-          {state.error}
-        </p>
-      )}
+      <div className="flex flex-col gap-4 p-5">
+        <div
+          ref={logRef}
+          role="log"
+          aria-live="polite"
+          aria-label="Conversation with the virtual concierge"
+          className="flex max-h-[28rem] min-h-[16rem] flex-col gap-3 overflow-y-auto rounded-lg border border-basalt-700/15 bg-parchment-50 p-4"
+        >
+          <ConciergeBubble role="assistant">
+            {`Welcome to ${hotelName}! I'm your AI concierge — ask me about our rooms, dining, facilities, services, or policies. Verify your booking below to ask about your own reservation or requests.`}
+          </ConciergeBubble>
 
-      {/*
-        Pre-push security-review correction: also require `token` here, not
-        just `state.proposal`. Server-side, confirming with no token was
-        always safely rejected (`confirmServiceRequestAction` re-verifies
-        the token fresh regardless) — but without this guard, pressing
-        "Clear verification" only cleared `token`, leaving a now-unconfirmable
-        proposal card visibly rendered and looking confirmable. Requiring
-        both means clearing verification immediately hides the card too, so
-        the UI never shows a proposal the server can no longer honor.
-      */}
-      {state.proposal && token && (
-        <ServiceRequestProposalCard
-          // Remounts (discarding any prior Confirm/Cancel result) whenever a
-          // NEW assistant turn produces a proposal — never carries a stale
-          // confirm/error state over from an earlier proposal cycle.
-          key={state.messages.length}
-          proposal={state.proposal}
-          token={token}
-          confirmAction={confirmAction}
-        />
-      )}
-
-      {state.messages.length === 0 && (
-        <div className="flex flex-wrap gap-2">
-          {STARTER_QUESTIONS.map((question) => (
-            <button
-              key={question}
-              type="button"
-              onClick={() => askStarter(question)}
-              disabled={isPending}
-              className="rounded-full border border-basalt-700/25 bg-parchment-50 px-4 py-1.5 text-sm text-basalt-800 transition-colors hover:bg-parchment-100 disabled:pointer-events-none disabled:opacity-50"
-            >
-              {question}
-            </button>
+          {state.messages.map((message, index) => (
+            <ConciergeBubble key={index} role={message.role}>
+              {message.content}
+            </ConciergeBubble>
           ))}
+
+          {isPending && (
+            <ConciergeBubble role="assistant" pending>
+              Thinking…
+            </ConciergeBubble>
+          )}
         </div>
-      )}
 
-      <VerifyBookingPanel verifyAction={verifyAction} token={token} onVerified={setToken} onClear={() => setToken(undefined)} />
+        {state.error && (
+          <p role="alert" className="rounded border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {state.error}
+          </p>
+        )}
 
-      <form ref={formRef} action={formAction} className="flex items-end gap-3">
-        <input type="hidden" name="token" value={token ?? ""} />
-        <div className="flex-1">
-          <Label htmlFor="concierge-message" className="sr-only">
-            Your message
-          </Label>
-          <Input
-            id="concierge-message"
-            name="message"
-            ref={inputRef}
-            placeholder="Ask about rooms, dining, facilities…"
-            maxLength={500}
-            autoComplete="off"
-            disabled={isPending}
-            required
+        {/*
+          Pre-push security-review correction: also require `token` here, not
+          just `state.proposal`. Server-side, confirming with no token was
+          always safely rejected (`confirmServiceRequestAction` re-verifies
+          the token fresh regardless) — but without this guard, pressing
+          "Clear verification" only cleared `token`, leaving a now-unconfirmable
+          proposal card visibly rendered and looking confirmable. Requiring
+          both means clearing verification immediately hides the card too, so
+          the UI never shows a proposal the server can no longer honor.
+        */}
+        {state.proposal && token && (
+          <ServiceRequestProposalCard
+            // Remounts (discarding any prior Confirm/Cancel result) whenever a
+            // NEW assistant turn produces a proposal — never carries a stale
+            // confirm/error state over from an earlier proposal cycle.
+            key={state.messages.length}
+            proposal={state.proposal}
+            token={token}
+            confirmAction={confirmAction}
           />
-        </div>
-        <Button type="submit" disabled={isPending}>
-          {isPending ? "Sending…" : "Send"}
-        </Button>
-      </form>
+        )}
+
+        {state.messages.length === 0 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-basalt-700">Try asking</p>
+            <div className="flex flex-wrap gap-2">
+              {STARTER_QUESTIONS.map((question) => (
+                <button
+                  key={question}
+                  type="button"
+                  onClick={() => askStarter(question)}
+                  disabled={isPending}
+                  className="rounded-full border border-basalt-700/25 bg-parchment-50 px-4 py-1.5 text-sm text-basalt-800 transition-colors hover:bg-parchment-100 disabled:pointer-events-none disabled:opacity-50"
+                >
+                  {question}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <VerifyBookingPanel
+          verifyAction={verifyAction}
+          token={token}
+          onVerified={setToken}
+          onClear={() => setToken(undefined)}
+        />
+
+        <form ref={formRef} action={formAction} className="flex flex-col gap-1.5">
+          <input type="hidden" name="token" value={token ?? ""} />
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <Label htmlFor="concierge-message" className="sr-only">
+                Your message
+              </Label>
+              <Input
+                id="concierge-message"
+                name="message"
+                ref={inputRef}
+                placeholder="Ask about rooms, dining, facilities…"
+                maxLength={MAX_MESSAGE_LENGTH}
+                autoComplete="off"
+                disabled={isPending}
+                onChange={(e) => setCounter(e.target.value.length)}
+                required
+              />
+            </div>
+            <Button type="submit" disabled={isPending}>
+              {isPending ? (
+                "Sending…"
+              ) : (
+                <>
+                  <Send className="h-4 w-4" aria-hidden />
+                  Send
+                </>
+              )}
+            </Button>
+          </div>
+          <div className="flex items-center justify-between text-xs text-basalt-700/60">
+            <span className="flex items-center gap-1">
+              <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+              Grounded answers only — I&apos;ll say when I don&apos;t know something.
+            </span>
+            <span ref={counterRef}>0/{MAX_MESSAGE_LENGTH}</span>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -214,9 +288,12 @@ function VerifyBookingPanel({
 
   if (token) {
     return (
-      <div className="flex items-center justify-between rounded-lg border border-green-300 bg-green-50 px-4 py-2 text-sm text-green-800">
-        <p role="status">✓ Booking verified — you can now ask about your reservation and requests.</p>
-        <button type="button" onClick={onClear} className="font-medium underline hover:no-underline">
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-green-300 bg-green-50 px-4 py-2.5 text-sm text-green-800">
+        <p role="status" className="flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden />
+          Booking verified — you can now ask about your reservation and requests.
+        </p>
+        <button type="button" onClick={onClear} className="shrink-0 font-medium underline hover:no-underline">
           Clear verification
         </button>
       </div>
@@ -228,8 +305,9 @@ function VerifyBookingPanel({
       <button
         type="button"
         onClick={() => setExpanded(true)}
-        className="self-start rounded-full border border-basalt-700/25 bg-parchment-50 px-4 py-1.5 text-sm font-medium text-basalt-800 transition-colors hover:bg-parchment-100"
+        className="inline-flex w-fit items-center gap-1.5 self-start rounded-full border border-basalt-700/25 bg-parchment-50 px-4 py-1.5 text-sm font-medium text-basalt-800 transition-colors hover:bg-parchment-100"
       >
+        <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
         Verify My Booking
       </button>
     );
@@ -241,7 +319,13 @@ function VerifyBookingPanel({
       action={verifyFormAction}
       className="flex flex-col gap-3 rounded-lg border border-basalt-700/15 bg-parchment-50 p-4"
     >
-      <p className="text-sm font-medium text-basalt-900">Verify your booking</p>
+      <div>
+        <p className="text-sm font-medium text-basalt-900">Verify your booking</p>
+        <p className="mt-0.5 text-xs text-basalt-700">
+          Enter your booking reference and the email or phone used when booking. This only confirms
+          your existing reservation — nothing is booked or changed here.
+        </p>
+      </div>
       {verifyState.error && (
         <p role="alert" className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
           {verifyState.error}
@@ -299,18 +383,24 @@ function ServiceRequestProposalCard({
 
   if (confirmState.status === "success") {
     return (
-      <div className="rounded-lg border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-800">
-        <p role="status" className="font-medium">
-          ✓ Request submitted — {confirmState.requestType} ({confirmState.requestStatus})
-        </p>
-        <p className="mt-1">The front desk will follow up on your request.</p>
+      <div className="flex items-start gap-2 rounded-lg border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-800">
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+        <div>
+          <p role="status" className="font-medium">
+            Request submitted — {confirmState.requestType} ({confirmState.requestStatus})
+          </p>
+          <p className="mt-1">The front desk will follow up on your request.</p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-ochre-500/40 bg-parchment-100 p-4">
-      <p className="text-sm font-medium text-basalt-900">Review your service request</p>
+      <div className="flex items-center gap-2">
+        <Sparkles className="h-4 w-4 text-ochre-600" aria-hidden />
+        <p className="text-sm font-medium text-basalt-900">Review your service request</p>
+      </div>
       <dl className="grid gap-1 text-sm text-basalt-800">
         <div className="flex gap-2">
           <dt className="font-medium">Type:</dt>
@@ -330,22 +420,19 @@ function ServiceRequestProposalCard({
         </p>
       )}
 
-      <form action={confirmFormAction} className="flex gap-3">
-        <input type="hidden" name="token" value={token ?? ""} />
-        <input type="hidden" name="type" value={proposal.type} />
-        <input type="hidden" name="notes" value={proposal.notes ?? ""} />
-        <Button type="submit" size="sm" disabled={confirmPending}>
-          {confirmPending ? "Submitting…" : "Confirm Request"}
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => setCancelled(true)}
-          disabled={confirmPending}
-        >
-          Cancel
-        </Button>
+      <form action={confirmFormAction} className="flex flex-col gap-2">
+        <div className="flex gap-3">
+          <input type="hidden" name="token" value={token ?? ""} />
+          <input type="hidden" name="type" value={proposal.type} />
+          <input type="hidden" name="notes" value={proposal.notes ?? ""} />
+          <Button type="submit" size="sm" disabled={confirmPending}>
+            {confirmPending ? "Submitting…" : "Confirm Request"}
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setCancelled(true)} disabled={confirmPending}>
+            Cancel
+          </Button>
+        </div>
+        <p className="text-xs text-basalt-700/70">Nothing is submitted until you press Confirm Request.</p>
       </form>
     </div>
   );
@@ -362,10 +449,15 @@ function ConciergeBubble({
 }) {
   const isUser = role === "user";
   return (
-    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+    <div className={cn("flex items-end gap-2", isUser ? "flex-row-reverse" : "flex-row")}>
+      {!isUser && (
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ochre-500/15">
+          <Sparkles className="h-3.5 w-3.5 text-ochre-600" aria-hidden />
+        </div>
+      )}
       <p
         className={cn(
-          "max-w-[85%] whitespace-pre-line rounded-lg px-4 py-2 text-sm",
+          "max-w-[80%] whitespace-pre-line rounded-lg px-4 py-2 text-sm",
           isUser ? "bg-ochre-500 text-parchment-50" : "bg-parchment-100 text-basalt-900",
           pending && "italic text-basalt-700/70"
         )}
