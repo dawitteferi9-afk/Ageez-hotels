@@ -1,6 +1,11 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AuthError } from "next-auth";
 import { auth, signIn } from "@/lib/auth";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +17,14 @@ export const dynamic = "force-dynamic";
  * The error message shown below is intentionally the same regardless of
  * whether the email doesn't match any StaffUser or the password is wrong
  * — see verifyStaffCredentials() for why.
+ *
+ * M9e — visual/UX polish only. The `email`/`password` field names,
+ * `autoComplete` values, `required` attributes, the exact
+ * `"Invalid email or password."` text (still a bare `<p role="alert">`,
+ * matching `tests/e2e/auth.spec.ts`'s `p[role="alert"]` locator and exact
+ * `.toHaveText()` check), the `loginAction` Server Action, its
+ * `redirectTo`s, and the generic-failure `AuthError` handling are all
+ * byte-for-byte unchanged from before this pass.
  */
 export default async function ManagementLoginPage({
   searchParams,
@@ -48,44 +61,44 @@ export default async function ManagementLoginPage({
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-4">
-      <h1 className="font-display text-2xl text-basalt-950">Staff Login</h1>
-      <p className="mt-1 text-sm text-basalt-700">Ageez Hotels management system.</p>
+    <main className="flex min-h-screen items-center justify-center bg-parchment-100 px-4 py-16">
+      <div className="flex w-full max-w-sm flex-col gap-6">
+        <div className="text-center">
+          <Link href="/" className="font-display text-2xl text-basalt-950">
+            Ageez Hotels
+          </Link>
+          <p className="mt-1 text-sm text-basalt-700">Hotel Management System</p>
+        </div>
 
-      {error && (
-        <p role="alert" className="mt-4 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
-          Invalid email or password.
-        </p>
-      )}
+        <Card>
+          <CardContent className="flex flex-col gap-6 pt-6">
+            <div>
+              <h1 className="font-display text-2xl text-basalt-950">Staff Sign In</h1>
+              <p className="mt-1 text-sm text-basalt-700">Sign in with your staff email and password.</p>
+            </div>
 
-      <form action={loginAction} className="mt-6 flex flex-col gap-4">
-        <label className="flex flex-col gap-1 text-sm">
-          Email
-          <input
-            type="email"
-            name="email"
-            required
-            autoComplete="username"
-            className="rounded border border-basalt-700/30 px-3 py-2"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Password
-          <input
-            type="password"
-            name="password"
-            required
-            autoComplete="current-password"
-            className="rounded border border-basalt-700/30 px-3 py-2"
-          />
-        </label>
-        <button
-          type="submit"
-          className="mt-2 rounded bg-basalt-950 px-4 py-2 text-parchment-50"
-        >
-          Sign in
-        </button>
-      </form>
+            {error && (
+              <p role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+                Invalid email or password.
+              </p>
+            )}
+
+            <form action={loginAction} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="login-email">Email</Label>
+                <Input id="login-email" type="email" name="email" required autoComplete="username" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="login-password">Password</Label>
+                <Input id="login-password" type="password" name="password" required autoComplete="current-password" />
+              </div>
+              <Button type="submit" size="lg" className="mt-2">
+                Sign in
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
     </main>
   );
 }
