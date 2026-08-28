@@ -40,17 +40,28 @@ function ConciergeNavLink({ className }: { className?: string }) {
 export function SiteHeader({ hotelName }: { hotelName: string }) {
   return (
     <header className="border-b border-basalt-700/15 bg-parchment-50">
-      <Container className="flex h-20 items-center justify-between">
-        <Link href="/" className="font-display text-xl text-basalt-950">
+      <Container className="flex h-20 items-center justify-between gap-4">
+        <Link href="/" className="shrink-0 whitespace-nowrap font-display text-xl text-basalt-950">
           {hotelName}
         </Link>
 
-        <nav className="hidden items-center gap-8 md:flex">
+        {/*
+          M9h — raised from `md` (768px) to `lg` (1024px). At the ~834px
+          tablet width this whole header is verified at, `md` was already
+          active but there wasn't enough room for the logo + all 6 links +
+          the AI Concierge pill + the Contact Us button on one line, so
+          every one of them wrapped onto 2-3 lines (the responsive defect
+          this fix addresses). `lg` gives the full nav enough width and
+          falls back to the existing mobile hamburger menu below `lg`,
+          which was already fully built and tested — no new navigation
+          infrastructure, just a wider fallback range for it.
+        */}
+        <nav className="hidden items-center gap-8 lg:flex">
           {NAV_LINKS.map((link) => (
             <Link
               key={link.href}
               href={link.href}
-              className="text-sm font-medium text-basalt-800 transition-colors hover:text-ochre-600"
+              className="whitespace-nowrap text-sm font-medium text-basalt-800 transition-colors hover:text-ochre-600"
             >
               {link.label}
             </Link>
@@ -58,12 +69,12 @@ export function SiteHeader({ hotelName }: { hotelName: string }) {
           <ConciergeNavLink />
         </nav>
 
-        <Link href="/contact" className={cn(buttonVariants({ size: "sm" }), "hidden md:inline-flex")}>
+        <Link href="/contact" className={cn(buttonVariants({ size: "sm" }), "hidden shrink-0 lg:inline-flex")}>
           Contact Us
         </Link>
 
         {/* No-JS mobile menu: a native <details> disclosure keeps the header a Server Component. */}
-        <details className="md:hidden">
+        <details className="lg:hidden">
           <summary className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded hover:bg-parchment-100">
             <Menu className="h-5 w-5 text-basalt-900" aria-hidden />
             <span className="sr-only">Open menu</span>
