@@ -163,6 +163,34 @@ describe("createMockProvider — getMaintenanceSummary", () => {
     const result = await ask("Which maintenance issues are in progress?", [tool]);
     expect(result.reply).toBe("I don't have access to that information.");
   });
+
+  it("M8c — truthfully discloses when the list was limited (listLimited: true), never implying completeness", async () => {
+    const tool = managementTool("getMaintenanceSummary", {
+      available: true,
+      countsByStatus: { OPEN: 60 },
+      countsByPriority: { URGENT: 60 },
+      openBlocking: [{ roomNumber: "104", description: "AC not cooling", priority: "URGENT", status: "OPEN", assignedToName: null }],
+      listLimited: true,
+    });
+    const result = await ask("Which urgent maintenance issues are open?", [tool]);
+    expect(result.reply).toContain("showing only the first 50");
+    expect(result.reply).toContain("more exist");
+    // Never a database/implementation detail (the actual limit number, a query term, etc.).
+    expect(result.reply).not.toMatch(/MAX_BOUNDED_LIST_SIZE|take:|query|prisma/i);
+  });
+
+  it("M8c — normal wording is completely unchanged when the list was NOT limited (listLimited: false)", async () => {
+    const tool = managementTool("getMaintenanceSummary", {
+      available: true,
+      countsByStatus: { OPEN: 1 },
+      countsByPriority: { URGENT: 1 },
+      openBlocking: [{ roomNumber: "104", description: "AC not cooling", priority: "URGENT", status: "OPEN", assignedToName: null }],
+      listLimited: false,
+    });
+    const result = await ask("Which urgent maintenance issues are open?", [tool]);
+    expect(result.reply).toBe("1 open HIGH/URGENT issue(s): Room 104 — AC not cooling (URGENT, OPEN, unassigned).");
+    expect(result.reply).not.toContain("showing only the first 50");
+  });
 });
 
 describe("createMockProvider — getServiceRequestSummary", () => {
@@ -194,6 +222,33 @@ describe("createMockProvider — getServiceRequestSummary", () => {
     const tool = managementTool("getServiceRequestSummary", { available: false });
     const result = await ask("Which service requests are in progress?", [tool]);
     expect(result.reply).toBe("I don't have access to that information.");
+  });
+
+  it("M8c — truthfully discloses when the list was limited (listLimited: true), never implying completeness", async () => {
+    const tool = managementTool("getServiceRequestSummary", {
+      available: true,
+      countsByStatus: { PENDING: 60 },
+      countsByType: { LAUNDRY: 60 },
+      pendingAndInProgress: [{ guestName: "Verify Guest", roomNumber: "205", type: "LAUNDRY", status: "PENDING", notes: "Two shirts" }],
+      listLimited: true,
+    });
+    const result = await ask("What pending service requests exist?", [tool]);
+    expect(result.reply).toContain("showing only the first 50");
+    expect(result.reply).toContain("more exist");
+    expect(result.reply).not.toMatch(/MAX_BOUNDED_LIST_SIZE|take:|query|prisma/i);
+  });
+
+  it("M8c — normal wording is completely unchanged when the list was NOT limited (listLimited: false)", async () => {
+    const tool = managementTool("getServiceRequestSummary", {
+      available: true,
+      countsByStatus: { PENDING: 1 },
+      countsByType: { LAUNDRY: 1 },
+      pendingAndInProgress: [{ guestName: "Verify Guest", roomNumber: "205", type: "LAUNDRY", status: "PENDING", notes: "Two shirts" }],
+      listLimited: false,
+    });
+    const result = await ask("What pending service requests exist?", [tool]);
+    expect(result.reply).toBe("1 request(s): Verify Guest — LAUNDRY (PENDING), Room 205: Two shirts.");
+    expect(result.reply).not.toContain("showing only the first 50");
   });
 });
 

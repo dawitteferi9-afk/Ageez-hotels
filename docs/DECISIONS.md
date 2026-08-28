@@ -4,6 +4,74 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-28 — M8 Phase c: AI input/output bounds, plus an M7 auth-boundary-ordering correction found during Product Owner review
+**Status:** Approved and implemented
+**Decision:**
+1. **Message-length limit (500 chars, server-enforced):** added
+   `src/lib/ai/messageBounds.ts` as the single shared source of two pure
+   constants/helpers — `MAX_MESSAGE_LENGTH = 500`, `MAX_HISTORY_MESSAGES =
+   20`, `boundHistory()` — used by both `sendConciergeMessageAction()`
+   (M6) and `sendManagementAssistantMessageAction()` (M7). Deliberately
+   the ONLY thing shared between the two: no identity, authorization,
+   prompt, or tool-registry logic crosses this file, keeping the M6/M7
+   boundary separation intact. A message over 500 characters is rejected
+   outright (never truncated, never appended to the transcript, never
+   sent to the provider); this is now the real boundary, since the
+   pre-existing client-side `maxLength={500}` was always bypassable by a
+   direct POST.
+2. **Conversation history cap (20 turns):** `boundHistory()` trims only
+   the array sent to `getAiProvider().converse()` as `history`; the full
+   transcript kept in the browser's own React state (`ConciergeChatState`/
+   `ManagementAssistantChatState`) is untouched. No conversation
+   persistence was added or exists.
+3. **Bounded operational report lists (50 records) + honest truncation
+   disclosure:** `reports.maintenanceSummary().openBlocking` and
+   `reports.serviceRequestSummary().pendingAndInProgress`
+   (`src/lib/tenant/index.ts`) are capped at `MAX_BOUNDED_LIST_SIZE = 50`,
+   using a `take: 51` + slice to detect truncation without a second
+   `count()` query. Each summary gains a `listLimited: boolean`, `true`
+   only when the 51st row was actually present. The pre-existing
+   `countsByStatus`/`countsByPriority`/`countsByType` aggregates are
+   computed by separate, unbounded `groupBy` calls and are never affected
+   — they always represent the complete tenant dataset even when the list
+   itself is capped. The mock provider's summarizers
+   (`src/lib/ai/providers/mock.ts`) disclose truncation in plain language
+   ("(showing only the first 50 — more exist)") rather than silently
+   implying the returned list is exhaustive. Existing projections and
+   `orderBy: createdAt desc` ordering are unchanged; tenant isolation is
+   unaffected (proven by a new integration test with a Hotel B row
+   present while Hotel A's list is truncated).
+4. **M7 auth-boundary-ordering correction (found during Product Owner
+   security review of this same milestone):** the M7 length check was
+   first implemented running BEFORE `requireStaffAccess()` in source
+   order. While no privileged action or data was actually reachable from
+   that ordering (this action does nothing sensitive before
+   authentication either way), it violated the intended invariant that
+   the established M7 authentication boundary always gets first refusal
+   on every request, regardless of anything about the request's content —
+   an unauthenticated caller submitting an over-limit message would have
+   been rejected by the length check's own message rather than the
+   session/auth error, which is the wrong boundary to have made that call.
+   Corrected by moving the `text.length > MAX_MESSAGE_LENGTH` check to
+   after the `requireStaffAccess()` call succeeds. M6 was deliberately
+   left unchanged: M6 has no staff-authentication boundary at all (it is
+   intentionally anonymous-accessible by design), so there is no
+   equivalent ordering concern there, and CLAUDE.md/Product Owner
+   instruction was explicit not to touch M6 behavior without cause.
+**Rationale:** Pre-demo hardening against oversized AI input inflating
+provider token usage/cost or being used as a crude DoS vector, and
+against an unbounded operational report list either degrading the
+demo/UI or silently under-representing how many issues/requests actually
+exist. The auth-boundary-ordering correction keeps the security
+boundary-ordering discipline established across M4/M6/M7 (authenticate
+before doing anything else with request content) uniform and doesn't
+rely on this particular action happening to be harmless in the wrong
+order — the invariant should hold structurally, not by accident.
+Recorded per CLAUDE.md rule 7 and 8 (an unrequested but in-scope
+correction found and fixed during the same milestone, not a redesign).
+
+---
+
 ## 2026-08-27 — M8 Phase b: dependency vulnerability findings assessed as not requiring pre-Saturday remediation
 **Status:** Approved as a documented, deferred-risk decision pending
 explicit Product Owner sign-off on the recommendation below (per M8's own

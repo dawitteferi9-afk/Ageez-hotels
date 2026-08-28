@@ -341,3 +341,112 @@ describe("sendManagementAssistantMessageAction — M7d: provider failure and mal
     ]);
   });
 });
+
+describe("sendManagementAssistantMessageAction — M8c: server-side message limit", () => {
+  it("500 characters is accepted — the provider is called and the reply is appended normally", async () => {
+    requireStaffAccess.mockResolvedValue(STAFF_OWNER);
+    getHotelById.mockResolvedValue(HOTEL);
+    converse.mockResolvedValue({ reply: "ok", toolCalls: [] });
+    const exactly500 = "a".repeat(500);
+
+    const result = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: exactly500 }));
+
+    expect(result.error).toBeUndefined();
+    expect(result.messages).toEqual([
+      { role: "user", content: exactly500 },
+      { role: "assistant", content: "ok" },
+    ]);
+    expect(converse).toHaveBeenCalledTimes(1);
+  });
+
+  it("501 characters from an AUTHENTICATED staff member is rejected — requireStaffAccess still runs (and succeeds) first, but the provider is never called, a safe validation error is returned, prior transcript is preserved unchanged", async () => {
+    requireStaffAccess.mockResolvedValue(STAFF_OWNER);
+    getHotelById.mockResolvedValue(HOTEL);
+    const priorMessages = [{ role: "user" as const, content: "earlier question" }, { role: "assistant" as const, content: "earlier answer" }];
+    const tooLong = "a".repeat(501);
+
+    const result = await sendManagementAssistantMessageAction({ messages: priorMessages }, formDataWith({ message: tooLong }));
+
+    // Security-boundary ordering: the established M7 authentication
+    // boundary always runs FIRST and is never skipped just because the
+    // input is over-limit — it's only once the caller is confirmed
+    // authenticated that the length is validated.
+    expect(requireStaffAccess).toHaveBeenCalledWith("dashboard", "view");
+    expect(converse).not.toHaveBeenCalled();
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain("500 characters");
+    expect(result.error).not.toMatch(/provider|tool|prompt|anthropic|RBAC/i);
+    expect(result.messages).toEqual(priorMessages);
+    expect(result.messages).not.toContainEqual({ role: "user", content: tooLong });
+  });
+
+  it("an UNAUTHENTICATED caller is rejected by the existing authentication boundary even when the message is ALSO over the length limit — the auth error wins, the length check is never reached, and the provider is never called", async () => {
+    requireStaffAccess.mockRejectedValue(new FakeUnauthenticatedError("session gone"));
+    const tooLong = "a".repeat(501);
+
+    const result = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: tooLong }));
+
+    expect(requireStaffAccess).toHaveBeenCalledWith("dashboard", "view");
+    expect(converse).not.toHaveBeenCalled();
+    expect(result.error).toBeDefined();
+    // The auth-failure message, never the length-validation message and
+    // never the raw exception text — proves the auth boundary, not the
+    // length check, is what actually rejected this request.
+    expect(result.error).not.toContain("500 characters");
+    expect(result.error).not.toContain("session gone");
+  });
+
+  it("a much longer oversized message (2000 chars) is rejected the same way, never truncated and echoed back", async () => {
+    const veryLong = "b".repeat(2000);
+    const result = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: veryLong }));
+
+    expect(converse).not.toHaveBeenCalled();
+    expect(result.error).toBeDefined();
+    expect(result.messages).toEqual([]);
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(veryLong);
+  });
+
+  it("blank-message behavior is unchanged by the new length check", async () => {
+    const result = await sendManagementAssistantMessageAction({ messages: [] }, formDataWith({ message: "   " }));
+    expect(result).toEqual({ messages: [] });
+    expect(converse).not.toHaveBeenCalled();
+    expect(requireStaffAccess).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendManagementAssistantMessageAction — M8c: conversation history bound", () => {
+  function priorTurn(n: number) {
+    return { role: n % 2 === 0 ? ("assistant" as const) : ("user" as const), content: `turn ${n}` };
+  }
+
+  it("the provider receives at most 20 messages even when the visible transcript has far more", async () => {
+    requireStaffAccess.mockResolvedValue(STAFF_OWNER);
+    getHotelById.mockResolvedValue(HOTEL);
+    converse.mockResolvedValue({ reply: "ok", toolCalls: [] });
+    const priorMessages = Array.from({ length: 30 }, (_, i) => priorTurn(i + 1));
+
+    const result = await sendManagementAssistantMessageAction({ messages: priorMessages }, formDataWith({ message: "the newest question" }));
+
+    const call = converse.mock.calls[0]![0];
+    expect(call.history).toHaveLength(20);
+    expect(call.history[call.history.length - 1]).toEqual({ role: "user", content: "the newest question" });
+    expect(call.history[0]).toEqual(priorTurn(12));
+
+    // Full transcript returned to the browser unaffected — 30 prior + new user turn + assistant reply.
+    expect(result.messages).toHaveLength(32);
+    expect(result.messages[0]).toEqual(priorTurn(1));
+  });
+
+  it("fewer than 20 prior messages: the provider receives the full history, unbounded", async () => {
+    requireStaffAccess.mockResolvedValue(STAFF_OWNER);
+    getHotelById.mockResolvedValue(HOTEL);
+    converse.mockResolvedValue({ reply: "ok", toolCalls: [] });
+    const priorMessages = Array.from({ length: 5 }, (_, i) => priorTurn(i + 1));
+
+    await sendManagementAssistantMessageAction({ messages: priorMessages }, formDataWith({ message: "newest" }));
+
+    const call = converse.mock.calls[0]![0];
+    expect(call.history).toHaveLength(6);
+  });
+});

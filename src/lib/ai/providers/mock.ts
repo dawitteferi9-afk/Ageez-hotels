@@ -521,10 +521,16 @@ function summarizeMaintenanceSummary(result: unknown): string {
       status: string;
       assignedToName: string | null;
     }>;
+    listLimited: boolean;
   };
   if (typed.openBlocking.length === 0) return "No open HIGH or URGENT maintenance issues right now.";
+  // M8c — when the tenant layer truncated the list (more than
+  // MAX_BOUNDED_LIST_SIZE matching issues exist), say so plainly rather
+  // than implying this is every open issue. Never mentions the exact
+  // limit or any database/implementation detail.
+  const limitedNote = typed.listLimited ? " (showing only the first 50 — more exist)" : "";
   return (
-    `${typed.openBlocking.length} open HIGH/URGENT issue(s): ` +
+    `${typed.openBlocking.length} open HIGH/URGENT issue(s)${limitedNote}: ` +
     typed.openBlocking
       .map(
         (issue) =>
@@ -547,10 +553,13 @@ function summarizeServiceRequestSummary(result: unknown): string {
       status: string;
       notes: string | null;
     }>;
+    listLimited: boolean;
   };
   if (typed.pendingAndInProgress.length === 0) return "No pending or in-progress service requests.";
+  // M8c — same truncation-disclosure rule as summarizeMaintenanceSummary() above.
+  const limitedNote = typed.listLimited ? " (showing only the first 50 — more exist)" : "";
   return (
-    `${typed.pendingAndInProgress.length} request(s): ` +
+    `${typed.pendingAndInProgress.length} request(s)${limitedNote}: ` +
     typed.pendingAndInProgress
       .map(
         (r) =>

@@ -370,6 +370,17 @@ type ScopedMaintenanceIssueArgs = Omit<Prisma.MaintenanceIssueFindManyArgs, "whe
   where?: Omit<Prisma.MaintenanceIssueWhereInput, "hotelId">;
 };
 
+/**
+ * M8c — the maximum number of records `reports.maintenanceSummary()`'s
+ * `openBlocking` and `reports.serviceRequestSummary()`'s
+ * `pendingAndInProgress` ever return in one call. Applied at this query
+ * boundary (not in the AI tool layer or the deterministic mock's
+ * presentation text) so it holds for every caller, present or future —
+ * the two `countsBy*` aggregates on each result are computed by a
+ * separate, unbounded `groupBy` and are never affected by this limit.
+ */
+const MAX_BOUNDED_LIST_SIZE = 50;
+
 /** Blocking = operationally significant enough to take a room out of service; `LOW`/`MEDIUM` never do (docs/DECISIONS.md M5 design). */
 const BLOCKING_MAINTENANCE_PRIORITIES: Prisma.MaintenanceIssueWhereInput["priority"] = { in: ["HIGH", "URGENT"] };
 /** Unresolved = still an open concern; `RESOLVED`/`CLOSED` issues never count as blockers regardless of priority. */
@@ -544,8 +555,16 @@ export interface OpenBlockingMaintenanceIssue {
 export interface MaintenanceSummary {
   countsByStatus: Record<MaintenanceStatus, number>;
   countsByPriority: Record<MaintenancePriority, number>;
-  /** Every currently OPEN/IN_PROGRESS HIGH/URGENT issue — never `resolutionNotes` (approved M7a exclusion). */
+  /**
+   * Every currently OPEN/IN_PROGRESS HIGH/URGENT issue, up to
+   * `MAX_BOUNDED_LIST_SIZE` (M8c) — never `resolutionNotes` (approved M7a
+   * exclusion). `countsByStatus`/`countsByPriority` above are unaffected
+   * by this bound — both always reflect the FULL tenant dataset, never
+   * only the returned list.
+   */
   openBlocking: OpenBlockingMaintenanceIssue[];
+  /** M8c — `true` when more than `MAX_BOUNDED_LIST_SIZE` issues matched and `openBlocking` above was truncated to the most recent ones; `false` when it already contains every matching issue. Never implies completeness when `true`. */
+  listLimited: boolean;
 }
 
 /** A `PENDING` or `IN_PROGRESS` service request — the only two statuses `pendingAndInProgress` ever includes. */
@@ -562,7 +581,15 @@ export interface ActiveServiceRequestSummaryItem {
 export interface ServiceRequestSummary {
   countsByStatus: Record<ServiceRequestStatus, number>;
   countsByType: Record<ServiceRequestType, number>;
+  /**
+   * Every currently PENDING/IN_PROGRESS request, up to
+   * `MAX_BOUNDED_LIST_SIZE` (M8c). `countsByStatus`/`countsByType` above
+   * are unaffected by this bound — both always reflect the FULL tenant
+   * dataset, never only the returned list.
+   */
   pendingAndInProgress: ActiveServiceRequestSummaryItem[];
+  /** M8c — `true` when more than `MAX_BOUNDED_LIST_SIZE` requests matched and `pendingAndInProgress` above was truncated to the most recent ones; `false` when it already contains every matching request. Never implies completeness when `true`. */
+  listLimited: boolean;
 }
 
 /**
@@ -1776,6 +1803,14 @@ export function withTenant(hotelId: string) {
        * shares — never a second, competing definition of "blocking".
        * `resolutionNotes` is never selected or returned (approved M7a PII/
        * data-scope rule); `assignedTo` is projected to a name only.
+       *
+       * M8c — `openBlocking` is capped at `MAX_BOUNDED_LIST_SIZE`. Fetches
+       * one extra row (`take: MAX_BOUNDED_LIST_SIZE + 1`) to detect
+       * truncation in the same query rather than a second `count()` call,
+       * then slices back down to the real limit — `listLimited` is `true`
+       * only when that extra row was actually present. `countsByStatus`/
+       * `countsByPriority` come from their own separate, unbounded
+       * `groupBy` calls above and are never affected by this cap.
        */
       maintenanceSummary: async (): Promise<MaintenanceSummary> => {
         const [statusGroups, priorityGroups, openBlockingIssues] = await Promise.all([
@@ -1785,6 +1820,7 @@ export function withTenant(hotelId: string) {
             where: { hotelId, priority: BLOCKING_MAINTENANCE_PRIORITIES, status: UNRESOLVED_MAINTENANCE_STATUSES },
             include: { room: true, assignedTo: true },
             orderBy: { createdAt: "desc" },
+            take: MAX_BOUNDED_LIST_SIZE + 1,
           }),
         ]);
 
@@ -1793,16 +1829,20 @@ export function withTenant(hotelId: string) {
         const countsByPriority = zeroedMaintenancePriorityCounts();
         for (const row of priorityGroups) countsByPriority[row.priority] = row._count;
 
+        const listLimited = openBlockingIssues.length > MAX_BOUNDED_LIST_SIZE;
+        const boundedOpenBlockingIssues = openBlockingIssues.slice(0, MAX_BOUNDED_LIST_SIZE);
+
         return {
           countsByStatus,
           countsByPriority,
-          openBlocking: openBlockingIssues.map((issue) => ({
+          openBlocking: boundedOpenBlockingIssues.map((issue) => ({
             roomNumber: issue.room.roomNumber,
             description: issue.description,
             priority: issue.priority,
             status: issue.status,
             assignedToName: issue.assignedTo?.name ?? null,
           })),
+          listLimited,
         };
       },
 
@@ -1815,6 +1855,13 @@ export function withTenant(hotelId: string) {
        * instruction staff need to act on the request), but nothing else
        * from `Guest`/`Reservation` beyond name/room number — never email,
        * phone, nationality, dates, price, or payment method.
+       *
+       * M8c — `pendingAndInProgress` is capped at `MAX_BOUNDED_LIST_SIZE`,
+       * same technique as `maintenanceSummary()` above (`take:
+       * MAX_BOUNDED_LIST_SIZE + 1`, sliced back down, `listLimited` set
+       * only when the extra row was present). `countsByStatus`/
+       * `countsByType` are unaffected — separate, unbounded `groupBy`
+       * calls.
        */
       serviceRequestSummary: async (): Promise<ServiceRequestSummary> => {
         const [statusGroups, typeGroups, activeRequests] = await Promise.all([
@@ -1824,6 +1871,7 @@ export function withTenant(hotelId: string) {
             where: { hotelId, status: { in: ["PENDING", "IN_PROGRESS"] } },
             include: { guest: true, reservation: { include: { room: true } } },
             orderBy: { createdAt: "desc" },
+            take: MAX_BOUNDED_LIST_SIZE + 1,
           }),
         ]);
 
@@ -1832,10 +1880,13 @@ export function withTenant(hotelId: string) {
         const countsByType = zeroedServiceRequestTypeCounts();
         for (const row of typeGroups) countsByType[row.type] = row._count;
 
+        const listLimited = activeRequests.length > MAX_BOUNDED_LIST_SIZE;
+        const boundedActiveRequests = activeRequests.slice(0, MAX_BOUNDED_LIST_SIZE);
+
         return {
           countsByStatus,
           countsByType,
-          pendingAndInProgress: activeRequests.map((request) => ({
+          pendingAndInProgress: boundedActiveRequests.map((request) => ({
             guestName: request.guest?.name ?? null,
             roomNumber: request.reservation?.room.roomNumber ?? null,
             type: request.type,
@@ -1843,6 +1894,7 @@ export function withTenant(hotelId: string) {
             notes: request.notes,
             createdAt: request.createdAt.toISOString(),
           })),
+          listLimited,
         };
       },
     },

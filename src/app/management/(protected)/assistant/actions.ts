@@ -4,6 +4,7 @@ import { requireStaffAccess, getHotelById, UnauthenticatedError, ForbiddenError 
 import { getAiProvider, type AiChatTurn } from "@/lib/ai/provider";
 import { buildManagementAssistantSystemPrompt } from "@/lib/ai/prompt";
 import { getManagementAssistantTools } from "@/lib/ai/tools/managementAssistantTools";
+import { MAX_MESSAGE_LENGTH, boundHistory } from "@/lib/ai/messageBounds";
 
 /**
  * M7b — the AI Management Assistant's ONLY server-side entry point. The
@@ -44,7 +45,21 @@ import { getManagementAssistantTools } from "@/lib/ai/tools/managementAssistantT
  *     kind. A malformed/empty reply (`undefined`/`null`/`""`/whitespace —
  *     M7d correction, pre-push review finding) is treated identically to
  *     a thrown provider failure, never appended as a blank assistant
- *     message.
+ *     message. `history` is bounded to the most recent
+ *     `MAX_HISTORY_MESSAGES` turns (M8c, `src/lib/ai/messageBounds.ts`,
+ *     shared with M6) before being sent — the full transcript returned to
+ *     the browser is unaffected.
+ *
+ * M8c also adds a server-side `MAX_MESSAGE_LENGTH` rejection (never a
+ * truncation) — see `MESSAGE_TOO_LONG_ERROR` below. This check runs
+ * strictly AFTER step 1 (`requireStaffAccess()`), never before: the
+ * established M7 authentication boundary always gets first refusal on
+ * every request, so an unauthenticated caller is rejected by that
+ * boundary regardless of message length, and is never able to reach (or
+ * distinguish itself via) the length check. (Pre-existing, unrelated
+ * blank-message handling still short-circuits before authentication, as
+ * it always has — there is nothing for `requireStaffAccess()` to protect
+ * when there is no message content at all.)
  *
  * Conversation history lives only in the browser's React state for this
  * component's lifetime (`useActionState` in
@@ -62,6 +77,14 @@ const GENERIC_ERROR =
   "Sorry, I'm having trouble responding right now. Please try again in a moment.";
 
 const SESSION_ERROR = "Your session has expired or your access has changed. Please sign in again.";
+
+/**
+ * M8c — a server-side-enforced message-length rejection, never a silent
+ * truncation. The client's own `maxLength={500}` on the chat input
+ * (`assistant-chat.tsx`) is UX only; a direct POST bypasses it entirely,
+ * so this is the actual boundary.
+ */
+const MESSAGE_TOO_LONG_ERROR = `Please keep your message under ${MAX_MESSAGE_LENGTH} characters.`;
 
 export async function sendManagementAssistantMessageAction(
   prevState: ManagementAssistantChatState,
@@ -86,11 +109,23 @@ export async function sendManagementAssistantMessageAction(
     // UnauthenticatedError (session/StaffUser gone) or ForbiddenError
     // (structurally unreachable for "dashboard"/"view", ALL_ROLES in the
     // approved matrix, but handled defensively) both get the identical
-    // staff-facing message — never the raw exception.
+    // staff-facing message — never the raw exception. This runs BEFORE
+    // the M8c length check below: the established M7 authentication
+    // boundary always gets first refusal, regardless of message length —
+    // an unauthenticated caller is never able to reach (or distinguish
+    // itself via) the length check.
     if (err instanceof UnauthenticatedError || err instanceof ForbiddenError) {
       return { messages: messagesWithStaffTurn, error: SESSION_ERROR };
     }
     return { messages: messagesWithStaffTurn, error: GENERIC_ERROR };
+  }
+
+  if (text.length > MAX_MESSAGE_LENGTH) {
+    // M8c — only reached once the caller is confirmed authenticated above.
+    // Rejected outright, never truncated, never appended to the transcript
+    // (not even as a bare staff turn, hence `priorMessages` and not
+    // `messagesWithStaffTurn` here) or sent to the AI provider.
+    return { messages: priorMessages, error: MESSAGE_TOO_LONG_ERROR };
   }
 
   let hotel;
@@ -110,7 +145,10 @@ export async function sendManagementAssistantMessageAction(
   const tools = getManagementAssistantTools({ hotelId: staff.hotelId, role: staff.role });
 
   try {
-    const result = await getAiProvider().converse({ systemPrompt, history: messagesWithStaffTurn, tools });
+    // M8c — the provider only ever sees the most recent MAX_HISTORY_MESSAGES
+    // turns; the full transcript in `messages` below (returned to the
+    // browser) is completely unaffected.
+    const result = await getAiProvider().converse({ systemPrompt, history: boundHistory(messagesWithStaffTurn), tools });
     // M7d correction — a provider reply is usable only when it exists and
     // is a non-blank string. `result.reply` being `undefined`/`null`/`""`/
     // whitespace-only (concretely reachable in the real Anthropic provider

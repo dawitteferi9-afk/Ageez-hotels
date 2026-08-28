@@ -8,6 +8,7 @@ import { getAnonymousConciergeTools } from "@/lib/ai/tools/anonymousConciergeToo
 import { getVerifiedConciergeTools } from "@/lib/ai/tools/verifiedConciergeTools";
 import { signVerifiedContextToken, resolveVerifiedReservationContext } from "@/lib/ai/verifiedContext";
 import { checkRateLimit, verifyReservationRateLimitKey, confirmServiceRequestRateLimitKey } from "@/lib/ai/rateLimiter";
+import { MAX_MESSAGE_LENGTH, boundHistory } from "@/lib/ai/messageBounds";
 import {
   normalizeServiceRequestType,
   normalizeServiceRequestNotes,
@@ -56,6 +57,15 @@ import {
  * (`useActionState` in `concierge-chat.tsx`) — this function is stateless
  * per call and writes nothing to the database. No conversation, message,
  * or token content is persisted or logged anywhere here.
+ *
+ * M8c adds two pre-demo bounds (`src/lib/ai/messageBounds.ts`, shared with
+ * M7's `sendManagementAssistantMessageAction()` — size/count constants and
+ * a pure trimming helper only, nothing about identity or tools): a
+ * server-side `MAX_MESSAGE_LENGTH` rejection (never a truncation, never
+ * appended to the transcript, never sent to the provider — see
+ * `MESSAGE_TOO_LONG_ERROR` below), and a `history` bounded to the most
+ * recent `MAX_HISTORY_MESSAGES` turns before the provider call — the full
+ * transcript returned to the browser is unaffected either way.
  *
  * M6d extends the SAME action further still: when a verified conversation's
  * turn calls the `proposeServiceRequest` tool, this action extracts its
@@ -124,6 +134,16 @@ const GENERIC_ERROR =
 const STALE_TOKEN_REPLY =
   "Your booking verification could not be confirmed. Please verify your booking again, or contact the front desk for help.";
 
+/**
+ * M8c — a server-side-enforced message-length rejection, never a silent
+ * truncation. The client's own `maxLength={500}` on the chat input
+ * (`concierge-chat.tsx`) is UX only; a direct POST bypasses it entirely,
+ * so this is the actual boundary. Deliberately worded the same as every
+ * other guest-facing copy in this file — concise, no internal/provider
+ * detail.
+ */
+const MESSAGE_TOO_LONG_ERROR = `Please keep your message under ${MAX_MESSAGE_LENGTH} characters.`;
+
 export async function sendConciergeMessageAction(
   prevState: ConciergeChatState,
   formData: FormData
@@ -136,6 +156,14 @@ export async function sendConciergeMessageAction(
     // Nothing to send (e.g. a blank/whitespace-only submission slipping
     // past the client's `required` attribute) — leave history untouched.
     return { messages: priorMessages };
+  }
+
+  if (text.length > MAX_MESSAGE_LENGTH) {
+    // M8c — rejected outright, never truncated, never appended to the
+    // transcript (not even as a bare user turn) or sent to the AI
+    // provider. Prior transcript/history state is untouched, exactly like
+    // the blank-message case above.
+    return { messages: priorMessages, error: MESSAGE_TOO_LONG_ERROR };
   }
 
   const tokenRaw = formData.get("token");
@@ -182,7 +210,10 @@ export async function sendConciergeMessageAction(
       : getAnonymousConciergeTools(hotel.id);
 
   try {
-    const result = await getAiProvider().converse({ systemPrompt, history: messagesWithGuestTurn, tools });
+    // M8c — the provider only ever sees the most recent MAX_HISTORY_MESSAGES
+    // turns; the full transcript in `messages` below (returned to the
+    // browser) is completely unaffected.
+    const result = await getAiProvider().converse({ systemPrompt, history: boundHistory(messagesWithGuestTurn), tools });
     return {
       messages: [...messagesWithGuestTurn, { role: "assistant", content: result.reply }],
       // Always set from THIS turn's tool calls only (`undefined` if this

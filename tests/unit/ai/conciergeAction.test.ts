@@ -264,3 +264,88 @@ describe("sendConciergeMessageAction — M6c verified-context token handling", (
     expect(serialized).not.toContain("guest-private-contact@example.com");
   });
 });
+
+describe("sendConciergeMessageAction — M8c: server-side message limit", () => {
+  it("500 characters is accepted — the provider is called and the reply is appended normally", async () => {
+    converse.mockResolvedValue({ reply: "ok", toolCalls: [] });
+    const exactly500 = "a".repeat(500);
+
+    const result = await sendConciergeMessageAction({ messages: [] }, formDataWith(exactly500));
+
+    expect(result.error).toBeUndefined();
+    expect(result.messages).toEqual([
+      { role: "user", content: exactly500 },
+      { role: "assistant", content: "ok" },
+    ]);
+    expect(converse).toHaveBeenCalledTimes(1);
+  });
+
+  it("501 characters is rejected — the provider is never called, a safe validation error is returned, and prior transcript state is preserved unchanged", async () => {
+    const priorMessages = [{ role: "user" as const, content: "earlier question" }, { role: "assistant" as const, content: "earlier answer" }];
+    const tooLong = "a".repeat(501);
+
+    const result = await sendConciergeMessageAction({ messages: priorMessages }, formDataWith(tooLong));
+
+    expect(converse).not.toHaveBeenCalled();
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain("500 characters");
+    // Never leaks any internal/provider detail.
+    expect(result.error).not.toMatch(/provider|tool|prompt|anthropic/i);
+    // Prior transcript is untouched — the oversized message was never appended, not even as a bare user turn.
+    expect(result.messages).toEqual(priorMessages);
+    expect(result.messages).not.toContainEqual({ role: "user", content: tooLong });
+  });
+
+  it("a much longer oversized message (2000 chars) is rejected the same way, never truncated and echoed back", async () => {
+    const veryLong = "b".repeat(2000);
+    const result = await sendConciergeMessageAction({ messages: [] }, formDataWith(veryLong));
+
+    expect(converse).not.toHaveBeenCalled();
+    expect(result.error).toBeDefined();
+    expect(result.messages).toEqual([]);
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(veryLong); // never silently truncated and appended as some shorter version either
+  });
+
+  it("blank-message behavior is unchanged by the new length check", async () => {
+    const result = await sendConciergeMessageAction({ messages: [] }, formDataWith("   "));
+    expect(result).toEqual({ messages: [] });
+    expect(converse).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendConciergeMessageAction — M8c: conversation history bound", () => {
+  function priorTurn(n: number) {
+    return { role: n % 2 === 0 ? ("assistant" as const) : ("user" as const), content: `turn ${n}` };
+  }
+
+  it("the provider receives at most 20 messages even when the visible transcript has far more", async () => {
+    converse.mockResolvedValue({ reply: "ok", toolCalls: [] });
+    const priorMessages = Array.from({ length: 30 }, (_, i) => priorTurn(i + 1)); // "turn 1".."turn 30"
+
+    const result = await sendConciergeMessageAction({ messages: priorMessages }, formDataWith("the newest question"));
+
+    const call = converse.mock.calls[0]![0];
+    expect(call.history).toHaveLength(20);
+    // The just-submitted message is always the newest, always last.
+    expect(call.history[call.history.length - 1]).toEqual({ role: "user", content: "the newest question" });
+    // The oldest of the retained 20 is "turn 12" (31 total turns incl. the
+    // new one, minus the 20 most recent = the first 11 dropped).
+    expect(call.history[0]).toEqual(priorTurn(12));
+
+    // The FULL transcript returned to the browser is completely unaffected
+    // by the bound — 30 prior turns + the new user turn + the assistant reply.
+    expect(result.messages).toHaveLength(32);
+    expect(result.messages[0]).toEqual(priorTurn(1));
+  });
+
+  it("fewer than 20 prior messages: the provider receives the full history, unbounded", async () => {
+    converse.mockResolvedValue({ reply: "ok", toolCalls: [] });
+    const priorMessages = Array.from({ length: 5 }, (_, i) => priorTurn(i + 1));
+
+    await sendConciergeMessageAction({ messages: priorMessages }, formDataWith("newest"));
+
+    const call = converse.mock.calls[0]![0];
+    expect(call.history).toHaveLength(6); // 5 prior + the new one
+  });
+});

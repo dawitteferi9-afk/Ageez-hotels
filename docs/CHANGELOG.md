@@ -1,5 +1,70 @@
 # Changelog
 
+## M8 — Testing + Security Hardening, Phase c (pre-demo AI input/output bounds) (2026-08-28)
+Third pre-demo M8 checkpoint. Adds server-side bounds around the M6/M7 AI
+chat surfaces so a malicious or accidental oversized input/output can't
+degrade the demo or the provider bill — no new capability, no schema
+change.
+- **Message-length limit:** `sendConciergeMessageAction()` (M6) and
+  `sendManagementAssistantMessageAction()` (M7) now reject any submitted
+  message over 500 characters server-side (`src/lib/ai/messageBounds.ts`,
+  `MAX_MESSAGE_LENGTH = 500`) — matching the pre-existing client-side
+  `maxLength={500}`, which was UX-only and never a real boundary (a direct
+  POST bypassed it entirely). 501+ is rejected outright with a generic
+  "keep your message under 500 characters" reply, never truncated and
+  never appended to the transcript (not even as a bare user/staff turn);
+  the AI provider is never called for a rejected message.
+- **M7 auth-boundary correction (Product Owner security review, same
+  day):** the M7 length check was initially implemented ahead of
+  `requireStaffAccess()` in source order. Corrected so the established M7
+  authentication boundary always runs first — an unauthenticated caller is
+  now rejected by that existing boundary regardless of message length, and
+  can never reach (or distinguish itself via) the length check. M6 has no
+  analogous change: it has no staff-authentication boundary to protect
+  (M6 is intentionally anonymous-accessible), so this does not apply
+  there. Added `tests/unit/ai/managementAssistantAction.test.ts` coverage:
+  an authenticated 501+-character request still calls `requireStaffAccess`
+  and is then rejected before the provider is called; an unauthenticated
+  501+-character request is rejected by the auth boundary itself (never
+  the length-validation message), and the provider is never called either
+  way.
+- **Conversation history bound:** both actions now cap the `history` array
+  sent to `getAiProvider().converse()` at the most recent 20 turns
+  (`MAX_HISTORY_MESSAGES = 20`, `boundHistory()`) — the full transcript
+  returned to and rendered by the browser is completely unaffected; still
+  no conversation persistence anywhere.
+- **Bounded operational report lists:** `reports.maintenanceSummary()`'s
+  `openBlocking` and `reports.serviceRequestSummary()`'s
+  `pendingAndInProgress` (`src/lib/tenant/index.ts`) are now capped at 50
+  records each (`MAX_BOUNDED_LIST_SIZE`), fetched via `take: 51` +
+  slice so truncation is detected in the same query. A new `listLimited`
+  boolean on each summary is `true` only when more rows actually matched.
+  `countsByStatus`/`countsByPriority`/`countsByType` are unaffected —
+  they come from separate, unbounded `groupBy` aggregates and always
+  reflect the complete tenant dataset. The mock provider's presentation
+  text (`src/lib/ai/providers/mock.ts`) now appends "(showing only the
+  first 50 — more exist)" when `listLimited` is `true`, so a truncated
+  list is never implied to be complete; wording is unchanged when it
+  isn't. Existing projections, field sets, and `orderBy: createdAt desc`
+  ordering are unchanged. Tenant isolation is unaffected — a new
+  integration test proves Hotel B's rows never appear in Hotel A's list
+  even while Hotel A's list is truncated at 50.
+- **Verified:** `npx prisma validate`; `npm run typecheck`; `npm run lint`
+  (0 warnings); `npm run test` (**352/352**, up from 326 — 9 new
+  `messageBounds.test.ts` tests, 2 new M8c blocks each in
+  `conciergeAction.test.ts`/`managementAssistantAction.test.ts`, 4 new
+  disclosure-wording tests in `mockProviderManagementAssistant.test.ts`,
+  plus 1 new auth-boundary-ordering test); `npm run test:integration`
+  (**207/207**, up from 199 — 8 new bounded-list tests in
+  `tests/integration/reports.test.ts`), fixture cleanup confirmed (a
+  direct DB check after the run found zero leftover M8c test rows). A
+  targeted single-attempt Playwright run of `tests/e2e/concierge.spec.ts`
+  and `tests/e2e/managementAssistant.spec.ts` (M6/M7 only, not the full
+  suite) passed **20/20**, no retries.
+- No schema change, no dependency/version change, no RBAC/tenant-
+  architecture change, no new AI tool, no rate-limiting/idempotency
+  change, no M8d work.
+
 ## M8 — Testing + Security Hardening, Phase b (pre-demo XSS/CSRF regression + dependency audit) (2026-08-27)
 Second pre-demo M8 checkpoint (following M8a's auth/RBAC/tenant/server-trust
 regression audit). Verification/documentation only — **no application

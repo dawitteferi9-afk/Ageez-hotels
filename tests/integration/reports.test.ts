@@ -377,7 +377,8 @@ describe("reports.serviceRequestSummary", () => {
     const summary = await withTenant(hotelA.hotel.id).reports.serviceRequestSummary();
     const serialized = JSON.stringify(summary);
     if (hotelA.guest.email) expect(serialized).not.toContain(hotelA.guest.email);
-    expect(Object.keys(summary)).toEqual(["countsByStatus", "countsByType", "pendingAndInProgress"]);
+    // M8c added `listLimited` (bounded-list truncation flag) — see the dedicated M8c describe block below for its own coverage.
+    expect(Object.keys(summary).sort()).toEqual(["countsByStatus", "countsByType", "listLimited", "pendingAndInProgress"].sort());
     for (const item of summary.pendingAndInProgress) {
       expect(Object.keys(item).sort()).toEqual(["createdAt", "guestName", "notes", "roomNumber", "status", "type"].sort());
     }
@@ -400,6 +401,202 @@ describe("reports.serviceRequestSummary", () => {
     });
     const summaryA = await withTenant(hotelA.hotel.id).reports.serviceRequestSummary();
     expect(summaryA.pendingAndInProgress.some((r) => r.notes === "HotelB request")).toBe(false);
+  });
+});
+
+describe("M8c — bounded operational lists (maintenanceSummary.openBlocking / serviceRequestSummary.pendingAndInProgress)", () => {
+  /**
+   * `hotelA` is shared across this whole file, and (per this file's own
+   * module comment) earlier describe blocks above deliberately leave real,
+   * uncleaned rows behind — `reports.maintenanceSummary`'s own first test
+   * leaves one real blocking issue, `reports.serviceRequestSummary`'s
+   * leaves one real PENDING request, on top of one PENDING request the
+   * fixture itself always creates. Asserting a hardcoded "created exactly
+   * N rows, so the total is N" would be exactly the fragile-to-test-order
+   * assumption that comment warns against — instead, each helper here
+   * tops hotelA's REAL current count up to an exact target TOTAL (querying
+   * live, not assuming a zero baseline), so the 49/50/51 boundary is
+   * always tested against the real number `maintenanceSummary()`/
+   * `serviceRequestSummary()` will actually see. Each test still cleans up
+   * exactly the rows it created itself.
+   */
+  async function topUpBlockingMaintenanceIssuesToTotal(targetTotal: number): Promise<string[]> {
+    const currentCount = await prisma.maintenanceIssue.count({
+      where: { hotelId: hotelA.hotel.id, priority: { in: ["HIGH", "URGENT"] }, status: { in: ["OPEN", "IN_PROGRESS"] } },
+    });
+    const toCreate = targetTotal - currentCount;
+    if (toCreate <= 0) {
+      throw new Error(
+        `M8c test setup: hotelA already has ${currentCount} blocking maintenance issues, at or above the target total ${targetTotal}.`
+      );
+    }
+    const rows = Array.from({ length: toCreate }, (_, i) => ({
+      hotelId: hotelA.hotel.id,
+      roomId: hotelA.room.id,
+      description: `M8c bound-test issue #${i}`,
+      priority: "HIGH" as const,
+      status: "OPEN" as const,
+    }));
+    await prisma.maintenanceIssue.createMany({ data: rows });
+    const created = await prisma.maintenanceIssue.findMany({
+      where: { hotelId: hotelA.hotel.id, description: { startsWith: "M8c bound-test issue #" } },
+      select: { id: true },
+    });
+    return created.map((r) => r.id);
+  }
+
+  async function topUpActiveServiceRequestsToTotal(targetTotal: number): Promise<string[]> {
+    const currentCount = await prisma.serviceRequest.count({
+      where: { hotelId: hotelA.hotel.id, status: { in: ["PENDING", "IN_PROGRESS"] } },
+    });
+    const toCreate = targetTotal - currentCount;
+    if (toCreate <= 0) {
+      throw new Error(
+        `M8c test setup: hotelA already has ${currentCount} active service requests, at or above the target total ${targetTotal}.`
+      );
+    }
+    const rows = Array.from({ length: toCreate }, (_, i) => ({
+      hotelId: hotelA.hotel.id,
+      guestId: hotelA.guest.id,
+      reservationId: hotelA.reservation.id,
+      type: "OTHER" as const,
+      status: "PENDING" as const,
+      notes: `M8c bound-test request #${i}`,
+    }));
+    await prisma.serviceRequest.createMany({ data: rows });
+    const created = await prisma.serviceRequest.findMany({
+      where: { hotelId: hotelA.hotel.id, notes: { startsWith: "M8c bound-test request #" } },
+      select: { id: true },
+    });
+    return created.map((r) => r.id);
+  }
+
+  describe("maintenanceSummary — 50-record bound", () => {
+    it("total blocking issues at 49: not limited, list length 49", async () => {
+      const ids = await topUpBlockingMaintenanceIssuesToTotal(49);
+      try {
+        const summary = await withTenant(hotelA.hotel.id).reports.maintenanceSummary();
+        expect(summary.listLimited).toBe(false);
+        expect(summary.openBlocking.length).toBe(49);
+      } finally {
+        await prisma.maintenanceIssue.deleteMany({ where: { id: { in: ids } } });
+      }
+    });
+
+    it("total blocking issues at exactly 50: not limited, list length 50", async () => {
+      const ids = await topUpBlockingMaintenanceIssuesToTotal(50);
+      try {
+        const summary = await withTenant(hotelA.hotel.id).reports.maintenanceSummary();
+        expect(summary.listLimited).toBe(false);
+        expect(summary.openBlocking.length).toBe(50);
+      } finally {
+        await prisma.maintenanceIssue.deleteMany({ where: { id: { in: ids } } });
+      }
+    });
+
+    it("total blocking issues at 51: limited, list length capped at 50, aggregate counts reflect all 51", async () => {
+      const ids = await topUpBlockingMaintenanceIssuesToTotal(51);
+      try {
+        const [statusGroups, priorityGroups] = await Promise.all([
+          prisma.maintenanceIssue.groupBy({ by: ["status"], where: { hotelId: hotelA.hotel.id }, _count: true }),
+          prisma.maintenanceIssue.groupBy({ by: ["priority"], where: { hotelId: hotelA.hotel.id }, _count: true }),
+        ]);
+        const summary = await withTenant(hotelA.hotel.id).reports.maintenanceSummary();
+
+        expect(summary.listLimited).toBe(true);
+        expect(summary.openBlocking.length).toBe(50); // never 51 — the bound holds even when more exist
+        // Aggregate counts are NEVER capped — they reflect the full tenant dataset, not just the returned 50.
+        for (const row of statusGroups) expect(summary.countsByStatus[row.status]).toBe(row._count);
+        for (const row of priorityGroups) expect(summary.countsByPriority[row.priority]).toBe(row._count);
+        expect(summary.countsByStatus.OPEN).toBeGreaterThanOrEqual(51);
+        expect(summary.countsByPriority.HIGH).toBeGreaterThanOrEqual(51);
+      } finally {
+        await prisma.maintenanceIssue.deleteMany({ where: { id: { in: ids } } });
+      }
+    });
+
+    it("Hotel B's issues never appear in Hotel A's list, even while Hotel A's list is limited", async () => {
+      const idsA = await topUpBlockingMaintenanceIssuesToTotal(51);
+      const hotelBIssue = await prisma.maintenanceIssue.create({
+        data: { hotelId: hotelB.hotel.id, roomId: hotelB.room.id, description: "M8c HotelB probe issue", priority: "URGENT", status: "OPEN" },
+      });
+      try {
+        const summaryA = await withTenant(hotelA.hotel.id).reports.maintenanceSummary();
+        expect(summaryA.listLimited).toBe(true);
+        expect(summaryA.openBlocking.some((i) => i.description === "M8c HotelB probe issue")).toBe(false);
+      } finally {
+        await prisma.maintenanceIssue.deleteMany({ where: { id: { in: idsA } } });
+        await prisma.maintenanceIssue.delete({ where: { id: hotelBIssue.id } });
+      }
+    });
+  });
+
+  describe("serviceRequestSummary — 50-record bound", () => {
+    it("total active requests at 49: not limited, list length 49", async () => {
+      const ids = await topUpActiveServiceRequestsToTotal(49);
+      try {
+        const summary = await withTenant(hotelA.hotel.id).reports.serviceRequestSummary();
+        expect(summary.listLimited).toBe(false);
+        expect(summary.pendingAndInProgress.length).toBe(49);
+      } finally {
+        await prisma.serviceRequest.deleteMany({ where: { id: { in: ids } } });
+      }
+    });
+
+    it("total active requests at exactly 50: not limited, list length 50", async () => {
+      const ids = await topUpActiveServiceRequestsToTotal(50);
+      try {
+        const summary = await withTenant(hotelA.hotel.id).reports.serviceRequestSummary();
+        expect(summary.listLimited).toBe(false);
+        expect(summary.pendingAndInProgress.length).toBe(50);
+      } finally {
+        await prisma.serviceRequest.deleteMany({ where: { id: { in: ids } } });
+      }
+    });
+
+    it("total active requests at 51: limited, list length capped at 50, aggregate counts reflect all 51, projection unchanged", async () => {
+      const ids = await topUpActiveServiceRequestsToTotal(51);
+      try {
+        const [statusGroups, typeGroups] = await Promise.all([
+          prisma.serviceRequest.groupBy({ by: ["status"], where: { hotelId: hotelA.hotel.id }, _count: true }),
+          prisma.serviceRequest.groupBy({ by: ["type"], where: { hotelId: hotelA.hotel.id }, _count: true }),
+        ]);
+        const summary = await withTenant(hotelA.hotel.id).reports.serviceRequestSummary();
+
+        expect(summary.listLimited).toBe(true);
+        expect(summary.pendingAndInProgress.length).toBe(50); // never 51
+        // Exact, ground-truth match per status/type — the real proof that
+        // the aggregates are never capped, regardless of how the 51 active
+        // requests are distributed across types (the pre-existing baseline
+        // row(s) this hotel already had may be a different type than the
+        // "OTHER" ones this test topped up with).
+        for (const row of statusGroups) expect(summary.countsByStatus[row.status]).toBe(row._count);
+        for (const row of typeGroups) expect(summary.countsByType[row.type]).toBe(row._count);
+        expect(summary.countsByStatus.PENDING + summary.countsByStatus.IN_PROGRESS).toBeGreaterThanOrEqual(51);
+
+        // Projection unchanged — same exact fields as before M8c, per item.
+        for (const item of summary.pendingAndInProgress) {
+          expect(Object.keys(item).sort()).toEqual(["createdAt", "guestName", "notes", "roomNumber", "status", "type"].sort());
+        }
+      } finally {
+        await prisma.serviceRequest.deleteMany({ where: { id: { in: ids } } });
+      }
+    });
+
+    it("Hotel B's requests never appear in Hotel A's list, even while Hotel A's list is limited", async () => {
+      const idsA = await topUpActiveServiceRequestsToTotal(51);
+      const hotelBRequest = await prisma.serviceRequest.create({
+        data: { hotelId: hotelB.hotel.id, guestId: hotelB.guest.id, type: "OTHER", status: "PENDING", notes: "M8c HotelB probe request" },
+      });
+      try {
+        const summaryA = await withTenant(hotelA.hotel.id).reports.serviceRequestSummary();
+        expect(summaryA.listLimited).toBe(true);
+        expect(summaryA.pendingAndInProgress.some((r) => r.notes === "M8c HotelB probe request")).toBe(false);
+      } finally {
+        await prisma.serviceRequest.deleteMany({ where: { id: { in: idsA } } });
+        await prisma.serviceRequest.delete({ where: { id: hotelBRequest.id } });
+      }
+    });
   });
 });
 
