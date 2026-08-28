@@ -1,5 +1,45 @@
 # Changelog
 
+## Guest Experience Enhancement — Phase C: Restaurant + Services/Facilities visual pass (2026-08-29)
+Product Owner-approved, presentation-only phase using the zero-schema
+approach explicitly required. Same `dining`/`services`/`facilities`
+`AiKnowledgeDocument` rows as before this pass — no new fact, no new
+database table, no schema change.
+- **`src/lib/guest/knowledgeHighlights.ts` (new)** and its README: pure,
+  framework-agnostic functions deriving guest-facing highlights (which
+  dining-venue card to show, which service/facility chip to render) from
+  the EXISTING knowledge prose — a highlight only ever renders when its
+  concept is actually present as a substring of the live fetched content,
+  never unconditionally, so a highlight can never outlive the fact it
+  represents. `deriveConferenceHallCount()` reads the "2" in "2
+  conference halls" directly from the live text rather than a hardcoded
+  number. 15 new unit tests (`tests/unit/guest/knowledgeHighlights.test.ts`).
+- **`src/components/guest/venue-card.tsx` (new):** one dining venue's
+  visual card — an image-ready `aspect-[4/3]` hero block (icon-on-gradient
+  placeholder for now; a plain `<img>` can later replace it with no
+  redesign, no `next/image`) plus name/tagline.
+- **`src/components/guest/fact-chip.tsx` (new):** a small icon+label chip
+  for a supported service/facility.
+- **`src/app/(guest)/restaurant/page.tsx`:** previously one plain
+  paragraph; now shows a distinct `VenueCard` per named venue actually
+  present in the live `dining` content (Axum Restaurant, Buna Lounge),
+  with the original full paragraph kept underneath as supporting context.
+  Deliberately does not claim a coffee ceremony, specific cuisine, hours,
+  menu items, breakfast inclusion, or a reservation policy.
+- **`src/app/(guest)/services/page.tsx`:** previously two plain
+  paragraphs; each now shows a scannable `FactChip` grid (9 approved
+  Guest Services concepts, 3 Facilities concepts including the live
+  conference-hall count) plus its original paragraph kept underneath.
+- **Verified:** `tsc --noEmit` clean; `next lint` 0 warnings; unit
+  **382/382** (367 + 15 new); e2e `booking.spec.ts` 4/4,
+  `concierge.spec.ts` 12/12, `contactPage.spec.ts` 2/2,
+  `xssRegression.spec.ts` 5/5 (23/23 total). Checked for horizontal
+  overflow and visually reviewed at 1440/834/390px — clean at all three;
+  M9h's `lg` header breakpoint untouched.
+- No schema change, no dependency change, no `next/image`, no change to
+  Auth.js/RBAC/tenant architecture, booking/room/service-request/
+  maintenance workflows, M6, or M7.
+
 ## Guest Experience Enhancement — Phase B: Contact page presentation fix (2026-08-29)
 Product Owner-approved, presentation-only phase. Same data as before this
 pass (`hotel.city`/`country`/`contactEmail`/`contactPhone`/`checkInTime`/
