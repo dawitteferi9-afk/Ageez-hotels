@@ -1,5 +1,6 @@
 import { requireStaffAccess, getHotelById } from "@/lib/tenant";
 import { AssistantChat } from "@/components/management/assistant-chat";
+import { AiBadge } from "@/components/ui/ai-badge";
 import { sendManagementAssistantMessageAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,12 @@ export const dynamic = "force-dynamic";
  * boundary is `sendManagementAssistantMessageAction()`, which re-derives
  * all of this fresh on every message, never trusting anything this page
  * rendered once at load time.
+ *
+ * M9g — visual/UX polish only. The `<h1>AI Assistant</h1>` text is kept
+ * byte-for-byte (required by `tests/e2e/managementAssistant.spec.ts`'s
+ * `getByRole("heading", {name:"AI Assistant"})`). `actions.ts` — the M7b
+ * entry point, M8c's auth-before-length-validation ordering, the M7a tool
+ * registry, and the provider/prompt boundary — is untouched.
  */
 export default async function ManagementAssistantPage() {
   const staff = await requireStaffAccess("dashboard", "view");
@@ -28,11 +35,14 @@ export default async function ManagementAssistantPage() {
 
   return (
     <section className="flex flex-col gap-6">
-      <div>
+      <div className="flex flex-col gap-2">
+        <AiBadge className="w-fit">AI Management Assistant</AiBadge>
         <h1 className="font-display text-2xl text-basalt-950">AI Assistant</h1>
         <p className="mt-1 text-sm text-basalt-700">
-          Ask about live occupancy, arrivals/departures, housekeeping, maintenance, and service requests for{" "}
-          {hotel?.name ?? "this hotel"}.
+          Ask about live occupancy, arrivals/departures, housekeeping, maintenance, and service requests
+          for {hotel?.name ?? "this hotel"}. It&apos;s read-only — it can help you understand what&apos;s
+          happening, but it never creates, changes, or cancels a reservation, room, service request,
+          maintenance issue, or staff record for you.
         </p>
       </div>
 
