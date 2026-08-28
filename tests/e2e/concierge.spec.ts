@@ -205,7 +205,7 @@ test("booking verification: success, generic failures, real grounded personal an
   });
 
   await page.goto("/concierge");
-  await page.getByRole("button", { name: "Verify My Booking" }).click();
+  await page.getByRole("button", { name: "Verify My Booking", exact: true }).click();
 
   // Attempt 1/6 — wrong reference, correct contact: generic failure, no leak.
   await page.fill("#verify-reference", "WRONG-REF1");
@@ -287,7 +287,7 @@ test("booking verification: success, generic failures, real grounded personal an
   await expect(conciergeLog(page).getByText(/verification isn't available in this version/).last()).toBeVisible();
 
   // Attempts 3-5/6 — deliberately wrong, to approach (but not yet exceed) the limit.
-  await page.getByRole("button", { name: "Verify My Booking" }).click();
+  await page.getByRole("button", { name: "Verify My Booking", exact: true }).click();
   for (let i = 0; i < 3; i++) {
     await page.fill("#verify-reference", `WRONG-REF${i}`);
     await page.fill("#verify-contact", "nobody@example.com");

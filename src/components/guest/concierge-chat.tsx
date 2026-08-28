@@ -17,8 +17,10 @@ import type {
 /**
  * M6 Phase b — the anonymous public concierge chat. All hotel-specific
  * content on screen (the assistant's replies) comes from the server action;
- * nothing hotel-specific is hardcoded here. The four starter prompts below
- * are generic question templates, not answers.
+ * nothing hotel-specific is hardcoded here. The starter prompts below
+ * (`STARTER_QUESTION_CATEGORIES`) are generic question templates, not
+ * answers — every one of them is answered fresh by the server action on
+ * click, exactly like a hand-typed question.
  *
  * Conversation state lives only in this component's React state via
  * `useActionState` — nothing is written to `localStorage`/`sessionStorage`
@@ -45,11 +47,69 @@ import type {
  * `useActionState` call are unchanged — this file only changes markup,
  * classNames, and added (never removed) copy.
  */
-const STARTER_QUESTIONS = [
-  "What time is check-in?",
-  "Tell me about the restaurant.",
-  "What facilities do you have?",
-  "What room types do you offer?",
+/**
+ * Guest-experience Phase A (Product Owner approval) — expanded from the
+ * original 4 starter prompts to ~17, organized into topic categories so
+ * the guest can scan them without a wall of buttons. The original 4 exact
+ * strings ("What time is check-in?", "Tell me about the restaurant.",
+ * "What facilities do you have?", "What room types do you offer?") are
+ * preserved verbatim inside their categories below —
+ * `tests/e2e/concierge.spec.ts`'s `getByRole("button", {name: <exact
+ * string>})` assertions locate them by that exact text regardless of
+ * which category groups them, and this presentation is deliberately
+ * NOT a collapsible/accordion UI (every category and every chip renders
+ * immediately, always visible) specifically so those assertions — which
+ * check visibility right after `page.goto("/concierge")` with no prior
+ * interaction — keep passing unmodified.
+ *
+ * Every question here was checked against (and, in a few cases, required
+ * a small keyword/reply fix to) `src/lib/ai/providers/mock.ts` so it
+ * produces a real, grounded, non-fallback answer under the deterministic
+ * demo provider — see that file's own Phase A comments. Two questions
+ * from the Product Owner's original candidate list are deliberately
+ * excluded: a coffee-ceremony question (not an established hotel fact —
+ * would risk a misleading answer) and "Is breakfast included?" (whether
+ * it's included in the room rate is not an established fact either;
+ * replaced with the answerable "What time is breakfast served?").
+ */
+const STARTER_QUESTION_CATEGORIES = [
+  {
+    label: "Rooms & Booking",
+    questions: [
+      "What room types do you offer?",
+      "Which room is best for a family?",
+      "What is your most premium room?",
+      "What time is check-in?",
+      "What time is check-out?",
+      "How can I verify my booking?",
+    ],
+  },
+  {
+    label: "Dining",
+    questions: [
+      "Tell me about the restaurant.",
+      "What dining options do you have?",
+      "Tell me about the Buna Lounge.",
+      "What time is breakfast served?",
+    ],
+  },
+  {
+    label: "Hotel Facilities",
+    questions: [
+      "What facilities do you have?",
+      "Do you have a fitness center?",
+      "Do you have conference facilities?",
+      "Do you have a business center?",
+    ],
+  },
+  {
+    label: "Guest Services",
+    questions: [
+      "Do you provide airport pickup?",
+      "What guest services are available?",
+      "How can I request a hotel service?",
+    ],
+  },
 ] as const;
 
 const MAX_MESSAGE_LENGTH = 500;
@@ -186,21 +246,26 @@ export function ConciergeChat({
         )}
 
         {state.messages.length === 0 && (
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-3">
             <p className="text-xs font-medium uppercase tracking-wide text-basalt-700">Try asking</p>
-            <div className="flex flex-wrap gap-2">
-              {STARTER_QUESTIONS.map((question) => (
-                <button
-                  key={question}
-                  type="button"
-                  onClick={() => askStarter(question)}
-                  disabled={isPending}
-                  className="rounded-full border border-basalt-700/25 bg-parchment-50 px-4 py-1.5 text-sm text-basalt-800 transition-colors hover:bg-parchment-100 disabled:pointer-events-none disabled:opacity-50"
-                >
-                  {question}
-                </button>
-              ))}
-            </div>
+            {STARTER_QUESTION_CATEGORIES.map((category) => (
+              <div key={category.label} className="flex flex-col gap-1.5">
+                <p className="text-xs font-medium text-basalt-700/70">{category.label}</p>
+                <div className="flex flex-wrap gap-2">
+                  {category.questions.map((question) => (
+                    <button
+                      key={question}
+                      type="button"
+                      onClick={() => askStarter(question)}
+                      disabled={isPending}
+                      className="rounded-full border border-basalt-700/25 bg-parchment-50 px-4 py-1.5 text-sm text-basalt-800 transition-colors hover:bg-parchment-100 disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      {question}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 

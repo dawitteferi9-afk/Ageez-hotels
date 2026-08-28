@@ -105,9 +105,22 @@ import type { AiProvider, AiConverseInput, AiConverseResult, AiToolCallRecord } 
  */
 
 const KNOWLEDGE_CATEGORY_KEYWORDS: Record<string, string[]> = {
-  policies: ["check-in", "check in", "checkout", "check-out", "policy", "policies"],
-  dining: ["restaurant", "breakfast", "dining", "food", "buna", "axum"],
-  facilities: ["facility", "facilities", "gym", "fitness", "conference"],
+  // Guest-experience Phase A — "breakfast" moved here from `dining`: the
+  // actual breakfast-hours fact ("Breakfast is served 6:30-10:30 AM")
+  // lives in the `policies` document alongside check-in/checkout, not in
+  // `dining` (which only covers the restaurant/lounge names). It was
+  // previously wired to the wrong category — a "What time is breakfast
+  // served?" question would have matched `dining`'s keyword list and
+  // returned the restaurant/lounge blurb, which never mentions a time at
+  // all. No new fact, just correcting which existing document a
+  // guest-facing question about an existing fact resolves to.
+  policies: ["check-in", "check in", "checkout", "check-out", "policy", "policies", "breakfast"],
+  dining: ["restaurant", "dining", "food", "buna", "axum"],
+  // "business center" added — the facilities document already states
+  // "...and a business center." (seed fixture, unchanged); this keyword
+  // was simply missing, so that existing fact was previously unreachable
+  // by a direct "Do you have a business center?" question.
+  facilities: ["facility", "facilities", "gym", "fitness", "conference", "business center"],
   services: ["service", "laundry", "wifi", "wi-fi", "airport"],
   payment: ["pay", "payment", "price includes"],
   overview: ["about", "overview", "tell me about"],
@@ -133,6 +146,27 @@ const PERSONAL_INFO_PATTERN =
 
 const PERSONAL_INFO_REPLY =
   "I can't look up personal booking, room, or request details in this chat yet — that requires verifying who you are first, and that verification isn't available in this version. Please contact the front desk with your booking reference for help with your reservation or request.";
+
+/**
+ * Guest-experience Phase A — a guest asking HOW to verify their booking
+ * ("How can I verify my booking?") is a how-to question about the
+ * existing UI, not a request to actually look up personal data — it must
+ * never fall into `PERSONAL_INFO_PATTERN` below, whose fixed reply
+ * ("...that verification isn't available in this version...") is
+ * actively wrong here (verification IS available, via the separate
+ * "Verify My Booking" panel `concierge-chat.tsx` already renders) and
+ * would be a confusing answer to a suggested question. Checked and
+ * returned BEFORE `PERSONAL_INFO_PATTERN` for exactly that reason. Narrow
+ * and deliberately literal (a "how" question about the verify action
+ * itself), so it never intercepts a genuine personalized lookup like "is
+ * my booking verified" or "verify my identity" — neither matches this
+ * pattern. No tool call: this is a fixed instruction pointing at existing
+ * UI, not a hotel fact, so nothing here can go stale or be fabricated.
+ */
+const VERIFY_HOWTO_PATTERN = /\bhow (can|do) i verify\b|\bhow to verify\b/;
+
+const VERIFY_HOWTO_REPLY =
+  'You can verify your booking using the "Verify My Booking" option below this chat — enter the booking reference from your confirmation and the email or phone number used when booking. Once verified, I can answer questions about your own reservation and requests.';
 
 /** A verified-tier personalized question specifically about a service request, vs. the reservation itself. */
 const SERVICE_REQUEST_PATTERN = /\brequest\b/;
@@ -301,6 +335,13 @@ export function createMockProvider(): AiProvider {
       // M7b correction — see this file's module comment / M6_GUEST_TOOL_NAMES.
       const isM6GuestConversation = tools.some((t) => M6_GUEST_TOOL_NAMES.has(t.name));
 
+      // Guest-experience Phase A — see VERIFY_HOWTO_PATTERN's own comment.
+      // Checked before PERSONAL_INFO_PATTERN, which would otherwise catch
+      // "verify my booking" and answer it wrongly.
+      if (isM6GuestConversation && VERIFY_HOWTO_PATTERN.test(question)) {
+        return { reply: VERIFY_HOWTO_REPLY, toolCalls };
+      }
+
       if (isM6GuestConversation && PERSONAL_INFO_PATTERN.test(question)) {
         const reservationTool = tools.find((t) => t.name === "getReservationSummary");
         const serviceRequestTool = tools.find((t) => t.name === "getServiceRequestStatus");
@@ -347,7 +388,15 @@ export function createMockProvider(): AiProvider {
         return { reply: summarizeManagementToolResult(toolName, result, question), toolCalls };
       }
 
-      if (/room type|price|suite|how much|nightly rate/.test(question)) {
+      // Guest-experience Phase A — "best room"/"which room"/"most premium"
+      // added so a comparison-style question ("Which room is best for a
+      // family?", "What is your most premium room?") reaches the SAME
+      // existing tool/reply as every other room-type question, rather than
+      // falling through to the generic fallback. Still the one whitelisted
+      // `getRoomTypesSummary` tool, still the same deterministic
+      // verbatim-from-DB reply (`summarizeRoomTypes`, below) — no new
+      // capability, no per-question special-casing of an answer.
+      if (/room type|price|suite|how much|nightly rate|best room|which room|most premium|premium room/.test(question)) {
         const tool = tools.find((t) => t.name === "getRoomTypesSummary");
         if (tool) {
           const result = await tool.execute({});
@@ -421,14 +470,37 @@ function summarizeServiceRequests(result: unknown): string {
   return requests.map((r) => `${r.type}: ${r.status}${r.notes ? ` (${r.notes})` : ""}`).join("; ");
 }
 
+/**
+ * Guest-experience Phase A — now also appends each room type's existing
+ * `description` (already returned by `getRoomTypesSummary`, previously
+ * discarded here) so a comparison question ("Which room is best for a
+ * family?", "What is your most premium room?") gets enough real, grounded
+ * detail to actually be useful — e.g. the Family Suite's own description
+ * already says "built for families" and the Presidential Suite's already
+ * says "the hotel's premier suite". Still just reciting live DB fields
+ * verbatim, never a new fact and never an editorialized "the best one for
+ * you is X" claim the mock isn't equipped to reason its way to.
+ * `description` is appended defensively (only when present) so a test
+ * double or any future caller that omits it never renders the literal
+ * word "undefined".
+ */
 function summarizeRoomTypes(result: unknown): string {
-  const roomTypes = result as Array<{ name: string; capacity: number; basePrice: string; currency: string }>;
+  const roomTypes = result as Array<{
+    name: string;
+    description?: string;
+    capacity: number;
+    basePrice: string;
+    currency: string;
+  }>;
   if (!Array.isArray(roomTypes) || roomTypes.length === 0) {
     return NOT_FOUND_REPLY;
   }
   return roomTypes
-    .map((rt) => `${rt.name} (up to ${rt.capacity} guests, ${rt.basePrice} ${rt.currency}/night)`)
-    .join("; ");
+    .map((rt) => {
+      const base = `${rt.name} (up to ${rt.capacity} guests, ${rt.basePrice} ${rt.currency}/night)`;
+      return rt.description ? `${base} — ${rt.description}` : base;
+    })
+    .join(" ");
 }
 
 /**

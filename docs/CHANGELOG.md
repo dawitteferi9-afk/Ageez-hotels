@@ -1,5 +1,62 @@
 # Changelog
 
+## Guest Experience Enhancement — Phase A: AI Concierge suggested-question expansion (2026-08-29)
+Product Owner-approved, content/presentation-only phase of a new
+post-M9 guest-experience enhancement track (audit + phased plan approved
+2026-08-29; Phases B-D approved to follow, Phases E/F and any schema
+change explicitly withheld pending separate approval).
+- **`src/components/guest/concierge-chat.tsx`:** the guest Concierge's
+  starter-question chips expanded from the original 4 to 17, grouped into
+  four always-visible categories (Rooms & Booking, Dining, Hotel
+  Facilities, Guest Services) — never a collapsible/accordion UI, so the
+  4 original exact strings stay immediately visible exactly as
+  `tests/e2e/concierge.spec.ts` requires. Two candidate questions from
+  the original ~20-item brainstorm were deliberately excluded: an
+  Ethiopian-coffee-ceremony question (not an established hotel fact) and
+  "Is breakfast included?" (rate inclusion is not established either;
+  replaced with the answerable "What time is breakfast served?").
+- **`src/lib/ai/providers/mock.ts`** (content/keyword-matching only — no
+  new tool, no new mutation capability, no change to verification/
+  confirmation-token/message-bound/rate-limit/tenant logic):
+  - Fixed a pre-existing miscategorization: the `"breakfast"` keyword was
+    wired to the `dining` knowledge category, but the actual
+    breakfast-hours fact lives in `policies` — a breakfast question
+    previously returned the restaurant/lounge blurb, never a time. Moved
+    to `policies`.
+  - Added the missing `"business center"` keyword to the `facilities`
+    category (that fact was already in the seeded content, just
+    unreachable by a direct question).
+  - Widened the room-type question trigger to recognize comparison-style
+    phrasing ("Which room is best for a family?", "What is your most
+    premium room?") — still the same single whitelisted
+    `getRoomTypesSummary` tool and the same deterministic reply.
+  - `summarizeRoomTypes()` now includes each room type's existing
+    `description` field in its reply (previously fetched but discarded),
+    so comparison questions get real, grounded differentiating detail
+    instead of just name/capacity/price.
+  - Added a new `VERIFY_HOWTO_PATTERN`/`VERIFY_HOWTO_REPLY` branch,
+    checked before `PERSONAL_INFO_PATTERN`, so "How can I verify my
+    booking?" gets a correct, direct answer pointing at the existing
+    "Verify My Booking" panel — previously this exact phrasing matched
+    `PERSONAL_INFO_PATTERN` and returned the actively misleading
+    "...that verification isn't available in this version..." reply.
+- **`tests/e2e/concierge.spec.ts`:** two `getByRole("button", {name:
+  "Verify My Booking"})` locators made `{exact: true}` — the new "How can
+  I verify my booking?" suggested-question button is a legitimate
+  non-exact substring match otherwise, causing a strict-mode violation.
+  Same pattern the file already uses for its adjacent "Verify" button.
+- **`tests/unit/ai/mockProvider.test.ts`:** 15 new tests proving every
+  newly-suggested question resolves to a real, grounded, non-fallback
+  answer (and that the new verify-how-to branch never regresses a
+  genuine personalized-info question).
+- **Verified:** `tsc --noEmit` clean; `next lint` 0 warnings; unit
+  **367/367** (352 + 15 new); e2e `concierge.spec.ts` **12/12**,
+  `booking.spec.ts` **4/4**, `xssRegression.spec.ts` **5/5**. DB baseline
+  restored after verification.
+- No schema change, no new AI tool, no dependency change, no change to
+  Auth.js/RBAC/tenant architecture, no change to the reservation/room/
+  service-request/maintenance state machines, no change to M7.
+
 ## M8 — Testing + Security Hardening, Phase e (demo reliability + pre-demo closeout) (2026-08-28)
 Fifth pre-demo M8 checkpoint. Adds a safe, idempotent `npm run
 db:restore-baseline` command so the demo database can be reset to a

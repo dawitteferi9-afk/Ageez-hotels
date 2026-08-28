@@ -18,7 +18,9 @@ function knowledgeTool(response: { found: boolean; category?: string; content?: 
   };
 }
 
-function roomTypesTool(response: Array<{ name: string; capacity: number; basePrice: string; currency: string }>): AiToolDefinition {
+function roomTypesTool(
+  response: Array<{ name: string; description?: string; capacity: number; basePrice: string; currency: string }>
+): AiToolDefinition {
   return {
     name: "getRoomTypesSummary",
     description: "test double",
@@ -690,5 +692,135 @@ describe("createMockProvider — M7b correction: real M6 behavior is unaffected 
     expect(propose.execute).toHaveBeenCalled();
     expect(result.reply).toContain('press "Confirm Request"');
     expect(result.reply).not.toMatch(/submitted|has been created/i);
+  });
+});
+
+/**
+ * Guest-experience Phase A (Product Owner approval, guest-facing Concierge
+ * suggested-question expansion) — proves every newly-suggested question
+ * routes to a real, grounded answer under the deterministic mock provider,
+ * never the generic fallback and never a fabricated/editorialized claim.
+ * The four pre-existing starter questions ("What time is check-in?",
+ * "Tell me about the restaurant.", "What facilities do you have?", "What
+ * room types do you offer?") already had coverage above and are
+ * deliberately not re-tested here.
+ */
+describe("createMockProvider — guest-experience Phase A: expanded suggested questions", () => {
+  const NOT_FOUND_REPLY = "I don't have that information — please contact the front desk for details.";
+  const PERSONAL_INFO_REPLY =
+    "I can't look up personal booking, room, or request details in this chat yet — that requires verifying who you are first, and that verification isn't available in this version. Please contact the front desk with your booking reference for help with your reservation or request.";
+  const VERIFY_HOWTO_REPLY =
+    'You can verify your booking using the "Verify My Booking" option below this chat — enter the booking reference from your confirmation and the email or phone number used when booking. Once verified, I can answer questions about your own reservation and requests.';
+
+  it("routes a family-comparison room question to getRoomTypesSummary, including each room type's real description", async () => {
+    const tool = roomTypesTool([
+      { name: "Family Suite", description: "A multi-bed suite with a separate living area, built for families.", capacity: 4, basePrice: "9500.00", currency: "ETB" },
+    ]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Which room is best for a family?" }],
+      tools: [tool],
+    });
+
+    expect(tool.execute).toHaveBeenCalled();
+    expect(result.reply).toContain("Family Suite");
+    expect(result.reply).toContain("built for families");
+    expect(result.reply).not.toBe(NOT_FOUND_REPLY);
+  });
+
+  it("routes a 'most premium room' question to getRoomTypesSummary, including the Presidential Suite's real description", async () => {
+    const tool = roomTypesTool([
+      { name: "Presidential Suite", description: "The hotel's premier suite, with a private lounge, dining area, and panoramic views.", capacity: 4, basePrice: "18000.00", currency: "ETB" },
+    ]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "What is your most premium room?" }],
+      tools: [tool],
+    });
+
+    expect(tool.execute).toHaveBeenCalled();
+    expect(result.reply).toContain("Presidential Suite");
+    expect(result.reply).toContain("premier suite");
+    expect(result.reply).not.toBe(NOT_FOUND_REPLY);
+  });
+
+  it("'How can I verify my booking?' gets a direct, correct answer pointing at the existing Verify My Booking panel — never the misleading PERSONAL_INFO_REPLY, and calls no tool", async () => {
+    const knowledge = knowledgeTool({ found: true, category: "policies", content: "irrelevant" });
+    const roomTypes = roomTypesTool([]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "How can I verify my booking?" }],
+      tools: [knowledge, roomTypes],
+    });
+
+    expect(result.reply).toBe(VERIFY_HOWTO_REPLY);
+    expect(result.reply).not.toBe(PERSONAL_INFO_REPLY);
+    expect(result.toolCalls).toEqual([]);
+    expect(knowledge.execute).not.toHaveBeenCalled();
+  });
+
+  it("a genuine personalized reservation question is unaffected by the new verify-how-to check (still gets PERSONAL_INFO_REPLY, anonymous tier)", async () => {
+    const knowledge = knowledgeTool({ found: true, category: "policies", content: "irrelevant" });
+    const roomTypes = roomTypesTool([]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Is my booking verified yet?" }],
+      tools: [knowledge, roomTypes],
+    });
+
+    expect(result.reply).toBe(PERSONAL_INFO_REPLY);
+  });
+
+  it.each([
+    ["What time is check-out?", "policies"],
+    ["What time is breakfast served?", "policies"],
+    ["What dining options do you have?", "dining"],
+    ["Tell me about the Buna Lounge.", "dining"],
+    ["Do you have a fitness center?", "facilities"],
+    ["Do you have conference facilities?", "facilities"],
+    ["Do you have a business center?", "facilities"],
+    ["Do you provide airport pickup?", "services"],
+    ["What guest services are available?", "services"],
+    ["How can I request a hotel service?", "services"],
+  ])("%j routes to the %j knowledge category, not the generic fallback", async (question, expectedCategory) => {
+    const knowledge = knowledgeTool({ found: true, category: expectedCategory, content: "real seeded content" });
+    const roomTypes = roomTypesTool([]);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: question }],
+      tools: [knowledge, roomTypes],
+    });
+
+    expect(knowledge.execute).toHaveBeenCalledWith({ category: expectedCategory });
+    expect(result.reply).toBe("real seeded content");
+    expect(result.reply).not.toBe(NOT_FOUND_REPLY);
+  });
+
+  it("verified-tier 'How can I request a hotel service?' still resolves to the services knowledge category, never a fabricated service-request confirmation", async () => {
+    const knowledge = knowledgeTool({ found: true, category: "services", content: "real seeded content" });
+    const roomTypes = roomTypesTool([]);
+    const reservation = reservationSummaryTool({ found: true });
+    const serviceRequests = serviceRequestStatusTool([]);
+    const propose = proposeServiceRequestTool();
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "How can I request a hotel service?" }],
+      tools: [knowledge, roomTypes, reservation, serviceRequests, propose],
+    });
+
+    expect(propose.execute).not.toHaveBeenCalled();
+    expect(result.reply).toBe("real seeded content");
   });
 });
