@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Users, BedDouble, ArrowLeft } from "lucide-react";
+import { Users, Crown, ArrowLeft } from "lucide-react";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
 import { buttonVariants } from "@/components/ui/button";
 import { cn, formatCurrency } from "@/lib/utils";
+import { deriveRoomHighlights, isPremierRoom } from "@/lib/guest/roomHighlights";
+import { getRoomPhotography } from "@/lib/guest/roomPhotography";
+import { ROOM_HIGHLIGHT_ICONS, DEFAULT_ROOM_ICON } from "@/components/guest/room-highlight-icons";
+import { RoomVisual } from "@/components/guest/room-visual";
+import { RoomGallery } from "@/components/guest/room-gallery";
+import { FactChip } from "@/components/guest/fact-chip";
 
 interface RoomDetailPageProps {
   params: Promise<{ id: string }>;
@@ -28,18 +34,29 @@ export async function generateMetadata({ params }: RoomDetailPageProps): Promise
 }
 
 /**
- * M9b — visual/UX polish only. Same fields as before this pass (name,
- * description, capacity, price, room count) and the exact same "Book
- * This Room" link to `/rooms/[id]/book` — booking route/behavior
- * unchanged. The left visual block is the same honest icon-on-gradient
- * treatment as `RoomTypeCard` (no photography exists in this repo; none
- * was added — see M9b completion report), not a new content field.
+ * Guest Experience Enhancement — Phase D2. Same fields as before this
+ * pass (name, description, capacity, price, room count) and the exact
+ * same "Book This Room" link to `/rooms/[id]/book` — booking route/
+ * behavior untouched, no new Prisma query. The hero and gallery regions
+ * are IMAGE-READY (`RoomVisual`/`RoomGallery` — see their own comments);
+ * with no photography supplied yet, the gallery renders nothing at all
+ * rather than empty/broken-looking boxes. Highlight chips
+ * (`deriveRoomHighlights()`) and the "Premier" badge (`isPremierRoom()`)
+ * are derived only from this room type's own live `description` — no
+ * specification is introduced beyond what that description already
+ * states (Phase D3).
  */
 export default async function RoomDetailPage({ params }: RoomDetailPageProps) {
   const { id } = await params;
   const result = await getRoomType(id);
   if (!result) notFound();
   const { roomType, roomCount } = result;
+
+  const highlights = deriveRoomHighlights(roomType.description, roomType.capacity);
+  const displayHighlights = highlights.filter((h) => h.key !== "capacity");
+  const primaryIcon = ROOM_HIGHLIGHT_ICONS[displayHighlights[0]?.key ?? ""] ?? DEFAULT_ROOM_ICON;
+  const photography = getRoomPhotography(roomType.name);
+  const premier = isPremierRoom(highlights);
 
   return (
     <section className="py-16">
@@ -50,8 +67,23 @@ export default async function RoomDetailPage({ params }: RoomDetailPageProps) {
         </Link>
 
         <div className="grid gap-10 lg:grid-cols-2 lg:items-start">
-          <div className="flex h-64 items-center justify-center rounded-lg bg-gradient-to-br from-ochre-500/15 via-parchment-100 to-basalt-900/5 lg:h-full lg:min-h-[22rem]">
-            <BedDouble className="h-16 w-16 text-ochre-600/50" aria-hidden />
+          <div className="flex flex-col gap-4">
+            <div className="relative">
+              <RoomVisual
+                imageSrc={photography.hero}
+                icon={primaryIcon}
+                alt={roomType.name}
+                className="aspect-[4/3] rounded-lg lg:aspect-auto lg:h-full lg:min-h-[22rem]"
+                iconClassName="h-16 w-16"
+              />
+              {premier && (
+                <span className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-basalt-950/90 px-3.5 py-1.5 text-sm font-medium text-parchment-50">
+                  <Crown className="h-3.5 w-3.5" aria-hidden />
+                  Premier
+                </span>
+              )}
+            </div>
+            <RoomGallery images={photography.gallery} roomName={roomType.name} />
           </div>
 
           <div className="flex flex-col gap-6">
@@ -74,6 +106,21 @@ export default async function RoomDetailPage({ params }: RoomDetailPageProps) {
             </p>
 
             <p className="text-lg leading-relaxed text-basalt-800">{roomType.description}</p>
+
+            {displayHighlights.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-basalt-700/70">Room Highlights</p>
+                <div className="flex flex-wrap gap-2">
+                  {displayHighlights.map((highlight) => (
+                    <FactChip
+                      key={highlight.key}
+                      icon={ROOM_HIGHLIGHT_ICONS[highlight.key] ?? DEFAULT_ROOM_ICON}
+                      label={highlight.label}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
 
             <Link
               href={`/rooms/${roomType.id}/book`}

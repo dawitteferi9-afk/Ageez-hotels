@@ -1,5 +1,61 @@
 # Changelog
 
+## Guest Experience Enhancement — Phase D: Room experience + photography-ready architecture (2026-08-29)
+Product Owner-approved. The most visually significant phase of this
+enhancement — transforms `/rooms` and `/rooms/[id]` into a richer
+hotel-shopping experience while making zero changes to `RoomType`
+Prisma queries, booking/domain logic, or the room lifecycle. Same
+name/description/capacity/basePrice/currency fields as before this
+pass; no schema change, no new `RoomType` business field, no dependency.
+- **`src/lib/guest/roomHighlights.ts` (new):** pure, framework-agnostic
+  derivation of a room type's guest-facing highlight chips from its own
+  live `description` (phrase-matched, same safety property as Phase C's
+  `knowledgeHighlights.ts` — a highlight only renders when its phrase is
+  actually present) plus a final "Up to N Guests" chip read from the
+  live `capacity` field. `isPremierRoom()` flags a room type for the
+  "Premier" badge only when its own description literally contains
+  "premier suite" — a data-driven signal, not a hardcoded name check. 9
+  new unit tests prove this produces exactly the Product Owner-approved
+  highlight set for each of the five real seeded room types.
+- **`src/lib/guest/roomPhotography.ts` (new):** presentation-only mapping
+  from a room type's name to its (future) local photography paths under
+  `public/images/rooms/<slug>/` — never a second source of truth for
+  price/capacity/availability. Every entry is currently empty (no image
+  files exist); adding a real file and updating this one mapping is the
+  entire "future switch" — no other code change, no Prisma/booking touch.
+- **`public/images/rooms/{standard-king,deluxe-twin,executive-room,
+  family-suite,presidential-suite}/`** (new, `.gitkeep` placeholders
+  only): the intended local structure, ready for real photography to be
+  dropped in later.
+- **`src/components/guest/room-visual.tsx`, `room-gallery.tsx`,
+  `room-highlight-icons.ts` (new):** the shared image-ready swap point
+  (real `<img>` when a path exists, the existing icon-on-gradient
+  fallback otherwise — no `next/image`), a gallery that renders nothing
+  at all (never a fake empty box) until real photographs exist, and one
+  shared highlight-key → icon map used consistently by both the room
+  list and detail page.
+- **`src/components/guest/room-type-card.tsx`:** hero area enlarged from
+  a fixed `h-28` to an image-ready `aspect-[4/3]`, a room-specific
+  primary icon, up to 2 highlight chips, and a "Premier" badge for the
+  Presidential Suite — all derived, none hardcoded. `/rooms/page.tsx`
+  itself required no change.
+- **`src/app/(guest)/rooms/[id]/page.tsx`:** larger image-ready hero,
+  gallery region, full highlight-chip strip, and the "Premier" badge —
+  same fields, same "Book This Room" link/route as before.
+- **Verified:** `tsc --noEmit` clean; `next lint` 0 warnings; unit
+  **391/391** (382 + 9 new); e2e `booking.spec.ts` 4/4 (including the
+  Presidential Suite inventory-exhaustion test and the Executive Room
+  booking-confirmation test — both prove "View Details"/"Book This Room"
+  still reach the correct real `RoomType`), `concierge.spec.ts` 12/12,
+  `contactPage.spec.ts` 2/2, `xssRegression.spec.ts` 5/5 (23/23 total).
+  Checked for horizontal overflow and visually reviewed all five room
+  types' list card and detail page at 1440/834/390px — clean at all
+  three. M9h header breakpoint architecture untouched.
+- No schema/migration change, no new `RoomType` field, no seed change,
+  no dependency, no `next/image`, no change to Auth.js/RBAC/tenant
+  architecture, booking/room/service-request/maintenance workflows, M6,
+  M7, or management UI.
+
 ## Guest Experience Enhancement — Phase C: Restaurant + Services/Facilities visual pass (2026-08-29)
 Product Owner-approved, presentation-only phase using the zero-schema
 approach explicitly required. Same `dining`/`services`/`facilities`
