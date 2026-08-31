@@ -4,6 +4,45 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-08-31 — Photography Integration Step 3B: `VenuePhotographySet` mirrors `RoomPhotographySet`; facility photo cards derive from live `services` content, not a new fact
+**Status:** Approved and implemented
+**Decision:** Introduced `src/lib/guest/venuePhotography.ts`
+(`VenuePhotographySet`, `getVenuePhotography()`) as a deliberate sibling
+to `src/lib/guest/roomPhotography.ts` rather than generalizing the two
+into one shared type — both are presentation-only path lookups, but
+naming a room-specific type generically and importing it into
+dining/facilities code read as more confusing than the small (2-field)
+duplication it would have avoided. `VenueCard` gained an optional
+`imageSrc` prop and now renders its hero slot through the existing
+`RoomVisual` component (the same one `/rooms` uses), rather than
+duplicating the "real `<img>` if present, icon-on-gradient fallback
+otherwise" logic a second time.
+
+Conference Facilities, Fitness Center, and Business Center previously had
+no image-ready component at all on `/services` — only `FactChip` grids.
+Rather than inventing new "facility name + tagline" hotel copy, added
+`deriveFacilityVenues()` to `src/lib/guest/knowledgeHighlights.ts`,
+mirroring the existing `deriveDiningVenues()`/`DiningVenueRule` pattern
+exactly: a facility only becomes eligible for a photo card when its
+concept is actually detected as a substring of the live `services`
+`AiKnowledgeDocument` content (reusing the same three match patterns
+already approved for that document's chip grid), and its tagline is a
+minimal, faithful paraphrase in the same restrained voice already
+approved for Buna Lounge ("A coffee lounge at the hotel.") — never new
+marketing claims. This keeps photography strictly presentational per
+this project's AI/data rules: no image or caption asserts a hotel fact
+that isn't already independently backed by the live knowledge-document
+content.
+**Rationale:** Reuse over duplication (one fallback-rendering
+implementation, one venue-eligibility pattern) while keeping the
+zero-new-hotel-fact discipline established in Phase C's
+`knowledgeHighlights.ts` intact for the two entirely new facility cards
+this phase adds. Full slot-by-slot photograph provenance (source file,
+audit rejections, permanent path) is tracked in
+`docs/PHOTOGRAPHY_MANIFEST.md`, not duplicated here.
+
+---
+
 ## 2026-08-28 — M8 Phase e: `npm run db:restore-baseline` reuses `seedBaseline()`, never a second seeding mechanism
 **Status:** Approved and implemented
 **Decision:** Added `prisma/seed/restoreBaseline.ts` (`npm run

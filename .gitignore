@@ -30,3 +30,8 @@ prisma/dev.db-journal
 /coverage
 /test-results
 /playwright-report
+
+# photography intake staging (Photography Integration Step 3B) — never a
+# production asset source; only files copied out of here into
+# public/images/rooms|dining|facilities/ are committed.
+public/images/_incoming/

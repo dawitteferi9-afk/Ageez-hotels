@@ -4,6 +4,7 @@ import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
 import { VenueCard } from "@/components/guest/venue-card";
 import { deriveDiningVenues } from "@/lib/guest/knowledgeHighlights";
+import { getVenuePhotography } from "@/lib/guest/venuePhotography";
 
 export const metadata: Metadata = {
   title: "Restaurant",
@@ -48,6 +49,7 @@ export default async function RestaurantPage() {
                 name={venue.name}
                 tagline={venue.tagline}
                 icon={DINING_VENUE_ICONS[venue.key] ?? UtensilsCrossed}
+                imageSrc={getVenuePhotography(venue.key).hero}
               />
             ))}
           </div>

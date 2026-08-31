@@ -16,7 +16,9 @@ import {
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
 import { FactChip } from "@/components/guest/fact-chip";
-import { deriveServiceHighlights, deriveFacilityHighlights } from "@/lib/guest/knowledgeHighlights";
+import { VenueCard } from "@/components/guest/venue-card";
+import { deriveServiceHighlights, deriveFacilityHighlights, deriveFacilityVenues } from "@/lib/guest/knowledgeHighlights";
+import { getVenuePhotography } from "@/lib/guest/venuePhotography";
 
 export const metadata: Metadata = {
   title: "Services",
@@ -52,6 +54,14 @@ const FACILITY_ICONS: Record<string, LucideIcon> = {
  * unconditionally, so a chip can never outlive (or precede) the fact it
  * represents. No availability, price, hour, or promise is invented
  * anywhere on this page.
+ *
+ * Photography Integration Step 3B additionally shows a photo card per
+ * named facility (Conference Facilities, Fitness Center, Business
+ * Center) alongside the existing chip grid — same gating discipline:
+ * `deriveFacilityVenues()` only returns a facility whose concept is
+ * actually present in the live `services` content, and each card's
+ * `imageSrc` comes from `src/lib/guest/venuePhotography.ts`, which is
+ * presentation-only and asserts no hotel fact of its own.
  */
 export default async function ServicesPage() {
   const hotel = await getCurrentTenantHotel();
@@ -63,6 +73,7 @@ export default async function ServicesPage() {
 
   const serviceHighlights = deriveServiceHighlights(services?.content ?? null);
   const facilityHighlights = deriveFacilityHighlights(facilities?.content ?? null);
+  const facilityVenues = deriveFacilityVenues(services?.content ?? null);
 
   return (
     <section className="py-16">
@@ -99,6 +110,19 @@ export default async function ServicesPage() {
               <Building2 className="h-5 w-5 text-ochre-600" aria-hidden />
               Facilities
             </h2>
+            {facilityVenues.length > 0 && (
+              <div className="grid gap-6 sm:grid-cols-3">
+                {facilityVenues.map((venue) => (
+                  <VenueCard
+                    key={venue.key}
+                    name={venue.name}
+                    tagline={venue.tagline}
+                    icon={SERVICE_ICONS[venue.key] ?? Building2}
+                    imageSrc={getVenuePhotography(venue.key).hero}
+                  />
+                ))}
+              </div>
+            )}
             {facilityHighlights.length > 0 && (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {facilityHighlights.map((highlight) => (

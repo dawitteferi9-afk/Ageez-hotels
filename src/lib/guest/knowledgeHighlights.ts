@@ -112,6 +112,58 @@ export function deriveConferenceHallCount(facilitiesContent: string | null): num
   return match ? Number(match[1]) : null;
 }
 
+export interface FacilityVenue {
+  /** Stable key for React lists and icon/photography lookup — not shown to guests. */
+  key: string;
+  name: string;
+  /** Short, guest-facing copy — a faithful paraphrase of the existing fact, never a new claim. */
+  tagline: string;
+}
+
+interface FacilityVenueRule {
+  key: string;
+  matchPattern: RegExp;
+  name: string;
+  tagline: string;
+}
+
+/**
+ * Reuses the same three concepts (and match patterns) already approved
+ * for the `services` document's chip grid above — `conference-facilities`,
+ * `fitness-center`, `business-center` — to decide which facilities get a
+ * named photo card (Photography Integration Step 3B) rather than a chip.
+ */
+const FACILITY_VENUE_RULES: readonly FacilityVenueRule[] = [
+  {
+    key: "conference-facilities",
+    matchPattern: /conference facilities/i,
+    name: "Conference Facilities",
+    tagline: "Meeting and event space at the hotel.",
+  },
+  {
+    key: "fitness-center",
+    matchPattern: /fitness center/i,
+    name: "Fitness Center",
+    tagline: "The hotel's fitness center.",
+  },
+  {
+    key: "business-center",
+    matchPattern: /business center/i,
+    name: "Business Center",
+    tagline: "The hotel's business center.",
+  },
+];
+
+/** Derives which named facilities to show a photo card for, from the live `services` knowledge content (the same content `deriveServiceHighlights` reads). */
+export function deriveFacilityVenues(servicesContent: string | null): FacilityVenue[] {
+  if (!servicesContent) return [];
+  return FACILITY_VENUE_RULES.filter((rule) => rule.matchPattern.test(servicesContent)).map((rule) => ({
+    key: rule.key,
+    name: rule.name,
+    tagline: rule.tagline,
+  }));
+}
+
 /** Derives the "Facilities" chip grid from the live `facilities` knowledge content. */
 export function deriveFacilityHighlights(facilitiesContent: string | null): KnowledgeHighlight[] {
   if (!facilitiesContent) return [];

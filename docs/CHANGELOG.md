@@ -1,5 +1,49 @@
 # Changelog
 
+## Photography Integration — Step 3B: 30/30 photography set integrated (2026-08-31)
+Product Owner-approved, following a multi-round audit (Steps 1–2F) of a
+supplied photograph batch — every image visually inspected against a
+locked 30-slot manifest, with spa/rooftop/cinema/pool/duplicate/superseded
+images explicitly rejected and never integrated. No schema, seed, backend,
+booking, auth, RBAC, or tenant-isolation change; no new dependency; no
+`next/image`.
+- **`docs/PHOTOGRAPHY_MANIFEST.md`:** rewritten as the permanent
+  slot-by-slot record — category, scene, original source filename, and
+  final permanent path for all 30 photographs, plus the audit history and
+  the 12 excluded files' rejection reasons.
+- **`public/images/rooms/*/`, `public/images/dining/*/`,
+  `public/images/facilities/*/`:** the 30 approved photographs added
+  (`NN-<category-scene>.jpg`, slot number embedded in the filename so a
+  file can never be mistaken for a different slot/category).
+- **`src/lib/guest/roomPhotography.ts`:** all five room types' `hero` +
+  `gallery` populated with real paths for the first time (previously
+  every entry was the empty placeholder from Phase D).
+- **`src/lib/guest/venuePhotography.ts` (new):** the dining/facilities
+  counterpart to `roomPhotography.ts` — same `hero`/`gallery` shape, same
+  "never a source of hotel business fact" boundary, keyed by the same
+  venue/facility keys `restaurant/page.tsx` and `services/page.tsx`
+  already use.
+- **`src/components/guest/venue-card.tsx`:** gained an optional
+  `imageSrc` prop, reusing `RoomVisual` internally for the hero image
+  slot — no new image-rendering logic, no `next/image`, same
+  photograph-or-icon-on-gradient fallback rule as rooms.
+- **`src/lib/guest/knowledgeHighlights.ts`:** added `FacilityVenue` /
+  `deriveFacilityVenues()`, mirroring the existing `DiningVenue` pattern
+  exactly — a facility only gets a named photo card when its concept is
+  actually present in the live `services` content; taglines are
+  minimal, faithful paraphrases in the same voice already approved for
+  Buna Lounge ("A coffee lounge at the hotel.").
+- **`src/app/(guest)/restaurant/page.tsx`:** Axum Restaurant and Buna
+  Lounge cards now pass `imageSrc` from `venuePhotography.ts`.
+- **`src/app/(guest)/services/page.tsx`:** new photo-card grid for
+  Conference Facilities, Fitness Center, and Business Center, gated on
+  the same live-content-presence rule as every existing chip on this
+  page; the existing chip grids and paragraphs are unchanged.
+- **`.gitignore`:** added `public/images/_incoming/` — the intake
+  staging directory (30 integrated + 12 rejected/surplus/superseded
+  files) is never a commit source; only files copied out to their
+  permanent paths above are tracked.
+
 ## Guest Experience Enhancement — Phase D: Room experience + photography-ready architecture (2026-08-29)
 Product Owner-approved. The most visually significant phase of this
 enhancement — transforms `/rooms` and `/rooms/[id]` into a richer
