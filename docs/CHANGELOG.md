@@ -1,5 +1,102 @@
 # Changelog
 
+## M10 — Demo Readiness & Experience Polish, Phase a (2026-09-01)
+Product Owner-approved after an M10 audit of the full guest/booking/
+management/AI-concierge/management-AI journeys on pushed master `20624bb`.
+Five items, priority order. No schema, seed, backend/business-logic,
+booking, auth/RBAC/tenant-isolation, or AI-safety-boundary change; no new
+dependency; photography untouched.
+
+1. **`npm run build` production blocker — root-caused and fixed, no
+   dependency change.** The audit's own initial root-cause finding (an
+   upstream Next.js bug) was itself re-investigated here and found to be
+   **wrong** — corrected rather than left standing. The actual cause,
+   confirmed by direct reproduction: `.env.local`/`.env.example` both
+   hardcoded `NODE_ENV="development"`, and the documented workaround for
+   the Prisma CLI not auto-loading `.env.local` (blanket-sourcing the
+   whole file) leaks that value into `next build`'s own process
+   environment, which is a confirmed trigger for a spurious `<Html>
+   should not be imported outside of pages/_document` crash while
+   prerendering the framework's own built-in `/500`/`/404` page — this
+   project had already diagnosed and fixed this exact failure once before
+   (see the M6b changelog entry), and it had silently regressed. Removed
+   `NODE_ENV` from both files with an explanatory comment in each so it
+   cannot be reintroduced by copying `.env.example` again; Next.js
+   manages `NODE_ENV` itself per-command and never needed it hardcoded.
+   Verified by literally reproducing the original careless invocation
+   (`export $(grep -v '^#' .env.local | xargs) && npm run build`) after
+   the fix: clean build, full 30-route table, and a real `next start`
+   smoke-tested against `/`, `/rooms`, `/concierge`, `/management/login`,
+   and a genuine 404 path, all serving correctly. An experimental `next`
+   patch bump to `15.5.25` (within the already-approved `^15.1.0` range)
+   was tried first per the approved plan, did **not** fix the crash on
+   its own, and was fully reverted (`next@15.5.23` restored) before the
+   real fix was found — recorded so the same dead end isn't retried.
+   Also surfaced and fixed in passing (not a code defect): this
+   environment's `npm ci`/`npm install` silently skips Prisma's
+   postinstall (`prisma generate`) under npm's script-allowlist gate,
+   leaving a stale generated client that manifested as dozens of
+   spurious `tsc`/build type errors — `npx prisma generate` after any
+   fresh install resolves it; worth remembering for any future dependency
+   work in this environment.
+2. **Branded root `not-found.tsx`/`global-error.tsx` (new).** The audit
+   found that any URL matching no defined route group at all (a typo, a
+   stale link, anything outside `(guest)`/`management/(protected)`, both
+   of which already had their own scoped boundaries) fell through to
+   Next's bare unstyled default 404 — confirmed live in dev mode, not
+   just a build-time concern. `src/app/not-found.tsx` reuses the existing
+   `buttonVariants`/design tokens for an on-brand page, deliberately with
+   no tenant/DB read so it stays resilient even if tenant resolution
+   itself is what's broken. `src/app/global-error.tsx` (the much rarer
+   root-layout-crash case) is inline-styled by necessity — it must define
+   its own `<html>`/`<body>` per Next.js convention and cannot depend on
+   the global stylesheet it might be catching a failure of.
+3. **Deterministic mock AI Concierge — specific-room-question precision
+   (`src/lib/ai/providers/mock.ts`).** Per explicit instruction, no live
+   Anthropic dependency was introduced. Asking about one named room type
+   (e.g. "What is the price of the Presidential Suite?") previously
+   always recited the full 5-room catalog verbatim, regardless of what
+   was asked — grounded but unfocused, exactly the kind of moment that
+   reads poorly in a live owner demo. `summarizeRoomTypes()` now checks
+   whether the question names one or more room types by their own live
+   `name` field (never a hardcoded room list) and narrows the reply to
+   just those; a genuine comparison/browse question (no room named)
+   returns the full catalog exactly as before — the existing, deliberate
+   "the mock isn't equipped to reason its way to one answer" design for
+   that case is unchanged. 2 new unit tests added (both scenarios, all 5
+   room types in the live result); all 51 pre-existing mock-provider
+   tests still pass unmodified.
+4. **Management mobile navigation (`src/components/management/nav.tsx`).**
+   The audit found the 10-link nav wrapped into a 4-line tab stack below
+   `lg` — functional (no overflow) but visibly cramped and inconsistent
+   with the guest site's own mobile nav one click away. Reuses that exact
+   pattern (a `<details>`/`<summary>` disclosure, no new dependency, no
+   JS required) at the same `lg` breakpoint the guest header already
+   uses, collapsing into a hamburger below it; the existing active-link
+   highlighting logic is shared by both layouts, extracted into one
+   `NavItem` helper rather than duplicated.
+5. **Hydration-warning re-investigation — not reproducible, no code
+   change.** The audit's own report flagged one intermittent React
+   hydration-mismatch console warning seen once on `/management/
+   reservations` and `/management/guests`. Re-attempted with a clean,
+   single-purpose test harness (no accumulated stale listeners, unlike
+   the audit sweep script that first surfaced it) across 10 total
+   attempts spanning two fresh dev-server starts: 0/10 reproductions.
+   Per the explicit instruction to only change code if a finding is
+   reproducible and root-caused, no code was changed for this item.
+
+**Verified:** `npx prisma generate` (environment fix), `npm run
+typecheck` clean, `npm run lint` clean, `npm run test` **393/393** (391 +
+2 new), `npm run test:integration` **210/210** (unchanged — confirms the
+Prisma-client regeneration didn't alter any query behavior), `npm run
+build` clean end-to-end (including under the original failure-inducing
+invocation), a real `next start` smoke test, and the full relevant
+Playwright suite (`booking`, `concierge`, `contactPage`,
+`xssRegression`, `management`, `managementDashboard` — **36/37 passed, 1
+pre-existing conditional skip, 0 failed**). DB baseline restored after
+every suite that writes data (52 rooms AVAILABLE, 0 guests/reservations/
+service requests/maintenance issues).
+
 ## Photography Integration — Step 3B: 30/30 photography set integrated (2026-08-31)
 Product Owner-approved, following a multi-round audit (Steps 1–2F) of a
 supplied photograph batch — every image visually inspected against a

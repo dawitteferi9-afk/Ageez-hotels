@@ -748,6 +748,65 @@ describe("createMockProvider — guest-experience Phase A: expanded suggested qu
     expect(result.reply).not.toBe(NOT_FOUND_REPLY);
   });
 
+  const ALL_FIVE_ROOM_TYPES = [
+    { name: "Standard King", description: "A comfortable king room with city views.", capacity: 2, basePrice: "4500.00", currency: "ETB" },
+    { name: "Deluxe Twin", description: "A spacious twin room with upgraded amenities.", capacity: 2, basePrice: "5500.00", currency: "ETB" },
+    { name: "Executive Room", description: "An elevated room with a dedicated workspace.", capacity: 2, basePrice: "7000.00", currency: "ETB" },
+    { name: "Family Suite", description: "A multi-bed suite with a separate living area, built for families.", capacity: 4, basePrice: "9500.00", currency: "ETB" },
+    { name: "Presidential Suite", description: "The hotel's premier suite, with a private lounge, dining area, and panoramic views.", capacity: 4, basePrice: "18000.00", currency: "ETB" },
+  ];
+
+  /**
+   * M10 — a question naming ONE specific room type (as opposed to a
+   * comparison/browse question) previously always got the full 5-room
+   * catalog dumped back regardless of what was asked, which read as an
+   * unfocused, robotic answer in a live demo. Confirms the reply is now
+   * narrowed to just the named room type when all 5 are in the live
+   * result, while the "which room is best"/"most premium" comparison
+   * cases above (each already only given ONE room type by their own test
+   * setup) keep their existing full-context behavior unchanged.
+   */
+  it("asking about ONE specific named room type (with all 5 in the live result) narrows the reply to just that room, not the full catalog", async () => {
+    const tool = roomTypesTool(ALL_FIVE_ROOM_TYPES);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "What is the price of the Presidential Suite and what makes it special?" }],
+      tools: [tool],
+    });
+
+    expect(tool.execute).toHaveBeenCalled();
+    expect(result.reply).toContain("Presidential Suite");
+    expect(result.reply).toContain("18000.00");
+    expect(result.reply).not.toBe(NOT_FOUND_REPLY);
+    // Narrowed to the one named room — the other four must not appear.
+    expect(result.reply).not.toContain("Standard King");
+    expect(result.reply).not.toContain("Deluxe Twin");
+    expect(result.reply).not.toContain("Executive Room");
+    expect(result.reply).not.toContain("Family Suite");
+  });
+
+  it("a genuine comparison question ('which room is best for a family?') with all 5 room types in the live result still returns the full catalog, not just one room", async () => {
+    const tool = roomTypesTool(ALL_FIVE_ROOM_TYPES);
+    const provider = createMockProvider();
+
+    const result = await provider.converse({
+      systemPrompt: "irrelevant",
+      history: [{ role: "user", content: "Which room is best for a family?" }],
+      tools: [tool],
+    });
+
+    expect(tool.execute).toHaveBeenCalled();
+    // No single room type is named in the question, so all 5 are described —
+    // the mock still isn't equipped to reason its way to just one answer.
+    expect(result.reply).toContain("Standard King");
+    expect(result.reply).toContain("Deluxe Twin");
+    expect(result.reply).toContain("Executive Room");
+    expect(result.reply).toContain("Family Suite");
+    expect(result.reply).toContain("Presidential Suite");
+  });
+
   it("'How can I verify my booking?' gets a direct, correct answer pointing at the existing Verify My Booking panel — never the misleading PERSONAL_INFO_REPLY, and calls no tool", async () => {
     const knowledge = knowledgeTool({ found: true, category: "policies", content: "irrelevant" });
     const roomTypes = roomTypesTool([]);

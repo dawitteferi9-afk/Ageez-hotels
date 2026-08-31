@@ -401,7 +401,7 @@ export function createMockProvider(): AiProvider {
         if (tool) {
           const result = await tool.execute({});
           toolCalls.push({ name: tool.name, input: {}, result });
-          return { reply: summarizeRoomTypes(result), toolCalls };
+          return { reply: summarizeRoomTypes(result, question), toolCalls };
         }
       }
 
@@ -483,8 +483,20 @@ function summarizeServiceRequests(result: unknown): string {
  * `description` is appended defensively (only when present) so a test
  * double or any future caller that omits it never renders the literal
  * word "undefined".
+ *
+ * M10 — if the question names one or more room types by their own live
+ * `name` (e.g. "What is the price of the Presidential Suite?"), the reply
+ * is narrowed to just those, instead of always reciting the full 5-room
+ * catalog regardless of what was actually asked. Matched against each
+ * room type's own `name` field (never a hardcoded room-name list), so
+ * this stays fully data-driven and never drifts from whatever the seed
+ * currently defines. A genuine comparison/browse question ("which room is
+ * best for a family?", "what room types do you offer?") names no single
+ * room, so `named` stays empty and the full catalog is returned exactly
+ * as before — that decision (full list for comparisons, since the mock
+ * isn't equipped to reason its way to one) is unchanged.
  */
-function summarizeRoomTypes(result: unknown): string {
+function summarizeRoomTypes(result: unknown, question?: string): string {
   const roomTypes = result as Array<{
     name: string;
     description?: string;
@@ -495,7 +507,9 @@ function summarizeRoomTypes(result: unknown): string {
   if (!Array.isArray(roomTypes) || roomTypes.length === 0) {
     return NOT_FOUND_REPLY;
   }
-  return roomTypes
+  const named = question ? roomTypes.filter((rt) => question.includes(rt.name.toLowerCase())) : [];
+  const toDescribe = named.length > 0 ? named : roomTypes;
+  return toDescribe
     .map((rt) => {
       const base = `${rt.name} (up to ${rt.capacity} guests, ${rt.basePrice} ${rt.currency}/night)`;
       return rt.description ? `${base} — ${rt.description}` : base;

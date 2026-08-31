@@ -4,6 +4,63 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-01 — M10 Phase a: the `npm run build` blocker was environment contamination, not an upstream Next.js bug; corrected the M10 audit's own initial finding
+**Status:** Approved and implemented
+**Decision:** The M10 audit initially concluded the build failure was a
+Next.js framework bug (citing several matching upstream GitHub issues)
+because reproducing it under a version bump to `next@15.5.25` produced
+the identical error. That version bump was reverted after failing to fix
+it, and further investigation found this project had already diagnosed
+and fixed the exact same failure once before (M6b): `.env.local`/
+`.env.example` hardcoded `NODE_ENV="development"`, and blanket-sourcing
+`.env.local` before `npm run build` (the standing workaround for the
+Prisma CLI not auto-loading it) leaks that value into `next build`'s own
+process environment, which upstream Next.js does treat as a trigger for
+a spurious `<Html>` prerender crash on its own built-in `/404`/`/500`
+page. That earlier fix had silently regressed (no code enforced it,
+only a changelog note). Rather than re-apply the same easily-forgotten
+verification-practice note, removed `NODE_ENV` from both env files
+outright, with a comment in each explaining why, so the class of mistake
+is no longer possible regardless of how the build command is invoked —
+confirmed by literally reproducing the original careless
+blanket-sourcing invocation after the fix and getting a clean build.
+**Rationale:** A one-line comment saying "don't do X" is weaker than
+making X impossible to do by accident, especially across sessions that
+don't always re-read deep changelog history before investigating a
+"known" issue — this decision exists partly to correct my own audit
+report's wrong initial conclusion in the same pass, rather than letting
+an incorrect root-cause finding stand uncorrected in the historical
+record. See `docs/CHANGELOG.md`'s M10 Phase a entry for full verification
+evidence (including the reverted version-bump experiment and the
+unrelated stale-Prisma-client environment issue it surfaced along the
+way).
+
+## 2026-09-01 — M10 Phase a: mock AI Concierge narrows to a named room type by matching the live `RoomType.name` field, never a hardcoded room list
+**Status:** Approved and implemented
+**Decision:** `summarizeRoomTypes()` in `src/lib/ai/providers/mock.ts`
+now checks whether the guest's question contains one or more room
+types' own `name` values (from the same live `getRoomTypesSummary` tool
+result it already had) and, if so, narrows its reply to just those —
+otherwise it returns the full catalog exactly as before. Deliberately
+matched against the live data itself, not a hardcoded array of the five
+current room-type names, so this can never drift out of sync with the
+seed and never requires a code change if a room type is renamed or
+added. The existing "full catalog for a genuine comparison question"
+behavior (`which room is best for a family?`, `most premium room?`) is
+unchanged and was a previous, already-reasoned decision (the mock isn't
+equipped to reason its way to a single answer for those) — this change
+only affects questions that name one specific room.
+**Rationale:** Per explicit instruction, the live demo must not depend
+on a real Anthropic API key, so the fix had to live in the deterministic
+mock rather than by switching providers. Reciting all 5 room types
+verbatim in response to a question about one specific, named room read
+as unfocused and robotic in the M10 audit's live test — a real
+first-impression risk for an owner demonstration — while still being
+technically "grounded" and therefore easy to overlook as a genuine
+defect rather than a UX gap.
+
+---
+
 ## 2026-08-31 — Photography Integration Step 3B: `VenuePhotographySet` mirrors `RoomPhotographySet`; facility photo cards derive from live `services` content, not a new fact
 **Status:** Approved and implemented
 **Decision:** Introduced `src/lib/guest/venuePhotography.ts`
