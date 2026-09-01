@@ -4,6 +4,44 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-02 — M12 Phase 2A: Earth Zoom poster uses the canonical exterior still, not a video-extracted frame; two content-quality issues flagged, not silently accepted
+**Status:** Approved and implemented (poster choice); flagged content
+issues are **open — require a Phase 2B Product Owner decision**, not
+resolved by this entry.
+**Decision:** (1) The Earth Zoom scene's poster/static/reduced-motion
+fallback image is a direct copy of the separately-supplied canonical
+hotel exterior still, not a frame extracted from the Earth Zoom video
+itself — because the video's actual final ~3.5s contain a person
+(motion-blurred at ~6.5s, large and camera-facing by ~7.5–8.5s through the
+10.04s end), which breaks the "no people" convention enforced throughout
+the photography set and all M11 panoramas. This keeps every static/
+no-motion viewer path person-free even though the video itself still
+contains the person. (2) The person-in-video issue, and a separate issue
+(garbled/misspelled generated signage — "ADDIS ADABA", illegible
+directional-sign text, garbled "GRAND HOTEL" lettering — visible on the
+Airport Pickup poster and, less critically, in its source video) are
+recorded in `docs/CINEMATIC_ASSET_MANIFEST.md` as **open quality
+limitations**, not silently shipped. Neither asset was regenerated,
+cropped, or trimmed to remove these issues in Phase 2A — asset intake was
+scoped to identification, transformation (audio/faststart), and
+documentation only.
+**Rationale:** CLAUDE.md rule 8 ("don't silently redesign... flag
+deviations as a decision for the Product Owner") and the project's
+established content-audit discipline (M11 panorama audits, 30-slot
+photography audit) both require flagging content issues explicitly rather
+than either silently including or silently discarding assets. Using the
+already-clean exterior still for the static fallback is a low-risk,
+reversible mitigation that costs nothing (the still was already an
+approved, separate deliverable) and does not preempt the Product Owner's
+choice on how to handle the video itself (trim / regenerate / accept as
+an establishing-shot exception).
+**Open question for Phase 2B:** should the Earth Zoom video be trimmed
+before the person becomes prominent (~7s cut point), regenerated without
+a person, or accepted as-is for motion playback given the static fallback
+is already clean? Should the Airport Pickup clip be used despite its
+signage flaws (motion playback de-emphasizes static text) or should a
+regeneration be requested? These are Product Owner calls, not made here.
+
 ## 2026-09-01 — M11 Phase 2: Corridor scene integrated via a linear hotspot chain, not restored as a third teleport target
 **Status:** Approved and implemented
 **Decision:** With the regenerated Corridor panorama classified POC

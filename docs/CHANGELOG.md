@@ -1,5 +1,39 @@
 # Changelog
 
+## M12 Phase 2A — Cinematic asset intake and validation (2026-09-02)
+Product Owner-approved asset intake for the cinematic homepage (M12). No
+homepage/component code, no business logic, no schema/seed/auth/RBAC/tenant
+change — assets only, per explicit Phase 2A scope. Full provenance,
+transformations, and flagged quality limitations recorded in
+`docs/CINEMATIC_ASSET_MANIFEST.md` (new).
+- **`public/videos/hero/` (new):** four hero videos —
+  `earth-zoom-to-hotel.mp4`, `airport-pickup.mp4`,
+  `axum-restaurant-shot-1.mp4`, `axum-restaurant-shot-2.mp4` — identified
+  by actual content (not filename order) from a five-asset external
+  delivery, transformed via lossless remux (audio stripped, faststart
+  applied), and decode-integrity-verified. Total payload ≈18.27 MB.
+- **`public/images/hero/` (new):** four poster/still images —
+  `earth-zoom-poster.jpg` (deliberately the clean exterior still, not a
+  video-extracted frame — see manifest), `airport-pickup-poster.jpg`,
+  `axum-restaurant-poster.jpg`, `ageez-grand-hotel-exterior.jpg`.
+- **`public/videos/_incoming/` (new, git-ignored):** raw video originals
+  preserved under content-identified filenames, mirroring the existing
+  `public/images/_incoming/` intake-staging convention.
+- **`.gitignore`:** added `public/videos/_incoming/`.
+- **`docs/CINEMATIC_ASSET_MANIFEST.md` (new):** full per-asset record,
+  including two flagged content-quality limitations requiring a Phase 2B
+  Product Owner decision — a person visible in the Earth Zoom video's
+  final ~3.5s (mitigated in the static/reduced-motion fallback, not in
+  video playback), and garbled/misspelled generated signage text on the
+  Airport Pickup poster/video.
+- Verified: `ffprobe` technical inspection (codec/resolution/duration/
+  audio) and full-file `ffmpeg` decode checks (exit code 0, no errors) on
+  all 4 transformed videos; `git check-ignore -v` confirms both intake
+  directories are correctly excluded; no application code touched, so no
+  build/typecheck/lint regression risk from this phase.
+- Not yet done: homepage cinematic components, restaurant shot dissolve
+  edit, reduced-motion/lazy-load wiring — all deferred to Phase 2B.
+
 ## M11 — Immersive 3D/360 Hotel Experience, Phase 2: Corridor integration, three-scene walkthrough (2026-09-01)
 Product Owner-approved. Integrates the freshly regenerated, freshly
 interactively-validated Corridor panorama (classified POC USABLE — see

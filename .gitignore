@@ -35,3 +35,9 @@ prisma/dev.db-journal
 # production asset source; only files copied out of here into
 # public/images/rooms|dining|facilities/ are committed.
 public/images/_incoming/
+
+# cinematic video intake staging (M12 Phase 2A) — same discipline as the
+# photography intake above: raw/original video deliverables live here,
+# never a production asset source; only the processed (audio-stripped,
+# faststart) files copied out into public/videos/hero/ are committed.
+public/videos/_incoming/
