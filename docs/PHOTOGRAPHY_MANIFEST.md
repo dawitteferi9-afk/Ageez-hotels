@@ -118,3 +118,46 @@ Step 3B. See `docs/CHANGELOG.md` for the corresponding functional-change
 entry and `docs/DECISIONS.md` for the architectural decisions this phase
 made (facility photo cards on `/services`, the `VenuePhotographySet`
 pattern).
+
+## 360° panorama assets (M11 — immersive tour, `/tour`)
+
+A separate, smaller asset set from the 30 flat photographs above —
+equirectangular 360° images for the immersive tour POC
+(`src/lib/guest/tourConfig.ts`). Same discipline as the flat set: every
+image was audited by actual visual content first (both a static
+pixel-level pass and, before integration, a real interactive spherical
+validation — dragging around an actual sphere-mapped render, not just
+inspecting the flat file), never by transfer/generation order — the
+batch's stated order did not match its actual content and was corrected
+during audit.
+
+| Scene | Source filename (from `_incoming`, content-identified) | Interactive classification | Permanent path |
+|---|---|---|---|
+| Lobby / Reception | `photo_5816514728707166077_y.jpg` | POC USABLE | `public/images/tour/lobby-reception-360.jpg` |
+| Presidential Suite | `photo_5816514728707166075_y.jpg` | POC USABLE | `public/images/tour/presidential-suite-360.jpg` |
+| Corridor / Transition | `photo_5816514728707166076_y.jpg` | **REGENERATE — rejected** | not integrated; remains only in the gitignored `_incoming/` intake directory |
+
+The Corridor scene showed a genuine, interactively-confirmed zenith
+projection defect (a fragmented, kaleidoscope-like ceiling when looking
+straight up) and was excluded from M11 Phase 1 — it is not referenced by
+any code path. Do not add it back without a fresh source image and a
+fresh passing interactive validation pass.
+
+**Fallback images** (shown as Pannellum's `preview` while the 360 texture
+loads, and as the full non-WebGL/accessible fallback path):
+- Presidential Suite reuses an already-approved, already-integrated flat
+  photo of this exact room — `public/images/rooms/presidential-suite/
+  14-presidential-suite-living-room.jpg` (Photography Integration Step
+  3B) — no new asset needed.
+- The Lobby has no equivalent in the original 30-slot set (it was never
+  part of that manifest). `public/images/tour/lobby-reception-fallback.jpg`
+  is a deterministic center crop of the already-approved Lobby
+  panorama above (the reception-desk "hero" region, avoiding the
+  distorted zenith/nadir bands) — no new content was generated, only an
+  existing approved image was cropped.
+
+All three source panoramas remain visible in `public/images/_incoming/`
+(gitignored, never staged) alongside the rest of that batch's rejected
+files (spa, rooftop, cinema, pool, duplicate/surplus, and the superseded
+Slot 30 candidate from Photography Integration) — the Corridor panorama
+joins that same "audited and excluded" set, not deleted, not integrated.

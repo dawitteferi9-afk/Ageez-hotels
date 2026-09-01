@@ -4,6 +4,49 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-01 — M11 Phase 1: `pannellum` chosen over `@photo-sphere-viewer/core`; hardcoded tour config; route isolated outside `(guest)/`
+**Status:** Approved and implemented
+**Decision:** For the two-scene immersive-tour POC, chose `pannellum`
+(zero dependencies, ~70 KB, native multi-scene `hotSpots`/`sceneId` API)
+over `@photo-sphere-viewer/core` (mandatory `three` peer dependency plus
+a separate plugin package for equivalent hotspot/tour functionality,
+likely 700 KB+ combined). Verified via `npm view` before installing:
+license (MIT, same as Photo Sphere Viewer), dependency count (0 vs.
+`three` + plugins), and recent maintenance/security activity (2025/2026
+commits; two historical XSS CVEs, both patched in the pinned 2.5.7 and
+both specific to loading hotspot config from an untrusted external URL —
+an attack surface this integration never exposes, since
+`src/lib/guest/tourConfig.ts` is hardcoded application code, never a
+URL-loaded or user-suppliable config file). `pannellum` ships no
+ES-module types and the published `@types/pannellum` package declares a
+global rather than a module — incompatible with this project's
+`import("pannellum")` dynamic side-effect pattern — so a minimal local
+`src/types/pannellum.d.ts` ambient declaration was added instead of that
+package.
+
+The route lives at `src/app/tour/` — a **top-level** route, deliberately
+outside `src/app/(guest)/` — so it never renders the guest site's
+`SiteHeader`/`SiteFooter` (this is a full-screen immersive experience,
+not a normal content page) and so nothing the guest site's shared layout
+imports ever pulls in `pannellum`; confirmed in the production build
+that the shared "First Load JS" bundle is unchanged. Scene/hotspot
+configuration is hardcoded, single-tenant, presentation-only (same
+"never a source of hotel fact" boundary already established for
+`roomPhotography.ts`/`venuePhotography.ts`) — a real multi-tenant,
+DB-backed scene/hotspot model is explicitly deferred to a later M11
+phase, per the approved POC scope.
+**Rationale:** The approved scope was two scenes and simple hotspot
+navigation — functionality `pannellum` provides natively, with the
+smallest possible dependency and bundle footprint and (per the M11
+architecture audit) the best security-surface story of the two real
+candidates. Isolating the route structurally (not just via code-
+splitting, which Next.js already does per-route by default, but via
+layout placement) keeps "the existing 2D guest website remains
+completely intact and primary" true in an easily-verifiable way, not
+just an intended one.
+
+---
+
 ## 2026-09-01 — M10 Phase b: no code change for the "create → redirect bounces to login" investigation — confirmed a test-harness artifact, not an app defect
 **Status:** Investigated at length; closed, no fix applied
 **Decision:** During the M10 Phase b live rehearsal, every ad-hoc

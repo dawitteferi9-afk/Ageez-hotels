@@ -1,5 +1,86 @@
 # Changelog
 
+## M11 — Immersive 3D/360 Hotel Experience, Phase 1: two-scene panorama tour POC (2026-09-01)
+Product Owner-approved, asset-first-gated (Option A: linked 360°
+equirectangular panoramas + hotspots, per the M11 architecture audit and
+the interactive spherical validation that followed it — see
+`docs/DECISIONS.md`). New, fully isolated, additive route; the standard
+2D guest site and booking flow are completely untouched. No schema, seed,
+backend, booking, auth, RBAC, tenant-isolation, or AI change.
+- **New dependency: `pannellum@2.5.7`** (exact-pinned), the one approved
+  panorama-viewer library. Chosen over `@photo-sphere-viewer/core` after
+  due diligence: zero runtime dependencies of its own (vs. Photo Sphere
+  Viewer's mandatory `three` peer dependency plus a separate hotspot/
+  virtual-tour plugin package), ~70 KB core vs. an estimated 700 KB+
+  combined stack, native `scenes`/`hotSpots`/`sceneId` multi-scene-tour
+  API that matches this POC's exact shape out of the box, MIT license,
+  actively maintained (2025/2026 commit and issue activity; two
+  historical XSS CVEs — CVE-2019-16763 and CVE-2026-27210 — both already
+  patched in this pinned version, and both specific to loading hotspot/
+  scene config from an untrusted external URL, an attack surface this
+  integration structurally never exposes since all tour config is
+  hardcoded in `src/lib/guest/tourConfig.ts`, never loaded from a URL or
+  user input). `npm audit`'s existing 11 pre-existing advisories
+  (`next`'s own transitive `postcss`/`sharp`, Prisma's transitive
+  `deepmerge-ts`) are unrelated to this addition and unchanged by it —
+  confirmed by inspection, not touched (a `next@16` major bump would be
+  required to clear them, explicitly out of this phase's scope).
+- **`src/app/tour/` (new, top-level route, not inside `(guest)/`):**
+  full-screen immersive experience, deliberately outside the guest
+  route group so it never renders `SiteHeader`/`SiteFooter` and so
+  `pannellum` is never imported by anything the normal guest site loads
+  — confirmed in the production build: the shared "First Load JS" bundle
+  (103 kB) is byte-identical before and after this addition; `/tour`
+  carries its own 2.93 kB of route-specific JS, with `pannellum` itself
+  loading as a separate async chunk only when a visitor actually opens
+  `/tour`. `export const dynamic = "force-dynamic"` (same reasoning as
+  `management/maintenance/new/page.tsx`) after the build's own static/
+  dynamic heuristic surprisingly marked this route statically
+  cacheable, which would have baked the Presidential Suite's live price
+  into a build-time snapshot — caught before it shipped.
+- **`src/lib/guest/tourConfig.ts` (new):** hardcoded, presentation-only
+  scene/hotspot config for exactly the two approved scenes (Lobby,
+  Presidential Suite) — same "never a source of hotel fact" boundary as
+  `roomPhotography.ts`/`venuePhotography.ts`. A real multi-tenant,
+  DB-backed scene/hotspot model is explicitly deferred, per the approved
+  scope.
+- **`src/components/tour/panorama-tour.tsx` (new, client component):**
+  the interactive viewer. WebGL-capability detected client-side; when
+  unavailable, renders a plain flat-image + button path with full
+  keyboard/screen-reader access to the same scene switching, the same
+  live room info, and the same booking link — the immersive view is
+  additive, never a requirement to reach booking. `prefers-reduced-motion`
+  disables scene-transition fade animation; `autoRotate` is permanently
+  off regardless (the guest drives all movement, never forced motion).
+  The Presidential Suite's info hotspot reads the room's live `name`/
+  `description`/`capacity`/`basePrice` from the same `RoomType` row every
+  other guest page reads (`src/app/tour/page.tsx`), and its "Book This
+  Room" link goes straight into the existing, untouched
+  `/rooms/[id]/book` route.
+- **`public/images/tour/` (new):** the two approved panoramas, copied in
+  by content identity (not transfer order — see
+  `docs/PHOTOGRAPHY_MANIFEST.md`'s new "360° panorama assets" section for
+  full provenance and the rejected Corridor scene's exclusion), plus a
+  derived flat fallback crop for the Lobby (the Presidential Suite reuses
+  an already-approved existing flat photo instead).
+- **`src/types/pannellum.d.ts` (new):** a minimal local ambient module
+  declaration — `pannellum` ships no ES-module types, and the published
+  `@types/pannellum` package declares a global rather than a module,
+  which doesn't fit this project's dynamic `import("pannellum")` pattern.
+
+**Verified:** `npm run typecheck` clean, `npm run lint` clean, `npm run
+build` clean (bundle-isolation confirmed via the route table above),
+real interactive testing (not just assertions) on desktop (1440px, mouse
+drag, full 360° rotation, zenith, nadir, seam crossing, hotspot scene
+navigation, the info panel's live data and correct booking-link href)
+and mobile (390px, touch drag, no horizontal overflow), the non-WebGL
+fallback path (forced via a test-only canvas-context override — same
+live data and same correct booking link, confirmed keyboard/DOM-visible
+content), and the full standard-site regression suite (`booking`,
+`concierge`, `contactPage`, `xssRegression` — 23/23, confirming the
+existing guest site and booking flow are unaffected) plus the full unit
+suite (393/393). DB baseline restored after every run that wrote data.
+
 ## M10 — Demo Readiness & Experience Polish, Phase b: hotel-owner demo rehearsal (2026-09-01)
 Product Owner-approved. A full live end-to-end rehearsal of the entire
 guest → AI Concierge → booking → staff check-in → guest service request
