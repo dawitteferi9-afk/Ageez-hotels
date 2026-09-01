@@ -135,13 +135,21 @@ during audit.
 |---|---|---|---|
 | Lobby / Reception | `photo_5816514728707166077_y.jpg` | POC USABLE | `public/images/tour/lobby-reception-360.jpg` |
 | Presidential Suite | `photo_5816514728707166075_y.jpg` | POC USABLE | `public/images/tour/presidential-suite-360.jpg` |
-| Corridor / Transition | `photo_5816514728707166076_y.jpg` | **REGENERATE — rejected** | not integrated; remains only in the gitignored `_incoming/` intake directory |
+| Corridor / Transition | `photo_5816850569379909741_y (4).jpg` | **POC USABLE — integrated (Phase 2)** | `public/images/tour/corridor-360.jpg` |
 
-The Corridor scene showed a genuine, interactively-confirmed zenith
-projection defect (a fragmented, kaleidoscope-like ceiling when looking
-straight up) and was excluded from M11 Phase 1 — it is not referenced by
-any code path. Do not add it back without a fresh source image and a
-fresh passing interactive validation pass.
+**Corridor history:** the original candidate (`photo_5816514728707166076_y.jpg`)
+showed a genuine, interactively-confirmed zenith projection defect (a
+fragmented, kaleidoscope-like ceiling when looking straight up) and was
+rejected in M11 Phase 1 — never integrated, never referenced by any code
+path. A freshly regenerated replacement
+(`photo_5816850569379909741_y (4).jpg`, a distinct file with no content
+relation to the rejected one) was audited the same way — static
+pixel-level pass plus a real interactive spherical validation — and
+showed a single, coherent vaulted ceiling at the zenith with no
+fragmentation, classified POC USABLE, and integrated in Phase 2. The
+original rejected file remains in `_incoming/` (gitignored, never
+staged, never referenced) — not deleted, not integrated, kept only as
+part of that batch's audit record.
 
 **Fallback images** (shown as Pannellum's `preview` while the 360 texture
 loads, and as the full non-WebGL/accessible fallback path):
@@ -149,15 +157,18 @@ loads, and as the full non-WebGL/accessible fallback path):
   photo of this exact room — `public/images/rooms/presidential-suite/
   14-presidential-suite-living-room.jpg` (Photography Integration Step
   3B) — no new asset needed.
-- The Lobby has no equivalent in the original 30-slot set (it was never
-  part of that manifest). `public/images/tour/lobby-reception-fallback.jpg`
-  is a deterministic center crop of the already-approved Lobby
-  panorama above (the reception-desk "hero" region, avoiding the
-  distorted zenith/nadir bands) — no new content was generated, only an
-  existing approved image was cropped.
+- The Lobby and Corridor have no equivalent in the original 30-slot set
+  (neither was ever part of that manifest).
+  `public/images/tour/lobby-reception-fallback.jpg` and
+  `public/images/tour/corridor-fallback.jpg` are deterministic center
+  crops of their own already-approved panoramas above (the same
+  "hero region, avoiding the distorted zenith/nadir bands" technique for
+  both) — no new content was generated, only existing approved images
+  were cropped.
 
-All three source panoramas remain visible in `public/images/_incoming/`
+All panorama source files remain visible in `public/images/_incoming/`
 (gitignored, never staged) alongside the rest of that batch's rejected
-files (spa, rooftop, cinema, pool, duplicate/surplus, and the superseded
-Slot 30 candidate from Photography Integration) — the Corridor panorama
-joins that same "audited and excluded" set, not deleted, not integrated.
+files (spa, rooftop, cinema, pool, duplicate/surplus, the superseded
+Slot 30 candidate from Photography Integration, and the original
+rejected Corridor candidate) — nothing in that directory is deleted,
+only ever selectively copied out once approved.

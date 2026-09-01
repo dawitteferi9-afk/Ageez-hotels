@@ -1,5 +1,49 @@
 # Changelog
 
+## M11 — Immersive 3D/360 Hotel Experience, Phase 2: Corridor integration, three-scene walkthrough (2026-09-01)
+Product Owner-approved. Integrates the freshly regenerated, freshly
+interactively-validated Corridor panorama (classified POC USABLE — see
+`docs/DECISIONS.md`'s matching entry) into the Phase 1 tour, completing
+the approved "hotel overview → navigate between areas → enter room"
+walkthrough shape. No schema, seed, backend, booking, auth, RBAC,
+tenant-isolation, or AI change; no new dependency.
+- **`public/images/tour/corridor-360.jpg` (new):** the approved
+  replacement Corridor panorama, copied in by content identity (see
+  `docs/PHOTOGRAPHY_MANIFEST.md`'s updated "360° panorama assets"
+  section) — confirmed byte-distinct from the originally rejected
+  candidate, which remains excluded from every code path.
+  **`public/images/tour/corridor-fallback.jpg` (new):** a derived flat
+  crop of the same approved panorama, same technique as the Lobby's
+  existing fallback — no new content generated.
+- **`src/lib/guest/tourConfig.ts`:** added the `"corridor"` scene and
+  rewired the hotspot topology from a single Lobby↔Presidential-Suite
+  link into a linear chain, Lobby ↔ Corridor ↔ Presidential Suite — the
+  direct Lobby↔Suite hotspot no longer exists, so the tour always passes
+  through the Corridor. `src/components/tour/panorama-tour.tsx` needed
+  **no changes at all**: it was already written generically over
+  `Object.keys(TOUR_SCENES)`/`Object.entries(TOUR_SCENES)`, so a third
+  scene is a pure data change. The Presidential Suite's live-data info
+  hotspot and "Book This Room" link, the always-visible Exit Tour link,
+  the non-WebGL/keyboard/screen-reader fallback path, and
+  `prefers-reduced-motion` handling are all unchanged and reconfirmed
+  working across all three scenes.
+
+**Verified:** `npm run typecheck` clean, `npm run lint` clean, `npm run
+build` clean (bundle-isolation and `force-dynamic` behavior unchanged
+from Phase 1; `/tour`'s own route size only grew from 2.93 kB to 2.99 kB
+— the extra scene's config data, no new dependency), a full interactive
+walkthrough (Lobby → Corridor → Presidential Suite → Corridor → Lobby)
+on desktop (1440px: mouse drag, full 360° rotation, zenith, nadir, seam
+crossing on both the Lobby and the new Corridor scene, hotspot
+navigation, the info panel's live data and correct booking-link href)
+and mobile (390px: touch drag, no horizontal overflow across all three
+scenes), the non-WebGL fallback path re-verified across all three
+scenes with the same live data and same correct booking link, and the
+core standard-site regression suite (`booking`, `concierge`,
+`contactPage` — 18/18, confirming the existing guest site and booking
+flow remain unaffected). DB baseline restored after the run that wrote
+data.
+
 ## M11 — Immersive 3D/360 Hotel Experience, Phase 1: two-scene panorama tour POC (2026-09-01)
 Product Owner-approved, asset-first-gated (Option A: linked 360°
 equirectangular panoramas + hotspots, per the M11 architecture audit and

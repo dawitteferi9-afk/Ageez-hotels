@@ -1,29 +1,37 @@
 /**
- * M11 Phase 1 — presentation-only scene/hotspot configuration for the
- * immersive 360° tour at `/tour`. Mirrors the exact discipline already
- * established by `src/lib/guest/roomPhotography.ts` /
- * `venuePhotography.ts`: this is NOT a source of truth for any hotel
- * business fact — the Presidential Suite's name/description/capacity/
- * price still come from the live `RoomType` row (see
- * `src/app/tour/page.tsx`), never from this file.
+ * M11 — presentation-only scene/hotspot configuration for the immersive
+ * 360° tour at `/tour`. Mirrors the exact discipline already established
+ * by `src/lib/guest/roomPhotography.ts` / `venuePhotography.ts`: this is
+ * NOT a source of truth for any hotel business fact — the Presidential
+ * Suite's name/description/capacity/price still come from the live
+ * `RoomType` row (see `src/app/tour/page.tsx`), never from this file.
  *
- * Approved M11 Phase 1 scope: exactly two scenes (Lobby, Presidential
+ * Approved scope: exactly three scenes (Lobby, Corridor, Presidential
  * Suite), hardcoded to this one demo tenant — a real multi-tenant,
  * DB-backed `TourScene`/`TourHotspot` model is explicitly deferred (see
- * `docs/DECISIONS.md`'s M11 architecture-audit entry). The Corridor scene
- * audited in Step "M11 — Panorama Asset Audit" was REJECTED (zenith
- * projection defect) and is deliberately absent here — do not add it
- * back without a fresh, passing interactive validation pass.
+ * `docs/DECISIONS.md`'s M11 architecture-audit entry).
+ *
+ * Phase 2 — the walkthrough topology is a linear chain,
+ * Lobby ↔ Corridor ↔ Presidential Suite: there is deliberately no direct
+ * Lobby↔Presidential-Suite hotspot any more, so the tour always passes
+ * through the Corridor, matching the approved "hotel overview → navigate
+ * between areas → enter room" journey rather than a single teleport. The
+ * Corridor scene used here is a *replacement* asset — the one originally
+ * audited in Step "M11 — Panorama Asset Audit" was REJECTED (a confirmed
+ * zenith projection defect: a fragmented, kaleidoscope-like ceiling) and
+ * was never integrated; this is a freshly regenerated, freshly
+ * interactively-validated replacement (Step "M11 Phase 2 — Replacement
+ * Corridor Validation", classified POC USABLE) with a coherent zenith.
  *
  * Every panorama path below was selected by visually auditing actual
  * image content, not by transfer/generation order — see
  * `docs/PHOTOGRAPHY_MANIFEST.md`'s "360° panorama assets" section for
- * full provenance (source filename, audit classification, and why the
- * Lobby scene's fallback is a derived crop rather than an existing
- * approved flat photo).
+ * full provenance (source filenames, audit classifications, and why the
+ * Lobby/Corridor scenes' fallbacks are derived crops rather than
+ * existing approved flat photos).
  */
 
-export type TourSceneId = "lobby" | "presidential-suite";
+export type TourSceneId = "lobby" | "corridor" | "presidential-suite";
 
 export interface TourHotspotConfig {
   /** Degrees, -90 (straight down) to 90 (straight up). */
@@ -46,10 +54,10 @@ export interface TourSceneConfig {
    * `preview` (shown instantly while the 360 texture loads) and as the
    * full non-WebGL/reduced-capability fallback. Reuses existing approved
    * flat photography wherever one already exists for this space (the
-   * Presidential Suite does); the Lobby has no equivalent in the
-   * original 30-slot photography set, so its fallback is a flat crop
-   * taken directly from this same approved panorama — no new content
-   * generated, see the manifest entry above.
+   * Presidential Suite does); the Lobby and Corridor have no equivalent
+   * in the original 30-slot photography set, so their fallbacks are flat
+   * crops taken directly from these same approved panoramas — no new
+   * content generated, see the manifest entry above.
    */
   fallbackImageSrc: string;
   fallbackAlt: string;
@@ -69,6 +77,28 @@ export const TOUR_SCENES: Record<TourSceneId, TourSceneConfig> = {
         pitch: -2,
         yaw: 35,
         type: "scene",
+        sceneId: "corridor",
+        text: "Walk to the guest room corridor",
+      },
+    ],
+  },
+  corridor: {
+    name: "Corridor",
+    panoramaSrc: "/images/tour/corridor-360.jpg",
+    fallbackImageSrc: "/images/tour/corridor-fallback.jpg",
+    fallbackAlt: "Ageez Grand Hotel guest room corridor",
+    hotSpots: [
+      {
+        pitch: -2,
+        yaw: 180,
+        type: "scene",
+        sceneId: "lobby",
+        text: "Back to the Lobby",
+      },
+      {
+        pitch: -2,
+        yaw: 0,
+        type: "scene",
         sceneId: "presidential-suite",
         text: "Enter the Presidential Suite",
       },
@@ -87,8 +117,8 @@ export const TOUR_SCENES: Record<TourSceneId, TourSceneConfig> = {
         pitch: -2,
         yaw: 205,
         type: "scene",
-        sceneId: "lobby",
-        text: "Back to the Lobby",
+        sceneId: "corridor",
+        text: "Back to the Corridor",
       },
       {
         pitch: 1,

@@ -4,6 +4,28 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-01 — M11 Phase 2: Corridor scene integrated via a linear hotspot chain, not restored as a third teleport target
+**Status:** Approved and implemented
+**Decision:** With the regenerated Corridor panorama classified POC
+USABLE (fresh interactive spherical validation: coherent zenith, no
+fragmentation — the specific defect that sank the original candidate in
+Phase 1), integrated it by **replacing** the Phase 1 Lobby↔Presidential-
+Suite hotspot pair with a linear chain: Lobby↔Corridor and
+Corridor↔Presidential-Suite. There is no longer any direct Lobby→Suite
+hotspot. `src/components/tour/panorama-tour.tsx` required no code
+change — it already iterated `TOUR_SCENES` generically, so this was a
+pure `src/lib/guest/tourConfig.ts` data change.
+**Rationale:** The approved M11 target journey is "hotel overview →
+lobby → navigate between areas → enter room," a walk *through* the
+hotel, not a menu of teleports — a direct Lobby↔Suite jump was always a
+Phase 1 placeholder standing in for the Corridor while it was rejected,
+not the intended final topology. Now that a passing Corridor asset
+exists, removing the placeholder link (rather than keeping it alongside
+the new Corridor routes) is what actually delivers the approved journey
+shape instead of leaving a shortcut that undercuts it.
+
+---
+
 ## 2026-09-01 — M11 Phase 1: `pannellum` chosen over `@photo-sphere-viewer/core`; hardcoded tour config; route isolated outside `(guest)/`
 **Status:** Approved and implemented
 **Decision:** For the two-scene immersive-tour POC, chose `pannellum`
