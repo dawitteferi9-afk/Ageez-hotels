@@ -4,6 +4,55 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-01 — M10 Phase b: no code change for the "create → redirect bounces to login" investigation — confirmed a test-harness artifact, not an app defect
+**Status:** Investigated at length; closed, no fix applied
+**Decision:** During the M10 Phase b live rehearsal, every ad-hoc
+diagnostic script driving the browser directly via `chromium.launch()` +
+`browser.newPage()` (rather than this project's own `playwright.config.ts`
+test fixtures) consistently reproduced a real-looking failure: submitting
+`/management/maintenance/new`, `/management/staff/new`, or (transiently,
+before isolating stray dev-server processes) `/management/login` itself
+would clear the session cookie (`Set-Cookie: authjs.session-token=;
+Max-Age=0`) and bounce to the login screen instead of landing on the new
+record's detail page. This was chased hard — a reverted speculative
+`revalidatePath()` addition to `reportIssueAction`, full process-hygiene
+cleanup (killing accumulated orphaned `chrome.exe`/`node.exe` processes
+from repeated script runs), a full dev-server restart on a confirmed
+single, uncontested port 3000, and direct inspection of the POST
+response's raw headers — before running the project's own **existing,
+already-passing** dedicated suites (`tests/e2e/managementMaintenance.spec.ts`,
+`managementReservationCreate.spec.ts`, `managementStaff.spec.ts` — 28/28,
+plus `csrfRegression.spec.ts`, which captures and replays this exact
+`createStaffAction` request shape) against the identical server state and
+getting a clean, complete pass every time. That is decisive: the
+create-then-redirect pattern is proven correct by the project's own
+established test harness; every ad-hoc script reproducing the failure
+shares a setup this investigation did not have time to fully isolate
+(most likely an artifact of `chromium.launch()`'s bare default browser
+context versus Playwright's own managed/configured one — not a
+`baseURL` difference, which was tried and made no difference). No
+application code was changed as a result. The literal, unrelated,
+genuinely real finding that came out of the same investigation — a stray
+`npm run dev` process silently forcing a fresh server onto port 3001,
+which *does* break login/redirects because `AUTH_URL` is hardcoded to
+port 3000 — is real and is now documented as a recovery step in
+`docs/DEMO_SCRIPT.md` and `docs/DEMO_READINESS.md`.
+**Rationale:** Per this project's standing rule to only change code for a
+reproducible, root-caused finding, and given the project's own
+comprehensive e2e suite — which exercises the identical user-facing
+flow end-to-end, including a dedicated CSRF-focused test for this exact
+action — passed 28/28 clean, changing `reportIssueAction`/
+`createStaffAction`/`createReservationAction` on the strength of an
+unreproducible ad-hoc script result would have been an unjustified
+change with real risk (these are the app's only three "create and land
+on the new record" flows) against no confirmed defect. Recorded here in
+full rather than silently dropped, per this project's rule against
+quietly abandoning an investigation that consumed real effort — a future
+session hitting the same symptom via raw Playwright scripting should
+start from this entry, not re-derive it.
+
+---
+
 ## 2026-09-01 — M10 Phase a: the `npm run build` blocker was environment contamination, not an upstream Next.js bug; corrected the M10 audit's own initial finding
 **Status:** Approved and implemented
 **Decision:** The M10 audit initially concluded the build failure was a

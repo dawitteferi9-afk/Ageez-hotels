@@ -1,5 +1,45 @@
 # Changelog
 
+## M10 — Demo Readiness & Experience Polish, Phase b: hotel-owner demo rehearsal (2026-09-01)
+Product Owner-approved. A full live end-to-end rehearsal of the entire
+guest → AI Concierge → booking → staff check-in → guest service request
+→ staff resolution → maintenance report → Dashboard/Reports →
+Management AI Assistant story, driven against the real running app (not
+just assertions) on pushed master `b2003ad`, then written up as a
+deterministic, presenter-facing script. No application code changed —
+every flow rehearsed was found already correct; see the matching
+`docs/DECISIONS.md` entry for the one investigation that looked like a
+real bug for a long time and turned out not to be.
+- **`docs/DEMO_SCRIPT.md` — rewritten.** The previous version predated
+  M6/M7 and described AI reporting as "not yet achievable"; it also had
+  no guest Concierge, no service-request workflow, and no photography in
+  its narrative at all. Replaced with the full current story: guest site
+  + photography → AI Concierge (a general policy question, then a
+  specific-named-room question exercising the M10 Phase a precision fix)
+  → booking → Concierge booking verification → a personal reservation
+  question → a guest-proposed, guest-confirmed service request → staff
+  check-in → staff service-request resolution (PENDING → IN_PROGRESS →
+  COMPLETED) → a staff-reported maintenance issue → Dashboard → Reports
+  → 3 Management AI Assistant questions. Every expected on-screen result
+  quoted in the file (booking totals, concierge replies, dashboard KPIs,
+  AI assistant answers) is copied verbatim from an actual run, not
+  invented. Includes a dedicated "Recovery instructions" section for the
+  specific failure modes actually hit during rehearsal (a stray dev
+  server on a competing port, a genuinely dirty DB, a cold-compile pause)
+  and a final-reset step.
+- **`docs/DEMO_READINESS.md`:** cross-referenced the rewritten script,
+  replaced its stale "Primary Demonstration Test" summary with a pointer
+  to the full story, and added the port-3000/`AUTH_URL` warning to its
+  "start the app" step.
+- Mobile (390px) reverified with no horizontal overflow across `/`,
+  `/rooms`, `/rooms/[id]`, `/rooms/[id]/book`, and `/concierge` — the
+  guest-facing portion of the story.
+- Full regression confirms no drift since M10 Phase a: `tests/e2e/
+  managementMaintenance.spec.ts`, `managementReservationCreate.spec.ts`,
+  `managementStaff.spec.ts` (28/28), `csrfRegression.spec.ts` (1/1), plus
+  the live rehearsal itself. DB baseline restored after every run that
+  wrote data.
+
 ## M10 — Demo Readiness & Experience Polish, Phase a (2026-09-01)
 Product Owner-approved after an M10 audit of the full guest/booking/
 management/AI-concierge/management-AI journeys on pushed master `20624bb`.
