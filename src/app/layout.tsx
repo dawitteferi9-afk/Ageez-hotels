@@ -3,9 +3,22 @@ import { Fraunces, Inter } from "next/font/google";
 import { cn } from "@/lib/utils";
 import "@/styles/globals.css";
 
+/**
+ * Review-deployment preparation — same `DEPLOYMENT_STAGE` env var as
+ * `src/app/robots.ts` (see that file's comment for the full rationale):
+ * unset/anything else (local dev, any future real production deployment)
+ * leaves `robots` unset entirely, i.e. normal indexable behavior with no
+ * extra meta tag — production needs zero configuration for this. Only
+ * the temporary review deployment sets `DEPLOYMENT_STAGE=review` to add
+ * a `noindex, nofollow` meta tag as a second, independent signal
+ * alongside `robots.ts`'s `/robots.txt` disallow rule.
+ */
+const isReviewDeployment = process.env.DEPLOYMENT_STAGE === "review";
+
 export const metadata: Metadata = {
   title: "Ageez Hotels",
   description: "Ageez Hotels platform (M0 scaffold — no product pages implemented yet).",
+  ...(isReviewDeployment && { robots: { index: false, follow: false } }),
 };
 
 /**

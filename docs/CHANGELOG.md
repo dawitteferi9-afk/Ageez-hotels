@@ -1,5 +1,42 @@
 # Changelog
 
+## Review-deployment preparation, Phase B — deployment-readiness code change (2026-09-02)
+Product Owner-approved small, reviewable diff preparing the app for a
+temporary public review deployment (Vercel + Neon) — no schema/seed/
+tenant/auth/RBAC/reservation/service-workflow/cinematic change. See
+`docs/DECISIONS.md`'s matching entry for the full audit context.
+- **`package.json`:** added `"postinstall": "prisma generate"` — the
+  existing `db:generate` alias is unchanged; this just makes Prisma
+  Client generation run automatically after `npm install` on any host,
+  rather than relying on `@prisma/client`'s own postinstall behaving
+  consistently across every install-flag combination.
+- **`src/app/robots.ts` (new):** environment-aware `/robots.txt`, gated
+  on a single host-agnostic env var, `DEPLOYMENT_STAGE` — unset (local
+  dev, and any future real production deployment) serves `Allow: /`;
+  `DEPLOYMENT_STAGE=review` serves `Disallow: /`. Not coupled to any
+  hosting provider's own env vars (e.g. `VERCEL_ENV`).
+- **`src/app/layout.tsx`:** same `DEPLOYMENT_STAGE` check adds a
+  `noindex, nofollow` meta tag as a second, independent signal alongside
+  `robots.ts`, only when `DEPLOYMENT_STAGE=review`. Default (unset)
+  behavior is unchanged from before this pass — no meta tag, fully
+  indexable, zero configuration required for production.
+- **`.env.example`:** documented `DEPLOYMENT_STAGE` (placeholder only,
+  per this file's existing convention).
+- Verified: `npm install` (confirms the new `postinstall` hook fires and
+  `prisma generate` succeeds — v6.19.3 client generated cleanly), `npm
+  run typecheck` (clean), `npm run lint` (clean), `npm run build`
+  (clean; `/robots.txt` now appears as a new prerendered static route).
+  Manually confirmed both `DEPLOYMENT_STAGE` states via a local dev
+  server: default → `/robots.txt` allows all, no meta tag; `review` →
+  `/robots.txt` disallows all, `<meta name="robots" content="noindex,
+  nofollow">` present. E2e regression (serial, since the root layout
+  touches every route): `contactPage.spec.ts`, `securityHeaders.spec.ts`,
+  two `booking.spec.ts` tests, `auth.spec.ts` — 12/12 pass.
+- Not yet done (Phase A, provisioning — no code): Neon project, Vercel
+  project, fresh `AUTH_SECRET`/`CONCIERGE_TOKEN_SECRET`, rotated review-
+  environment staff password. No remote database created or modified.
+  Not pushed.
+
 ## M12 Phase 3 — Cinematic homepage polish pass (2026-09-02)
 Product Owner-approved focused polish pass on top of Phase 2B (`75bc7eb`),
 after a live visual review of the running homepage. No redesign, no new

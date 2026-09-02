@@ -4,6 +4,44 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-02 — Review deployment: Vercel + Neon, Option B management credentials, mock-only AI, environment-aware noindex
+**Status:** Approved (audit + Phase A/B); Phase A provisioning and the
+actual deployment are not yet executed as of this entry.
+**Decision:** A temporary, public, HTTPS review deployment (not the
+production launch) will use Vercel (Hobby/free) for the Next.js app and
+Neon (free tier, pooled connection string) for PostgreSQL. Management
+routes stay reachable (Option B, not disabled) but the shared, publicly-
+documented demo password (`AgeezDemo2026!`, committed in
+`docs/DEMO_SCRIPT.md`/`DEMO_READINESS.md`/the seed source) will be
+rotated to a fresh, temporary, never-committed password for the review
+environment's seeded staff accounts only — the normal local-dev seed
+password is explicitly NOT changed by this work. The friend reviewing
+the app receives only the guest-site URL, not management credentials.
+`AI_PROVIDER=mock` for the first review deployment — no `ANTHROPIC_API_KEY`
+is configured or exposed; real AI is an explicit future decision, not
+bundled into this one. Search-engine indexing is controlled by a new,
+single, host-agnostic env var, `DEPLOYMENT_STAGE` (`"review"` on the
+temporary deployment only) rather than any permanent or hosting-specific
+mechanism, so a future real production deployment needs zero
+configuration to remain fully indexable.
+**Rationale:** Full audit (architecture, hosting comparison, cost,
+security posture) preceded this decision — see the "AGEEZ HOTELS —
+REVIEW DEPLOYMENT AUDIT" conversation record for the complete reasoning.
+Key points worth preserving here: (1) `trustHost: true` already present
+in `src/lib/auth/config.ts` means no Auth.js code change is needed for a
+new public URL, only `AUTH_URL`/`AUTH_SECRET` env values; (2) the shared
+demo password was the one concrete, non-hypothetical security gap found
+by the audit — rotating it is a data-only change scoped to the review
+database, never a code or seed-default change; (3) Neon's *pooled*
+connection string is required for `DATABASE_URL` on a serverless host to
+avoid exhausting Postgres connections — a setup detail to get right
+during Phase A provisioning, not a code change; (4) the existing
+in-memory rate limiter (`src/lib/ai/rateLimiter.ts`) is already
+documented as non-distributed-safe — worth knowing on a serverless host,
+not a new gap introduced by this deployment.
+
+---
+
 ## 2026-09-02 — M12 Phase 3: video mount lifecycle fixed to genuinely persist (not just documented that way); header left unchanged
 **Status:** Approved and implemented
 **Decision:** Two Phase 3 choices worth recording:
