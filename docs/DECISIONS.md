@@ -4,6 +4,50 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-02 — M12 Phase 3: video mount lifecycle fixed to genuinely persist (not just documented that way); header left unchanged
+**Status:** Approved and implemented
+**Decision:** Two Phase 3 choices worth recording:
+
+1. **`CinematicScene`/`RestaurantDissolveScene` no longer conditionally
+   mount/unmount their `<video>` element on every `inView` transition.**
+   Phase 2B's own doc comment already *claimed* "paused (not unmounted)
+   once it scrolls sufficiently off-screen," but the actual JSX
+   (`{shouldMountVideo && <video/>}`, with `shouldMountVideo` derived
+   directly from `inView`) unmounted and remounted the element on every
+   visibility flip — a real gap between intent and implementation that a
+   live visual review surfaced (scrolling a finished scene back into view
+   replayed it from frame 0). Fixed by mounting once, the first time a
+   scene is needed, and never unmounting again — `inView` now only
+   drives `play()`/`pause()`, which is what the original comment
+   described. A second, independent fix (`hasEndedRef`/`shot1EndedRef`/
+   `shot2EndedRef`) blocks `play()` once a clip has already reached
+   `ended`, since a non-looping HTML5 `<video>` restarts from 0 on its
+   next `play()` call by spec regardless of the mount fix. Both were
+   needed; either alone would have left the replay possible in some
+   scroll pattern.
+2. **`SiteHeader` was left structurally unchanged in this phase**, despite
+   Priority 4 asking that navigation "not visually overpower the
+   cinematic opening." Assessment: the header is already a modest,
+   ~80px, non-overlapping bar that scrolls away in normal document flow
+   — it does not currently overpower the video, so no change was judged
+   necessary. A transparent/floating header treatment was considered and
+   rejected for this pass specifically because Phase 2B's header fix
+   (`relative z-50`, see that entry above) was itself a correctness fix
+   for a real stacking-context regression the cinematic hero introduced;
+   layering another structural header change on top of that so soon,
+   without a specific defect driving it, was judged to trade a real,
+   already-fixed risk for a speculative visual one. If the Product Owner
+   still wants a lighter-weight header treatment after seeing this pass,
+   that should be its own scoped follow-up, not bundled into this fix.
+**Rationale:** CLAUDE.md rule 1 (don't claim something works without
+verifying) applied retroactively here — the Phase 2B doc comment's claim
+turned out to be inaccurate, and Phase 3 corrected both the code and the
+comment together, with a Playwright test asserting the fix directly
+(`currentTime`/`paused` before and after a deliberate scroll-away-and-
+back past `ended`) rather than trusting a visual impression alone.
+
+---
+
 ## 2026-09-02 — M12 Phase 2B: cinematic homepage architecture, restaurant reuse, and a header stacking-context fix
 **Status:** Approved and implemented
 **Decision:** Several implementation choices made while building the

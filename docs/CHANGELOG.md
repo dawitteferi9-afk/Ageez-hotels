@@ -1,5 +1,76 @@
 # Changelog
 
+## M12 Phase 3 — Cinematic homepage polish pass (2026-09-02)
+Product Owner-approved focused polish pass on top of Phase 2B (`75bc7eb`),
+after a live visual review of the running homepage. No redesign, no new
+AI video, no new dependency, no push. Scope: pacing/continuity of the
+existing 4-scene sequence and restrained motion on the sections after it.
+- **Fixed a real bug, the main driver of "feels like separate
+  background videos":** `CinematicScene`'s `<video>` was being
+  unmounted/remounted on every `inView` transition (contrary to its own
+  doc comment's stated intent), and — independently — a finished,
+  non-looping `<video>` restarts from frame 0 on its next `play()` call
+  per the HTML spec. Combined, scrolling a finished scene back into view
+  (e.g. scrolling down past the hero, then back up slightly to re-read
+  the tagline — an extremely ordinary scroll gesture) replayed the
+  *entire* clip from the start, most visibly the full Earth → Ethiopia →
+  hotel flight playing again. Fixed in both `CinematicScene.tsx` and
+  `RestaurantDissolveScene.tsx`: each video now mounts once and is never
+  unmounted again, and an `ended` ref blocks any further `play()` call
+  once a clip has finished — a completed scene now just holds its final
+  frame, permanently, matching the intended one-way narrative. Verified
+  with a Playwright test asserting `currentTime`/`paused` state before
+  and after a deliberate scroll-away-and-back once the video had reached
+  `ended`.
+- **Cross-scene visual continuity:** every `CinematicScene` and
+  `RestaurantDissolveScene` now renders a persistent, subtle top/bottom
+  dark vignette (independent of video/reduced-motion state, so it's
+  present even in the poster-only path) — the same treatment on every
+  scene, so an otherwise-unrelated hotel exterior / airport terminal /
+  restaurant interior read as chapters sharing one visual language
+  instead of a hard content-to-content cut at each boundary.
+- **Restaurant Shot 1 → Shot 2 continuity:** both video layers now carry
+  a slow, continuous `scale-105` drift that starts the instant they
+  mount (before either is visible) and keeps running underneath the
+  existing opacity crossfade — because both are on the same clock, Shot
+  2 picks up the push-in already in progress when it fades up instead of
+  snapping to a static frame, reading closer to one continuous shot.
+- **Hero → normal content transition:** a short decorative
+  dark-to-parchment gradient band now bridges the end of the cinematic
+  sequence into the Room Highlights section, replacing the previous hard
+  boundary between the Restaurant scene's dark final frame and a bright
+  section start.
+- **Hero readability:** the Scene 1 text scrim strengthened slightly
+  (`/85`→`/90` at its darkest, `/35`→`/45` at mid-gradient) for
+  robustness across the video's brighter early frames; still a gradient
+  scrim, not an opaque box.
+- **Normal-section motion:** Room Highlights cards now reveal as an
+  individually-staggered cascade (`Reveal`'s new optional `delayMs`,
+  80ms per card) instead of the whole grid fading in as one block, plus
+  a small restrained hover lift (`.cinematic-media-frame`'s existing
+  Ken-Burns hover zoom is unchanged/additive). Kept intentionally subtle
+  per "do not make every card move aggressively."
+- **Assessed, not changed:** header/navigation visual weight (Priority
+  4) — the header is already a modest, non-overlapping ~80px bar that
+  scrolls away normally; it was not judged to be "overpowering" the
+  cinematic opening, and changing its positioning (e.g. to a
+  transparent/floating treatment) was judged higher regression risk
+  than benefit so soon after Phase 2B's header stacking-context fix — see
+  `docs/DECISIONS.md`.
+- Verified: `npm run typecheck` (clean), `npm run lint` (clean), `npm run
+  build` (clean, `/` 1.95→2.25 kB, `/restaurant` 1.15→1.27 kB — both
+  minor). E2e regression (serial): `contactPage.spec.ts`,
+  `securityHeaders.spec.ts`, `booking.spec.ts` (the 3 date-independent
+  tests — the 4th, fixed-date inventory-exhaustion test was skipped here
+  as a known pre-existing same-day-rerun artifact, not re-litigated),
+  `auth.spec.ts`, `management.spec.ts` — all pass. Dedicated Playwright
+  checks: the no-replay-after-`ended` fix (asserted directly via
+  `currentTime`/`paused`), zero `<video>` elements under
+  `prefers-reduced-motion: reduce`, restaurant banner still renders, and
+  keyboard Tab still never focuses a `<video>`. Manual desktop
+  (1440×900, full scroll-through) and mobile (390×844) screenshots
+  confirmed the intended visual result.
+
 ## M12 Phase 2B — Cinematic homepage implementation (2026-09-02)
 Product Owner-approved implementation of the M12 cinematic guest
 experience, built on the Phase 2A assets. No schema/seed/auth/RBAC/

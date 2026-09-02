@@ -17,15 +17,22 @@ import { cn } from "@/lib/utils";
  * component) forces full, static visibility — see the reduced-motion
  * block in `globals.css` — so this component doesn't need its own
  * reduced-motion branch.
+ *
+ * M12 Phase 3 — optional `delayMs` staggers a group of `Reveal`s (e.g.
+ * one per room card) so they rise in as a gentle cascade rather than all
+ * at once, per the Product Owner's "layered reveal" request. Omitted
+ * (the default), every `Reveal` still fires together, exactly as before.
  */
 export function Reveal({
   children,
   className,
   as: Tag = "div",
+  delayMs = 0,
 }: {
   children: ReactNode;
   className?: string;
   as?: "div" | "section";
+  delayMs?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
@@ -51,7 +58,11 @@ export function Reveal({
 
   const Comp = Tag as "div";
   return (
-    <Comp ref={ref} className={cn("cinematic-reveal", visible && "is-visible", className)}>
+    <Comp
+      ref={ref}
+      className={cn("cinematic-reveal", visible && "is-visible", className)}
+      style={delayMs ? { transitionDelay: `${delayMs}ms` } : undefined}
+    >
       {children}
     </Comp>
   );

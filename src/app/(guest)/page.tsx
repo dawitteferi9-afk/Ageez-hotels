@@ -31,6 +31,15 @@ import { cn } from "@/lib/utils";
  * hover-triggered Ken-Burns zoom (`.cinematic-media-frame` in
  * `globals.css`) — CSS only, no shared component touched, so `/rooms`,
  * `/rooms/[id]`, and `/services` are unaffected.
+ *
+ * M12 Phase 3 (polish pass) — hero scrim strengthened slightly for
+ * contrast robustness; a decorative dark→parchment gradient band bridges
+ * the cinematic sequence into the normal homepage; room cards now reveal
+ * as an individually-staggered cascade (`delayMs`) with a small hover
+ * lift (`.cinematic-lift`) layered on the existing Ken-Burns zoom. The
+ * actual scene-to-scene continuity work (no-replay-on-scroll-back,
+ * cross-scene vignettes, the restaurant dissolve's continued push-in)
+ * lives in `src/components/guest/cinematic/` itself, not here.
  */
 export default async function GuestHomePage() {
   const hotel = await getCurrentTenantHotel();
@@ -57,7 +66,7 @@ export default async function GuestHomePage() {
                 purely a contrast aid, not part of any asset. */}
             <div
               aria-hidden
-              className="pointer-events-none absolute inset-0 bg-gradient-to-t from-basalt-950/85 via-basalt-950/35 to-transparent"
+              className="pointer-events-none absolute inset-0 bg-gradient-to-t from-basalt-950/90 via-basalt-950/45 to-transparent"
             />
             <Container className="pointer-events-auto relative flex flex-col gap-6 pb-16 pt-32 text-parchment-50">
               <p className="text-sm uppercase tracking-[0.2em] text-ochre-400">
@@ -99,6 +108,16 @@ export default async function GuestHomePage() {
         }
       />
 
+      {/*
+        M12 Phase 3 — a short dark-to-parchment gradient bridge, so the
+        cinematic sequence's dark tone eases into the normal homepage's
+        light background instead of cutting straight from the Restaurant
+        scene's dark final frame to a bright section boundary ("avoid the
+        feeling that the cinematic experience suddenly stops and an
+        unrelated normal website begins"). Purely decorative, no content.
+      */}
+      <div aria-hidden className="h-16 w-full bg-gradient-to-b from-basalt-950 to-parchment-50 md:h-24" />
+
       <section className="py-20">
         <Container className="flex flex-col gap-10">
           <Reveal className="flex flex-col gap-2">
@@ -111,9 +130,16 @@ export default async function GuestHomePage() {
               in total.
             </p>
           </Reveal>
-          <Reveal className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3" as="div">
+          {/*
+            M12 Phase 3 — each card gets its own `Reveal` with a small
+            increasing delay (a "layered reveal" cascade, per the Product
+            Owner's request) instead of the whole grid fading in as one
+            flat block. `cinematic-media-frame` (hover Ken-Burns) and a
+            restrained hover lift are unchanged/additive.
+          */}
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {roomTypes.map((rt, i) => (
-              <div key={rt.id} className="cinematic-media-frame rounded-lg">
+              <Reveal key={rt.id} delayMs={i * 80} className="cinematic-lift cinematic-media-frame rounded-lg">
                 <RoomTypeCard
                   id={rt.id}
                   name={rt.name}
@@ -123,9 +149,9 @@ export default async function GuestHomePage() {
                   currency={rt.currency}
                   roomCount={roomCounts[i]}
                 />
-              </div>
+              </Reveal>
             ))}
-          </Reveal>
+          </div>
         </Container>
       </section>
 
