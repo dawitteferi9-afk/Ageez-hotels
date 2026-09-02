@@ -4,6 +4,89 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-03 — Multilingual Support Phase 1: middleware relocated to `src/middleware.ts` (a real, pre-existing detection bug, not a redesign); next-intl routing/config choices
+**Status:** Approved and implemented
+**Decision, and the discovery behind it:** While implementing Phase 1's
+locked "default-locale-unprefixed" routing — which depends on
+`middleware.ts` actually executing a locale rewrite for every unprefixed
+request — `/` and every guest route 404'd even though the exact,
+unmodified, git-committed `middleware.ts` (root-level since M4) was in
+place. Root-caused by process of elimination, not guesswork: a bare,
+`next-auth`-free middleware also failed; a from-scratch, disposable
+Next.js scaffold built outside this project (to rule out the project's
+own code/config) worked immediately with the same file content at the
+project root; the differentiator turned out to be that scaffold's *lack*
+of a `src/` directory. Next.js does not detect (and does not warn about)
+a root-level `middleware.ts` when the app itself lives under `src/app` —
+it must be `src/middleware.ts`. Moving it there fixed detection
+immediately, confirmed via `.next/server/middleware-manifest.json` going
+from `{"middleware": {}}` to populated, a "ƒ Middleware" line appearing
+in `next build`'s route summary for the first time, and the
+`/management` auth redirect changing from a ~15s page-render-then-throw
+(the `requireStaffAccess()` defense-in-depth path) to a ~700ms
+middleware-level redirect.
+**Rationale for recording this prominently:** this means the
+`/management/*` auth gate's *middleware layer* has likely never actually
+executed in this project, for any milestone before this one — entirely
+masked by `requireStaffAccess()`'s independent, page-level re-check,
+which is precisely the failure mode that defense-in-depth pattern exists
+to catch, and did, once this milestone's own correctness depended on
+middleware genuinely running. No auth/RBAC/tenant-isolation *logic*
+changed — the exact same file, moved to the location Next.js actually
+reads. CLAUDE.md rule 1 (never claim something works without having
+verified it) applied in reverse here: a past claim ("the auth gate
+works") turned out to have been verified only through a redundant path,
+not the one it was designed around — worth knowing for any future work
+that touches `middleware.ts` or assumes its matcher/`authorized()`
+callback is the enforcement point in practice, not just in the code's own
+comments.
+**Routing/config choices made alongside this, for the record:**
+- `localePrefix: "as-needed"` + `localeDetection: false`
+  (`src/i18n/routing.ts`) — the default locale is served unprefixed with
+  **no** Accept-Language/cookie-based auto-redirect on unprefixed paths.
+  Considered and rejected: leaving `localeDetection` on (next-intl's
+  default) would let the middleware 302-redirect *any* unprefixed URL —
+  including a real guest's bookmarked `/rooms` or a booking-confirmation
+  email link — to a different locale-prefixed URL for a visitor whose
+  browser/cookie indicates a non-English preference, which directly
+  conflicts with the locked "preserve every existing unprefixed English
+  URL / preserve existing booking links" requirement, read as a
+  deterministic guarantee, not a best-effort one.
+- `NextIntlClientProvider` (`messages={{}}`, no catalogs yet) is required
+  in `src/app/[locale]/(guest)/layout.tsx` even before Phase 2's
+  translations exist, because the language switcher's `usePathname`/
+  `useRouter` (next-intl's locale-aware navigation) read the current
+  locale from this context, not only from the URL — confirmed by an
+  actual runtime crash ("No intl context found") during verification,
+  not assumed from the docs.
+- `src/components/guest/html-attributes-sync.tsx` (new) — a client-side
+  `<html lang>`/`dir` sync, needed because the *true* root layout (the
+  only place `<html>` can be rendered, since it must also serve
+  `/management/*` and `/tour`, outside `[locale]`) doesn't re-run on a
+  client-side navigation between two `[locale]` values; without it, an
+  Arabic switch left the page LTR until a hard reload. Found the same
+  way as the middleware issue: by testing the actual behavior end-to-end
+  in Playwright, not by inspecting the code and assuming it worked.
+- `/tour` was deliberately left outside `[locale]` and excluded from
+  `middleware.ts`'s intl branch — it has no corresponding
+  `[locale]/tour` route, and `as-needed` prefix rewriting would otherwise
+  try to route it to `/en/tour` and 404 the entire 360° tour. Localizing
+  `/tour` is an explicit future choice, not something this phase should
+  do as a side effect.
+- Testing `Hotel.enabledLocales`' tenant-isolation guarantee at the full
+  HTTP level (a *different* tenant's disabled locale actually 404s
+  through a real request) isn't possible in this milestone's single-
+  tenant-demo architecture — `getCurrentTenantHotel()` always resolves
+  the one seeded hotel regardless of which fixture hotel a test creates.
+  Covered instead at the data/gating-logic layer
+  (`tests/integration/hotelEnabledLocales.test.ts`,
+  `tests/unit/guest/locale.test.ts`) — accepted as the correct scope for
+  this phase rather than building real multi-tenant HTTP resolution
+  (host- or path-based) just to test one column, which would itself be a
+  significant, unapproved architecture change.
+
+---
+
 ## 2026-09-02 — Review deployment: Vercel + Neon, Option B management credentials, mock-only AI, environment-aware noindex
 **Status:** Approved (audit + Phase A/B); Phase A provisioning and the
 actual deployment are not yet executed as of this entry.

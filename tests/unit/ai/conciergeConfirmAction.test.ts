@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { confirmServiceRequestAction } from "../../../src/app/(guest)/concierge/actions";
+import { confirmServiceRequestAction } from "../../../src/app/[locale]/(guest)/concierge/actions";
 import { resetRateLimiterForTests } from "../../../src/lib/ai/rateLimiter";
 
 /**

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
-import { verifyReservationContextAction } from "../../../src/app/(guest)/concierge/actions";
+import { verifyReservationContextAction } from "../../../src/app/[locale]/(guest)/concierge/actions";
 import { resetRateLimiterForTests } from "../../../src/lib/ai/rateLimiter";
 
 /**

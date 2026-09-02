@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Fraunces, Inter } from "next/font/google";
+import { getLocale } from "next-intl/server";
 import { cn } from "@/lib/utils";
+import { isRtlLocale } from "@/i18n/routing";
 import "@/styles/globals.css";
 
 /**
@@ -62,10 +64,26 @@ const inter = Inter({
  * Root layout. Deliberately generic in M0: no Ageez Grand Hotel branding is
  * applied here. Per-hotel branding will be resolved from tenant data starting
  * in M2/M3 via src/lib/tenant, not hardcoded in this file.
+ *
+ * Multilingual Support Phase 1 — this is the ONLY place `<html>`/`<body>`
+ * are rendered (Next.js requirement: exactly one true root layout for the
+ * whole app), so it must serve every route, localized or not —
+ * `/management/*`, `/tour`, `/api/*` included, none of which live under
+ * the `[locale]` segment. `getLocale()` (from `next-intl/server`) resolves
+ * the current request's locale via `src/i18n/request.ts`'s
+ * `getRequestConfig`, which safely falls back to `routing.defaultLocale`
+ * ("en") for any request that never went through locale routing at all —
+ * so this call never throws for a management/tour/api request, it just
+ * always reports "en" there, exactly as before this milestone. `dir`
+ * follows the resolved locale: `rtl` for Arabic, `ltr` for every other
+ * locale (`isRtlLocale()`, `src/i18n/routing.ts`).
  */
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const locale = await getLocale();
+  const dir = isRtlLocale(locale) ? "rtl" : "ltr";
+
   return (
-    <html lang="en" className={cn(fraunces.variable, inter.variable)}>
+    <html lang={locale} dir={dir} className={cn(fraunces.variable, inter.variable)}>
       <body className="font-body bg-parchment-50 text-basalt-950 antialiased">{children}</body>
     </html>
   );

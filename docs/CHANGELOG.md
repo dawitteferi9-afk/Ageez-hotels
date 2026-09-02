@@ -1,5 +1,114 @@
 # Changelog
 
+## Multilingual Support Phase 1 — routing/locale foundation (2026-09-03)
+Product Owner-approved foundation for guest-site multilingual support:
+`en` (default), `am`, `zh`, `es`, `ar` (RTL), default-locale-unprefixed
+routing, per-tenant enabled-locale configuration, a language switcher.
+Guest content is still English-only this phase — the ~1,600-line UI-
+string extraction is Phase 2, hotel-content translation tables (`RoomType`/
+`AiKnowledgeDocument`) are Phase 3, AI Concierge language-awareness is
+Phase 4. No schema/logic change to auth, RBAC, tenant isolation,
+reservations, service workflows, management routes, or the cinematic
+system.
+- **Added `next-intl` (^4.14.2), the one new dependency approved for this
+  phase.** `src/i18n/routing.ts` (locale list, `localePrefix: "as-needed"`,
+  `localeDetection: false` — see that file's own comment for why automatic
+  browser-language redirects are deliberately off, to guarantee every
+  existing unprefixed URL and booking-confirmation link keeps resolving
+  identically for every visitor), `src/i18n/navigation.ts` (locale-aware
+  `Link`/`usePathname`/`useRouter`, used only by the language switcher —
+  every other existing `<Link>` in the app is untouched this phase),
+  `src/i18n/request.ts` (locale resolution; `messages: {}` — no catalogs
+  yet).
+- **Route restructuring:** `src/app/(guest)/` moved to
+  `src/app/[locale]/(guest)/` (`git mv`, no page logic changed) so
+  `/rooms`, `/restaurant`, etc. keep their exact existing URLs (English,
+  unprefixed) while `/am/rooms`, `/zh/...`, `/es/...`, `/ar/...` become
+  reachable for the same pages. `/management/*`, `/tour`, `/api/*`
+  deliberately stay outside `[locale]`, entirely unaffected.
+- **Critical infrastructure fix, found during this phase's own
+  verification, not caused by it:** `middleware.ts` — present at the
+  project root since M4 — was moved to `src/middleware.ts`. Next.js
+  silently never detects/executes a root-level `middleware.ts` once a
+  project uses a `src/` directory for `src/app`; this was true of the
+  file's *original, unmodified* content too (confirmed directly:
+  restoring the exact pre-Phase-1 file at the root left it equally
+  undetected). The `/management/*` auth gate had been "working" this
+  entire time only because `requireStaffAccess()` independently
+  re-checks authentication at the page level as defense in depth —
+  exactly the failure mode that pattern exists to catch. Diagnosed by
+  isolating the bug in a disposable, throwaway Next.js scaffold outside
+  this project (confirming it wasn't this project's code) before finding
+  the root cause. See `docs/DECISIONS.md`'s matching entry.
+- **`prisma/schema.prisma` / migration `20260902204841_add_hotel_enabled_locales`:**
+  added `Hotel.enabledLocales String[] @default(["en"])`, following the
+  exact existing `enabledModules` per-tenant-toggle pattern. Safe,
+  additive `ALTER TABLE ... ADD COLUMN` — verified via `prisma migrate
+  dev` against local Postgres, `prisma validate`, and a dedicated
+  integration test (`tests/integration/hotelEnabledLocales.test.ts`)
+  proving both the schema round-trip and per-tenant isolation (two
+  fixture hotels with different `enabledLocales` never see each other's
+  value).
+- **`src/config/defaults/seed/ageez-grand-hotel.ts` /
+  `prisma/seed/index.ts`:** the demo tenant now seeds
+  `enabledLocales: ["en", "am", "zh", "es", "ar"]` (all five, to exercise
+  the full routing/switcher surface for the demo).
+- **`src/app/[locale]/(guest)/layout.tsx`:** two-layer locale gate —
+  `hasLocale(routing.locales, locale)` (an unrecognized segment like
+  `/fr/rooms` 404s; the bare `[locale]` dynamic segment would otherwise
+  match any string) and `isLocaleEnabledForHotel(locale,
+  hotel.enabledLocales)` (a recognized-but-tenant-disabled locale also
+  404s — "disabled locale cannot be accessed for a tenant"). `locale`
+  itself is ordinary URL/request context, never treated as a trust
+  boundary; `hotel.enabledLocales` is always server-resolved via the
+  existing, unmodified `getCurrentTenantHotel()`.
+- **`src/components/guest/language-switcher.tsx` (new):** a native
+  `<select>` (full keyboard/screen-reader semantics for free), listing
+  only the current hotel's enabled locales, wired into `SiteHeader` in
+  both the desktop nav and the mobile menu. Switching uses next-intl's
+  locale-aware router to land on the equivalent page in the new locale.
+- **`src/components/guest/html-attributes-sync.tsx` (new), a second bug
+  found during e2e verification:** a client-side locale switch (the
+  switcher) doesn't re-invoke the true root layout's `getLocale()` (Next
+  App Router only re-renders the `[locale]` segment and below on that
+  kind of navigation), so `<html lang>`/`<html dir>` would otherwise
+  stay stale — e.g. switching to Arabic wouldn't flip the page to RTL
+  without a hard reload. This component syncs both attributes on the
+  client after every locale change.
+- **`src/app/layout.tsx`:** now resolves `lang`/`dir` via `getLocale()`/
+  `isRtlLocale()` instead of a hardcoded `lang="en"` — this is the one
+  true root layout, serving every route including `/management/*` and
+  `/tour`, both of which correctly continue to resolve as `en`/`ltr`
+  with zero configuration of their own.
+- Verified: `npm install` (postinstall/`prisma generate` clean),
+  `prisma validate`, `npm run typecheck` (clean), `npm run lint` (clean),
+  `npm run build` (clean — compiles with a pre-existing, non-fatal
+  `next-auth`/`jose` Edge Runtime compatibility warning newly *visible*
+  now that middleware actually compiles, not newly introduced; the JWE
+  code path it flags isn't used by this app's plain signed-JWT sessions).
+  399/399 unit tests (6 new), 213/213 integration tests (3 new), and a
+  full serial e2e regression — 118/119 meaningful passes plus 1
+  pre-existing conditional skip on the first clean run (the sole
+  "failure" was a resource-exhaustion artifact from a very long session
+  — orphaned Chrome/Playwright processes had consumed most of this
+  machine's 8GB RAM; killing them and re-running cleanly produced 119/120
+  passes, the 1 remaining flake confirmed non-deterministic by rerunning
+  it alone). New `tests/unit/guest/locale.test.ts`,
+  `tests/integration/hotelEnabledLocales.test.ts`,
+  `tests/e2e/multilingual.spec.ts`.
+- Known Phase 1 limitations, recorded rather than hidden: existing
+  `<Link>`s/`redirect()` calls elsewhere in the app (e.g. the booking
+  flow's confirmation redirect) aren't locale-aware yet, so following one
+  while browsing a non-English locale lands on the English/unprefixed
+  version of the next page — full locale-persistent navigation is a
+  Phase 2+ concern, once pages carry translated content worth staying
+  in-locale for. `AI_PROVIDER=mock` remains English-only (unrelated to
+  this phase — AI language-awareness is Phase 4). Full HTTP-level
+  "a *different* tenant's disabled locale 404s" isn't exercisable in this
+  single-tenant-demo milestone (`getCurrentTenantHotel()` always resolves
+  the one seeded hotel) — covered instead at the data/gating-logic layer
+  by the new integration test.
+
 ## Review-deployment preparation, Phase B — deployment-readiness code change (2026-09-02)
 Product Owner-approved small, reviewable diff preparing the app for a
 temporary public review deployment (Vercel + Neon) — no schema/seed/

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { sendConciergeMessageAction } from "../../../src/app/(guest)/concierge/actions";
+import { sendConciergeMessageAction } from "../../../src/app/[locale]/(guest)/concierge/actions";
 
 /**
  * M6 Phase b — `sendConciergeMessageAction()`, the anonymous concierge's

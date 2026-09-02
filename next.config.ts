@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import createNextIntlPlugin from "next-intl/plugin";
 
 /**
  * Ageez Hotels — Next.js configuration.
@@ -17,9 +18,10 @@ const nextConfig: NextConfig = {
    * M8d — minimal pre-demo security headers, applied globally (every
    * route: guest pages, `/management/*`, API routes) via Next.js's own
    * `headers()` config — the single central mechanism for this, entirely
-   * separate from `middleware.ts` (which only gates `/management/*` for
-   * auth and is left untouched). Deliberately narrow, approved scope
-   * only:
+   * separate from `middleware.ts` (which gates `/management/*` for auth
+   * and — since Multilingual Support Phase 1 — also handles locale
+   * routing for guest routes; the auth-gating behavior itself is
+   * unchanged). Deliberately narrow, approved scope only:
    *  - `X-Content-Type-Options: nosniff` — stops the browser from
    *    MIME-sniffing a response into a more dangerous content type than
    *    the server declared.
@@ -49,4 +51,14 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+/**
+ * Multilingual Support Phase 1 — `next-intl`'s Next.js plugin wraps the
+ * config to wire in `src/i18n/request.ts` (per-request locale/message
+ * resolution). Does not itself add any route, redirect, or header — the
+ * plugin only makes `getRequestConfig`'s output available to Server
+ * Components/layouts app-wide (see that file's own comment for exactly
+ * what it resolves and why it never throws for non-localized routes).
+ */
+const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
+
+export default withNextIntl(nextConfig);

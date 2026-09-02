@@ -42,8 +42,16 @@ const BCRYPT_SALT_ROUNDS = 10;
 export async function seedBaseline(client: PrismaClient) {
   const hotel = await client.hotel.upsert({
     where: { slug: hotelFixture.slug },
-    update: { ...hotelFixture, enabledModules: [...hotelFixture.enabledModules] },
-    create: { ...hotelFixture, enabledModules: [...hotelFixture.enabledModules] },
+    update: {
+      ...hotelFixture,
+      enabledModules: [...hotelFixture.enabledModules],
+      enabledLocales: [...hotelFixture.enabledLocales],
+    },
+    create: {
+      ...hotelFixture,
+      enabledModules: [...hotelFixture.enabledModules],
+      enabledLocales: [...hotelFixture.enabledLocales],
+    },
   });
   console.log(`Hotel: ${hotel.name} (${hotel.id})`);
 

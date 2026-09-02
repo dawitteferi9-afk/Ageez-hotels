@@ -35,6 +35,16 @@ export const hotelFixture = {
     "services",
     "reports",
   ],
+  /**
+   * Multilingual Support Phase 1 — the demo tenant enables every
+   * platform-supported locale (`src/i18n/routing.ts`'s `LOCALES`), per
+   * the locked product decision. A real onboarding hotel would start
+   * with a narrower list (e.g. just `["en"]`) and enable others as
+   * translated content becomes available in Phase 3+ — this fixture
+   * enables all five specifically to exercise/demo the full routing and
+   * switcher behavior end to end.
+   */
+  enabledLocales: ["en", "am", "zh", "es", "ar"],
 } as const;
 
 /**

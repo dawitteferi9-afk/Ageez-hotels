@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Menu, Sparkles } from "lucide-react";
 import { Container } from "@/components/ui/container";
 import { buttonVariants } from "@/components/ui/button";
+import { LanguageSwitcher } from "@/components/guest/language-switcher";
+import type { AppLocale } from "@/i18n/routing";
 import { cn } from "@/lib/utils";
 
 /** Guest-site navigation structure. Route labels/paths are app UI, not hotel business data. */
@@ -37,7 +39,16 @@ function ConciergeNavLink({ className }: { className?: string }) {
   );
 }
 
-export function SiteHeader({ hotelName }: { hotelName: string }) {
+export function SiteHeader({
+  hotelName,
+  currentLocale,
+  enabledLocales,
+}: {
+  hotelName: string;
+  /** Multilingual Support Phase 1 — optional so this component still type-checks anywhere it might be reused without a resolved locale context; the guest layout always supplies both. */
+  currentLocale?: AppLocale;
+  enabledLocales?: readonly string[];
+}) {
   return (
     // M12 Phase 2B — `relative z-50` added (previously unpositioned):
     // the mobile dropdown's own `z-10` only ranks it above elements *within
@@ -78,6 +89,9 @@ export function SiteHeader({ hotelName }: { hotelName: string }) {
             </Link>
           ))}
           <ConciergeNavLink />
+          {currentLocale && enabledLocales && (
+            <LanguageSwitcher currentLocale={currentLocale} enabledLocales={enabledLocales} />
+          )}
         </nav>
 
         <Link href="/contact" className={cn(buttonVariants({ size: "sm" }), "hidden shrink-0 lg:inline-flex")}>
@@ -101,6 +115,9 @@ export function SiteHeader({ hotelName }: { hotelName: string }) {
               </Link>
             ))}
             <ConciergeNavLink className="mt-1 w-fit" />
+            {currentLocale && enabledLocales && (
+              <LanguageSwitcher currentLocale={currentLocale} enabledLocales={enabledLocales} className="mt-1" />
+            )}
           </nav>
         </details>
       </Container>

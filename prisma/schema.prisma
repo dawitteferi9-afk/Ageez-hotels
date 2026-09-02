@@ -49,6 +49,17 @@ model Hotel {
   /// this column.
   enabledModules String[]
 
+  /// Multilingual Support Phase 1 — which of the platform's supported guest
+  /// locales (`src/i18n/routing.ts`'s `LOCALES`: en/am/zh/es/ar) this hotel
+  /// has turned on, following the exact same per-tenant-toggle shape as
+  /// `enabledModules` above. `en` (the platform default) is always assumed
+  /// available even if a row predates this column / omits it, but is listed
+  /// explicitly for every hotel going forward rather than relied on
+  /// implicitly. Locale *content* (translated room/policy text) is a
+  /// separate, later concern (Phase 3) — this column only controls whether
+  /// a locale's URL space is reachable for this hotel at all.
+  enabledLocales String[] @default(["en"])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

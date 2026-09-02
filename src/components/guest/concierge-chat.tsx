@@ -12,7 +12,7 @@ import type {
   VerifyBookingState,
   ConfirmServiceRequestState,
   ServiceRequestProposalView,
-} from "@/app/(guest)/concierge/actions";
+} from "@/app/[locale]/(guest)/concierge/actions";
 
 /**
  * M6 Phase b — the anonymous public concierge chat. All hotel-specific

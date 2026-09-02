@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import type { BookingFormState } from "@/app/(guest)/rooms/[id]/book/schema";
+import type { BookingFormState } from "@/app/[locale]/(guest)/rooms/[id]/book/schema";
 
 type BookingAction = (prevState: BookingFormState, formData: FormData) => Promise<BookingFormState>;
 
