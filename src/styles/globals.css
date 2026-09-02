@@ -3,3 +3,54 @@
 @tailwind utilities;
 
 @import "./tokens.css";
+
+/*
+ * M12 Phase 2B — restrained, browser-native cinematic motion for the
+ * homepage sections that follow the video hero (`CinematicHero`).
+ * Pure CSS, no animation library (locked product decision: no new
+ * animation dependency, no Three.js/WebGL for normal homepage motion).
+ *
+ * `.cinematic-reveal` — a one-shot fade + rise, applied by
+ * `src/components/guest/cinematic/Reveal.tsx` via IntersectionObserver.
+ * `.cinematic-media-frame` — a restrained hover-triggered Ken-Burns zoom,
+ * applied only around specific homepage card instances (never inside the
+ * shared `RoomVisual`/`RoomTypeCard`/`VenueCard` components themselves,
+ * so `/rooms`, `/rooms/[id]`, `/services`, and `/restaurant` keep their
+ * exact existing presentation and are not part of this change).
+ *
+ * Both are fully disabled under `prefers-reduced-motion: reduce`.
+ */
+.cinematic-reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition:
+    opacity 0.7s ease-out,
+    transform 0.7s ease-out;
+}
+.cinematic-reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+.cinematic-media-frame {
+  overflow: hidden;
+}
+.cinematic-media-frame img {
+  transition: transform 3s ease-out;
+  will-change: transform;
+}
+.cinematic-media-frame:hover img {
+  transform: scale(1.06);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cinematic-reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+  .cinematic-media-frame img {
+    transition: none !important;
+    transform: none !important;
+  }
+}

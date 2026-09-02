@@ -39,7 +39,18 @@ function ConciergeNavLink({ className }: { className?: string }) {
 
 export function SiteHeader({ hotelName }: { hotelName: string }) {
   return (
-    <header className="border-b border-basalt-700/15 bg-parchment-50">
+    // M12 Phase 2B — `relative z-50` added (previously unpositioned):
+    // the mobile dropdown's own `z-10` only ranks it above elements *within
+    // this same stacking context*. Once the homepage's cinematic hero
+    // introduced a `z-10`, `h-[100svh]` block directly beneath the header,
+    // that hero content — later in DOM order — started painting over (and
+    // intercepting clicks on) the open dropdown, since header and main
+    // were both plain, unpositioned siblings. Giving the header its own
+    // higher stacking context is the correct general fix: a nav dropdown
+    // must always sit above whatever page content follows it, regardless
+    // of that content's own z-index. Caught by
+    // `tests/e2e/contactPage.spec.ts`'s mobile hamburger-menu test.
+    <header className="relative z-50 border-b border-basalt-700/15 bg-parchment-50">
       <Container className="flex h-20 items-center justify-between gap-4">
         <Link href="/" className="shrink-0 whitespace-nowrap font-display text-xl text-basalt-950">
           {hotelName}

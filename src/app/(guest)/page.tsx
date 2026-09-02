@@ -5,16 +5,32 @@ import { Container } from "@/components/ui/container";
 import { buttonVariants } from "@/components/ui/button";
 import { AiBadge } from "@/components/ui/ai-badge";
 import { RoomTypeCard } from "@/components/guest/room-type-card";
+import { CinematicHero } from "@/components/guest/cinematic/CinematicHero";
+import { Reveal } from "@/components/guest/cinematic/Reveal";
 import { cn } from "@/lib/utils";
 
 /**
- * M9b — visual/UX polish only. Same queries as before this pass
- * (`roomTypes.findMany`, the three `aiKnowledgeDocuments.findByCategory`
- * calls, the per-room-type count) — no new data source, nothing
- * invented. `overview.content` (DB-backed, M2's own AiKnowledgeDocument)
- * remains the only source for any "premium hotel" framing in the hero;
- * `hotel.name`/`city`/`country` remain the only hotel-identity strings,
- * never a hardcoded literal.
+ * M12 Phase 2B — cinematic guest experience. Same queries as before this
+ * pass (`roomTypes.findMany`, the three `aiKnowledgeDocuments.findByCategory`
+ * calls, the per-room-type count) — no new data source, nothing invented.
+ * `overview.content` remains the only source for any "premium hotel"
+ * framing in the hero; `hotel.name`/`city`/`country` remain the only
+ * hotel-identity strings, never a hardcoded literal.
+ *
+ * The former static hero section is replaced by `<CinematicHero>` (Earth
+ * Zoom → Airport Pickup → Restaurant Shot 1 → dissolve → Shot 2, all
+ * client-side, IntersectionObserver-gated, reduced-motion-aware — see
+ * `src/components/guest/cinematic/`). The exact same hero copy/CTAs that
+ * used to render directly in this file are now built here (still a
+ * Server Component, still fetching live `hotel`/`overview` data) and
+ * passed down as `heroOverlay` — `CinematicHero` itself fetches nothing
+ * and knows no hotel facts, matching the `PanoramaTour` boundary at
+ * `/tour`. Rooms & Suites and Dining & Amenities are otherwise the exact
+ * same sections as before, now wrapped in `<Reveal>` for a restrained
+ * scroll-in fade, with each room card's image frame gaining a
+ * hover-triggered Ken-Burns zoom (`.cinematic-media-frame` in
+ * `globals.css`) — CSS only, no shared component touched, so `/rooms`,
+ * `/rooms/[id]`, and `/services` are unaffected.
  */
 export default async function GuestHomePage() {
   const hotel = await getCurrentTenantHotel();
@@ -33,57 +49,59 @@ export default async function GuestHomePage() {
 
   return (
     <>
-      <section className="relative overflow-hidden border-b border-basalt-700/15 bg-basalt-950 py-28 text-parchment-50">
-        {/* Subtle Ge'ez-inspired geometric motif — pure CSS, no image asset (M9 UI audit: none exist in this repo, none added). Decoration only, low-opacity, never mistaken for content. */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-[0.06]"
-          style={{
-            backgroundImage:
-              "repeating-linear-gradient(135deg, var(--color-ochre-500) 0, var(--color-ochre-500) 1px, transparent 1px, transparent 48px)",
-          }}
-        />
-        <Container className="relative flex flex-col gap-6">
-          <p className="text-sm uppercase tracking-[0.2em] text-ochre-400">
-            {hotel.city}, {hotel.country}
-          </p>
-          <h1 className="max-w-3xl font-display text-5xl leading-tight md:text-6xl">
-            {hotel.name}
-          </h1>
-          {overview && (
-            <p className="max-w-xl text-lg text-parchment-100/80">{overview.content}</p>
-          )}
-
-          <div className="mt-2 flex flex-wrap items-center gap-4">
-            <Link href="/rooms" className={buttonVariants({ size: "lg" })}>
-              Book a Room
-            </Link>
-            <Link
-              href="/concierge"
-              className={cn(
-                buttonVariants({ variant: "outline", size: "lg" }),
-                "gap-2 border-parchment-100/30 text-parchment-50 hover:bg-parchment-50/10"
+      <CinematicHero
+        heroOverlay={
+          <div className="relative flex h-full flex-col justify-end">
+            {/* Scrim: guarantees CTA/text legibility regardless of the
+                underlying video/poster content at this scroll position —
+                purely a contrast aid, not part of any asset. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 bg-gradient-to-t from-basalt-950/85 via-basalt-950/35 to-transparent"
+            />
+            <Container className="pointer-events-auto relative flex flex-col gap-6 pb-16 pt-32 text-parchment-50">
+              <p className="text-sm uppercase tracking-[0.2em] text-ochre-400">
+                {hotel.city}, {hotel.country}
+              </p>
+              <h1 className="max-w-3xl font-display text-5xl leading-tight md:text-6xl">
+                {hotel.name}
+              </h1>
+              {overview && (
+                <p className="max-w-xl text-lg text-parchment-100/90">{overview.content}</p>
               )}
-            >
-              <Sparkles className="h-4 w-4 text-ochre-400" aria-hidden />
-              Ask Our AI Concierge
-            </Link>
-          </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <AiBadge className="border border-ochre-400/30 bg-transparent text-ochre-300">
-              AI Concierge
-            </AiBadge>
-            <span className="text-xs text-parchment-100/60">
-              Instant answers about rooms, dining, and your reservation — any time.
-            </span>
+              <div className="mt-2 flex flex-wrap items-center gap-4">
+                <Link href="/rooms" className={buttonVariants({ size: "lg" })}>
+                  Book a Room
+                </Link>
+                <Link
+                  href="/concierge"
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "lg" }),
+                    "gap-2 border-parchment-100/40 bg-basalt-950/30 text-parchment-50 hover:bg-parchment-50/10"
+                  )}
+                >
+                  <Sparkles className="h-4 w-4 text-ochre-400" aria-hidden />
+                  Ask Our AI Concierge
+                </Link>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <AiBadge className="border border-ochre-400/30 bg-transparent text-ochre-300">
+                  AI Concierge
+                </AiBadge>
+                <span className="text-xs text-parchment-100/70">
+                  Instant answers about rooms, dining, and your reservation — any time.
+                </span>
+              </div>
+            </Container>
           </div>
-        </Container>
-      </section>
+        }
+      />
 
       <section className="py-20">
         <Container className="flex flex-col gap-10">
-          <div className="flex flex-col gap-2">
+          <Reveal className="flex flex-col gap-2">
             <p className="text-sm font-medium uppercase tracking-[0.2em] text-ochre-600">
               Room Highlights
             </p>
@@ -92,34 +110,35 @@ export default async function GuestHomePage() {
               {roomTypes.length} room types, {roomCounts.reduce((sum, n) => sum + n, 0)} rooms
               in total.
             </p>
-          </div>
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          </Reveal>
+          <Reveal className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3" as="div">
             {roomTypes.map((rt, i) => (
-              <RoomTypeCard
-                key={rt.id}
-                id={rt.id}
-                name={rt.name}
-                description={rt.description}
-                capacity={rt.capacity}
-                basePrice={rt.basePrice}
-                currency={rt.currency}
-                roomCount={roomCounts[i]}
-              />
+              <div key={rt.id} className="cinematic-media-frame rounded-lg">
+                <RoomTypeCard
+                  id={rt.id}
+                  name={rt.name}
+                  description={rt.description}
+                  capacity={rt.capacity}
+                  basePrice={rt.basePrice}
+                  currency={rt.currency}
+                  roomCount={roomCounts[i]}
+                />
+              </div>
             ))}
-          </div>
+          </Reveal>
         </Container>
       </section>
 
       {(dining || services) && (
         <section className="border-t border-basalt-700/15 bg-parchment-100 py-20">
           <Container className="flex flex-col gap-10">
-            <div className="flex flex-col gap-2 text-center">
+            <Reveal className="flex flex-col gap-2 text-center">
               <p className="text-sm font-medium uppercase tracking-[0.2em] text-ochre-600">
                 Discover More
               </p>
               <h2 className="font-display text-3xl text-basalt-950">Dining & Amenities</h2>
-            </div>
-            <div className="grid gap-6 md:grid-cols-2">
+            </Reveal>
+            <Reveal className="grid gap-6 md:grid-cols-2">
               {dining && (
                 <div className="flex flex-col gap-3 rounded-lg bg-parchment-50 p-8 shadow-sm">
                   <div className="flex h-11 w-11 items-center justify-center rounded-full bg-ochre-500/15">
@@ -144,7 +163,7 @@ export default async function GuestHomePage() {
                   </Link>
                 </div>
               )}
-            </div>
+            </Reveal>
           </Container>
         </section>
       )}

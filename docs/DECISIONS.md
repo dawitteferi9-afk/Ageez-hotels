@@ -4,6 +4,75 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-02 — M12 Phase 2B: cinematic homepage architecture, restaurant reuse, and a header stacking-context fix
+**Status:** Approved and implemented
+**Decision:** Several implementation choices made while building the
+cinematic homepage, recorded because none of them were explicitly
+pre-specified and a future session shouldn't have to re-derive them:
+
+1. **The Restaurant Shot 1 → Shot 2 "dissolve" is a component-level CSS
+   crossfade, not a video edit.** `RestaurantDissolveScene` stacks both
+   videos as absolutely-positioned layers and crossfades opacity on
+   Shot 1's native `ended` event; the two source files remain untouched,
+   separate assets in `public/videos/hero/`. This directly satisfies the
+   Product Owner's "keep Shot1/Shot2 separate... do not concatenate"
+   instruction while still producing a single continuous visual beat, and
+   keeps the "short premium dissolve" duration/easing tunable in CSS
+   rather than baked into a re-rendered video file.
+2. **Scenes 3 and 4 (Restaurant Shot 1 / dissolve / Shot 2) are
+   implemented as one component (`RestaurantDissolveScene`), not two
+   independently-scrollable `CinematicScene` instances.** They describe
+   one continuous cinematic beat, not two separately-paced sections;
+   treating them as two full `100svh` scroll sections would have doubled
+   the scroll distance for what is meant to read as a single moment, and
+   would have required either scroll-jacking or an awkward "wait for
+   scroll" gap between Shot 1 ending and Shot 2 starting — both against
+   locked constraints. The component internally reuses
+   `useCinematicVisibility`, the same hook `CinematicScene` uses, so
+   nothing is duplicated.
+3. **The restaurant page reuses `CinematicScene` directly** (Shot 2, at a
+   shorter `50vh` banner height via the existing `heightClassName` prop)
+   rather than a bespoke restaurant-page component, per "reuse... do not
+   duplicate unnecessary implementation."
+4. **Restrained homepage motion beyond the hero (Reveal + Ken-Burns) is
+   scoped to the homepage's own JSX, never the shared `RoomVisual`/
+   `RoomTypeCard`/`VenueCard` components.** `Reveal` wraps section-level
+   content already owned by `page.tsx`, and the Ken-Burns hover zoom is a
+   CSS descendant selector (`.cinematic-media-frame img`) applied via a
+   wrapper `page.tsx` adds only around its own `RoomTypeCard` instances —
+   the shared components' internals are untouched, so `/rooms`,
+   `/rooms/[id]`, and `/services` keep their exact existing presentation
+   and regression surface. Rejected alternative: adding the effect inside
+   `RoomVisual` itself, which would have applied it sitewide and expanded
+   this change's blast radius well past "restrained... homepage" scope.
+   No scroll-linked parallax (e.g. `background-attachment: fixed`) was
+   added — reveal + Ken-Burns already satisfy "restrained," and
+   scroll-linked backgrounds carry known mobile Safari reliability
+   issues that would have worked against the "mobile-safe behavior"
+   requirement.
+5. **`SiteHeader` gained `relative z-50`** (previously a plain,
+   unpositioned `<header>`). This fixes a real regression caught by
+   `tests/e2e/contactPage.spec.ts`'s mobile hamburger test during
+   implementation: introducing a full-`100svh`, `z-10` hero directly
+   below the header meant that hero content — later in DOM order — began
+   painting over, and intercepting clicks on, the header's own
+   absolutely-positioned mobile-nav dropdown (also `z-10`, but ranked by
+   DOM order among unpositioned siblings). Giving the header its own
+   higher stacking context is the general-purpose fix: a nav dropdown
+   must always outrank whatever page content follows it, independent of
+   that content's own z-index — not specific to this one hero. Combined
+   with `pointer-events-none` on `CinematicScene`/`RestaurantDissolveScene`'s
+   full-height overlay wrapper (opted back to `pointer-events-auto` only
+   around actual interactive content) as defense in depth against the
+   same class of issue.
+**Rationale:** CLAUDE.md rule 8 — these are implementation-level
+decisions a future session (or the Product Owner) should be able to see
+without re-reading the diff, especially the header fix, which is a
+correctness fix for a bug this same change introduced, not a pre-existing
+issue.
+
+---
+
 ## 2026-09-02 — M12 Phase 2A: Earth Zoom poster uses the canonical exterior still, not a video-extracted frame; two content-quality issues flagged, not silently accepted
 **Status:** Approved and implemented (poster choice); flagged content
 issues are **open — require a Phase 2B Product Owner decision**, not

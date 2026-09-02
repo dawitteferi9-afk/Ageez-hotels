@@ -1,5 +1,74 @@
 # Changelog
 
+## M12 Phase 2B — Cinematic homepage implementation (2026-09-02)
+Product Owner-approved implementation of the M12 cinematic guest
+experience, built on the Phase 2A assets. No schema/seed/auth/RBAC/
+tenant/reservation/service-workflow change; no new dependency (pure CSS +
+plain `<video>`/`<img>`, same "no `next/image`" boundary as the rest of
+the guest site).
+- **`src/components/guest/cinematic/` (new):** `CinematicScene` (one
+  poster-first, IntersectionObserver-gated, reduced-motion-aware video
+  background scene — muted, `playsInline`, no loop, `aria-hidden`),
+  `RestaurantDissolveScene` (Shot 1 → CSS crossfade on the video's own
+  `ended` event → Shot 2, never loops back), `CinematicHero` (composes
+  the 4-scene homepage sequence), `Reveal` (one-shot scroll fade/rise),
+  and the shared `useCinematicVisibility` hook.
+- **`src/lib/guest/cinematicConfig.ts` (new):** presentation-only
+  scene→asset path config, mirroring `tourConfig.ts`'s discipline — no
+  hotel fact lives here.
+- **`src/app/(guest)/page.tsx`:** the static hero section is replaced by
+  `<CinematicHero>` (Earth Zoom → Airport Pickup → Restaurant dissolve),
+  with the exact same live `hotel`/`overview` data and CTAs now passed
+  down as `heroOverlay`. Room Highlights and Dining & Amenities sections
+  wrapped in `<Reveal>`; room cards gain a hover-triggered Ken-Burns zoom
+  via a homepage-only `.cinematic-media-frame` wrapper (shared
+  `RoomVisual`/`RoomTypeCard` components themselves untouched, so
+  `/rooms`, `/rooms/[id]`, and `/services` are unaffected).
+- **`src/app/(guest)/restaurant/page.tsx`:** a `CinematicScene` banner
+  (Shot 2, shorter height) reuses the same component instead of
+  duplicating it, per the Product Owner's "reuse... do not duplicate"
+  instruction.
+- **`src/components/guest/site-header.tsx`:** `relative z-50` added to
+  `<header>` (previously unpositioned) — a real regression caught by
+  `tests/e2e/contactPage.spec.ts`'s mobile hamburger test: the new
+  full-height hero directly below the header started painting over (and
+  intercepting clicks on) the header's own open mobile-nav dropdown,
+  since both were `z-10` and unpositioned siblings paint in DOM order.
+  Fixed at its root cause (header now always outranks page content
+  below it), plus `pointer-events-none`/`-auto` scoping in
+  `CinematicScene`/`RestaurantDissolveScene` so a scene's empty area
+  never swallows clicks meant for anything else.
+- **`src/styles/globals.css`:** `.cinematic-reveal` and
+  `.cinematic-media-frame` utilities (pure CSS keyframes/transitions,
+  fully disabled under `prefers-reduced-motion: reduce`).
+- **`docs/CINEMATIC_ASSET_MANIFEST.md`:** two non-generative edits
+  recorded (Earth Zoom trimmed to 6.33s to remove an unplanned person;
+  Restaurant Shot 2 trimmed to drop its opening title card) plus the
+  Airport Pickup poster's retimed extraction (0.2s → 4.3s, avoiding the
+  flawed background signage without touching the video) — no asset was
+  regenerated. New total video payload ≈13.94 MB (was 18.27 MB).
+- Verified: `npm run typecheck` (clean), `npm run lint` (clean), `npm run
+  build` (production build succeeds, `/` and `/restaurant` both compile
+  with modest bundle growth, no video bytes in the JS bundle). E2e
+  regression: `booking.spec.ts`, `contactPage.spec.ts`,
+  `securityHeaders.spec.ts` (all pass serially — one booking test flaked
+  under parallel workers due to shared dev-DB inventory contention
+  across repeated same-day runs, a pre-existing test-fixture
+  characteristic unrelated to this change, not a real regression),
+  `auth.spec.ts` and `management.spec.ts` (all 13 pass, confirming no
+  management/auth impact). Ad hoc Playwright checks confirmed: zero
+  `<video>` elements under `prefers-reduced-motion: reduce`; Scene 1's
+  video carries `aria-hidden`, `muted`, `playsinline`, no `loop`;
+  keyboard Tab never focuses a `<video>`; mobile viewport (390×844)
+  renders the hero and hamburger menu correctly; restaurant banner
+  renders its poster with no video before intersection. Manual desktop
+  (1440×900) and mobile (390×844) screenshots confirmed legible
+  CTAs/text over video on both.
+- Known limitation carried forward, accepted by explicit Product Owner
+  direction (not fixed): Airport Pickup's own video (not its poster)
+  still briefly shows the flawed background signage during its first
+  ~1-2s of playback.
+
 ## M12 Phase 2A — Cinematic asset intake and validation (2026-09-02)
 Product Owner-approved asset intake for the cinematic homepage (M12). No
 homepage/component code, no business logic, no schema/seed/auth/RBAC/tenant
