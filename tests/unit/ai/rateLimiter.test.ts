@@ -56,4 +56,28 @@ describe("verifyReservationRateLimitKey", () => {
     expect(verifyReservationRateLimitKey("1.2.3.4")).toContain("verifyReservationContext");
     expect(verifyReservationRateLimitKey("1.2.3.4")).not.toBe(verifyReservationRateLimitKey("5.6.7.8"));
   });
+
+  /**
+   * Multilingual Support Phase 4 — locale must never create a separate
+   * rate-limit identity. `verifyReservationRateLimitKey()`'s signature is
+   * `(clientIp: string)` — there is structurally no way for a locale
+   * value to reach this key at all (`concierge/actions.ts` never passes
+   * one), so a guest attempting verification from `/am/concierge`, then
+   * `/zh/concierge`, then `/es/concierge` still shares exactly ONE budget
+   * for the same underlying `clientIp` — proven behaviorally below by
+   * simulating that exact sequence (same IP, key built identically
+   * regardless of which "locale page" the attempt conceptually came
+   * from), not just by reading the function's arity.
+   */
+  it("a guest switching locale between verification attempts still shares ONE budget for the same client — no locale-keyed bypass", () => {
+    const now = 1_000_000;
+    const clientIp = "203.0.113.42";
+    // Five attempts, "from" five different locale pages — the key is
+    // identical every time because locale was never part of it.
+    const attemptsFromDifferentLocalePages = [now, now, now, now, now];
+    const results = attemptsFromDifferentLocalePages.map(() => checkRateLimit(verifyReservationRateLimitKey(clientIp), now));
+    expect(results).toEqual([true, true, true, true, true]);
+    // The 6th attempt, from yet another locale, is still blocked — same budget.
+    expect(checkRateLimit(verifyReservationRateLimitKey(clientIp), now)).toBe(false);
+  });
 });

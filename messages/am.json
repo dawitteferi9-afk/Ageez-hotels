@@ -219,6 +219,13 @@
       "requestVerificationExpired": "የማስያዣ ማረጋገጫዎ ሊረጋገጥ አልቻለም። እባክዎ ማስያዣዎን እንደገና ያረጋግጡ፣ ከዚያም ጥያቄዎን እንደገና ይላኩ።",
       "tooManyRequests": "በአጭር ጊዜ ውስጥ በጣም ብዙ ጥያቄዎች ተልከዋል። እባክዎ ትንሽ ቆይተው እንደገና ከመሞከርዎ በፊት ይጠብቁ፣ ወይም ወደ አቀባበል ያግኙ።",
       "messageTooLong": "እባክዎ መልእክትዎ ከ{max} ፊደላት በታች እንዲሆን ያድርጉ።"
+    },
+    "serviceRequestTypes": {
+      "AIRPORT_TRANSFER": "ከአውሮፕላን ማረፊያ አገልግሎት",
+      "LAUNDRY": "ልብስ ማጠቢያ",
+      "ROOM_SERVICE": "የክፍል አገልግሎት",
+      "RESTAURANT": "ምግብ ቤት",
+      "OTHER": "ሌላ"
     }
   },
   "Highlights": {

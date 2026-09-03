@@ -22,8 +22,8 @@ all of them.
 |---|---|---|
 | **Phase 1** | Routing foundation: `[locale]` segment, `next-intl` wiring, language switcher, `<html lang/dir>`, cookie-based "remember explicit choice," locale-aware `<Link>` site-wide. No real translated text yet. | Done |
 | **Phase 2** | **Interface chrome translation.** Every static guest-facing UI string — navigation, buttons, form labels, validation/error text, accessibility labels, footer, AI Concierge UI chrome — translated into all 5 locales via `messages/<locale>.json`. RTL logical-property audit. Per-script typography. Locale-aware `Intl` date/currency formatting. | Done |
-| **Phase 3** | **Hotel business-content translation.** `RoomType.name`/`.description` and `AiKnowledgeDocument.content` gain real per-locale storage (`RoomTypeTranslation`/`AiKnowledgeDocumentTranslation`) and are translated for the demo tenant into all 4 non-English locales, with field-level English fallback. | Done (this doc's current state) |
-| **Phase 4** | **Multilingual AI Concierge conversation.** The concierge actually understands and replies in the guest's chosen locale. Not started — the mock provider is still effectively English-keyword-matched; Phase 2 kept it that way on purpose (see below). | Not started |
+| **Phase 3** | **Hotel business-content translation.** `RoomType.name`/`.description` and `AiKnowledgeDocument.content` gain real per-locale storage (`RoomTypeTranslation`/`AiKnowledgeDocumentTranslation`) and are translated for the demo tenant into all 4 non-English locales, with field-level English fallback. | Done |
+| **Phase 4** | **Multilingual AI Concierge conversation.** The concierge derives the guest's locale server-side, responds in it by default (with natural language-switching), grounds every reply in Phase 3's approved localized content (English fallback, never invented), and keeps every security/tool/tenant boundary exactly as it was — locale is presentation context only. | Done (this doc's current state) |
 
 **The Phase 2/3 rule, stated plainly:** if a string is part of the app's
 own interface (a button, a label, a nav link, a validation message, an
@@ -183,10 +183,12 @@ const locales = ["en", "am", "zh", "es", "ar"];
 // walk each messages/<locale>.json, collect dot-path leaf keys, diff against en's set
 ```
 
-17 namespaces: `Navigation`, `LanguageSwitcher`, `Common`, `Home`, `Rooms`,
+18 namespaces: `Navigation`, `LanguageSwitcher`, `Common`, `Home`, `Rooms`,
 `RoomDetail`, `Booking`, `Validation`, `BookingConfirmation`, `Restaurant`,
-`Services`, `Contact`, `About`, `Concierge`, `Errors`, `NotFound`, `Footer`.
-198 leaf keys per locale, 990 translated strings total.
+`Services`, `Contact`, `About`, `Highlights`, `Concierge`, `Errors`,
+`NotFound`, `Footer`. 234 leaf keys per locale, 1,170 translated strings
+total (`Concierge.serviceRequestTypes.*` — 5 keys × 5 locales — is Phase
+4's own addition to this namespace; see "AI Concierge boundary" below).
 
 Loaded via `src/i18n/request.ts` (`getRequestConfig`) for every Server
 Component (`getTranslations()`), and passed to `NextIntlClientProvider` in
@@ -294,27 +296,199 @@ rather than mixing two numeral systems on one screen.
 
 ## AI Concierge boundary
 
-Only UI chrome is translated (headings, buttons, placeholders,
-confirmation copy, accessibility labels, system-level error strings). The
-AI system prompt, tool security, verified-guest context, and hotel
-knowledge grounding are completely untouched. The starter-question
-buttons are a deliberate special case: the DISPLAYED label is translated,
-but the text actually SUBMITTED to the chat on click is always the fixed
-English question (`concierge-chat.tsx`'s `STARTER_QUESTION_CATEGORIES`,
-`en` field) — because the mock AI provider (`src/lib/ai/providers/mock.ts`)
-matches on English keywords only, and submitting a translated question
-would silently degrade every non-English guest to the generic fallback
-answer instead of the real grounded one. Real multilingual AI
-conversation is Phase 4's job, not Phase 2's.
+### Phase 4 — the Concierge is now genuinely multilingual
 
-**Phase 3 addendum:** `src/lib/ai/tools/getHotelKnowledge.ts`/
-`getRoomTypesSummary.ts` (and every other AI tool) still call the plain,
+**One Concierge, one tenant, one knowledge base, one security
+architecture — never five.** There is no `prompt-en.ts`/`prompt-am.ts`,
+no per-language bot, no per-language tool registry, and no per-language
+copy of the hotel's facts. A single core prompt per tier
+(`buildAnonymousConciergeSystemPrompt()`/`buildVerifiedConciergeSystemPrompt()`
+in `src/lib/ai/prompt.ts`) gets one additional LAYER appended — a
+`LANGUAGE_INSTRUCTIONS[locale]` paragraph plus a shared
+`LANGUAGE_INSTRUCTION_SUFFIX` fact-preservation warning — never a
+separate prompt file or a separate tool set per locale.
+
+**Locale is server-derived, presentation-only context — never an
+authorization boundary.** `resolveEffectiveLocale(requestedLocale,
+hotel.enabledLocales)` (`src/lib/guest/locale.ts`) validates the request
+locale against both the platform's `LOCALES` and the tenant's own
+`enabledLocales`, falling back to English for anything invalid, disabled,
+or malformed (defensive even against a non-array `enabledLocales`; never
+throws). The resolved locale flows into the system prompt and into the AI
+tools' grounding reads — and nowhere else. **It has zero influence on
+hotel identity, guest verification, staff identity/RBAC, tenant
+authorization, or mutation authorization** — those pipelines
+(`resolveVerifiedReservationContext()`, `requireStaffAccess()`,
+`withTenant()`) are entirely locale-blind, exactly as before Phase 4.
+Switching locale mid-conversation cannot invalidate a verified guest,
+change which reservation is in scope, or create any new security surface.
+
+**Language behavior.** The Concierge responds in the guest's active route
+locale by default, and may switch naturally if the guest clearly writes in
+one of the other four supported languages — steered by the language
+instruction as the model's primary guidance plus its own language
+understanding, deliberately NOT a fragile keyword-only language detector.
+Each locale gets its own quality bar in `LANGUAGE_INSTRUCTIONS` (Ethiopic
+script for Amharic, avoiding archaic wording; natural Simplified Chinese;
+neutral international Spanish; clear MSA Arabic script) plus a shared
+warm/concise-but-not-verbose instruction.
+
+**Knowledge grounding stays exactly Phase 3's rule, now actually
+reachable by the AI conversation.** `getHotelKnowledge()`/
+`getRoomTypesSummary()`/`getReservationSummary()` now call the Phase-3
+locale-aware reads (`findByCategoryLocalized()`/`findManyLocalized()`/
+`roomTypes.localize()`) instead of the plain unlocalized ones — closing
+the gap the Phase 3 addendum below described. A missing or partial
+translation still falls back field-by-field to the exact English source,
+never a live/machine translation and never an invented fact — the model
+is explicitly instructed (via `LANGUAGE_INSTRUCTION_SUFFIX`) that it may
+never add, infer, or embellish a fact beyond what a tool result itself
+states, in any language. `tests/integration/conciergeMultilingual.test.ts`
+proves this against a real two-tenant database: Hotel A's Amharic
+translation never reaches Hotel B, and Hotel B's English fallback never
+borrows Hotel A's translation.
+
+**Room identity stays canonical.** A guest naming a room by its own
+localized name (e.g. "行政客房") still resolves to the exact same
+`RoomType` id/price/capacity as "Executive Room" in English — the mock's
+room-name matching narrows on whatever locale-resolved `name` the
+grounding layer already returned, with no per-locale room-name keyword
+table. Price/capacity/currency are asserted byte-identical across all
+five locales in both the integration and e2e/unit multilingual suites.
+
+**Confirmation-token security is unchanged.** Locale was NOT added to the
+confirmation-token's security semantics (inspection confirmed nothing
+requires it) — "model proposes, deterministic app validates, guest
+explicitly confirms via a real button click, server executes" holds
+identically in every language.
+`confirmServiceRequestAction` (the only code path that actually creates a
+`ServiceRequest`) is still not a tool at all and is unreachable from the
+model or from typed chat text in any language — see
+`verifiedConciergeTools.ts`'s own module comment, and
+`tests/unit/ai/multilingualSecurity.test.ts` for a deterministic proof
+that a typed affirmation ("አዎ፣ አረጋግጣለሁ።"/"是的，我确认。"/"Sí, confirmo."/
+"نعم، أؤكد.") never itself triggers a `proposeServiceRequest` call.
+
+**Service requests resolve to the SAME canonical workflow in every
+language.** No localized service-type enum values exist anywhere — the
+tool's own `type`/`label` stay the English canonical
+(`serviceRequestTypeLabel()`, `src/lib/domain/serviceRequestTypes.ts`,
+untouched). A NEW `Concierge.serviceRequestTypes.*` message-catalog
+namespace (5 keys × 5 locales) is DISPLAY-only — the proposal card reads
+through it (`t.has()`-guarded, falling back to the tool's own English
+label), never persisted as operational state. The guest's original
+free-text notes are preserved verbatim, in whatever language they were
+typed.
+
+**Tool calling stays canonical and language-neutral.** Tool schemas and
+every structured argument value (service-request `type`, room-type
+identity, etc.) are unchanged by Phase 4 — the model converses in any
+language but still emits the same canonical tool call shape.
+`getAnonymousConciergeTools()`/`getVerifiedConciergeTools()` gained a
+`locale` closure parameter purely to select which grounding rows to read;
+`locale` is never part of a tool's model-facing `inputSchema` (proven in
+`tests/integration/conciergeMultilingual.test.ts`).
+
+**Structured result vs. language presentation stay separate.** A tool's
+return value is deterministic and canonical regardless of locale; the
+mock provider's own generated sentences (never the DB-sourced content,
+which is returned verbatim) are the only place a small, explicit,
+locale-keyed template layer exists — see "Mock provider" below.
+
+**Starter questions — Phase 2's workaround, reassessed.** Phase 2 kept
+starter-button SUBMISSION fixed in English because the mock was English-
+keyword-matched. Phase 4 re-examined this now that grounding is
+locale-aware, and kept the same behavior for a DIFFERENT reason: since
+`getHotelKnowledge()`/`getRoomTypesSummary()` now resolve locale-aware
+content regardless of the submitted text's language, clicking a
+translated starter button already produces a genuinely localized,
+correctly-grounded reply (proven in `tests/e2e/conciergeMultilingual.spec.ts`),
+while keeping the mock's full, already-verified English keyword coverage
+reliable for all 17 starter questions. Reintroducing native-language
+submission would add risk (a fragile expanded keyword surface) for no
+observable guest-facing benefit, so it was not changed.
+
+**Conversation history** is never rewritten or re-translated — a
+guest switching languages mid-conversation keeps every prior turn, in
+whatever language it was written, exactly as sent.
+
+**Mock provider (`src/lib/ai/providers/mock.ts`) — the smallest safe
+extension for deterministic multilingual testing, not a homemade
+multilingual NLP system.** It remains a pure keyword-matcher, now with a
+small set of representative non-English keywords merged into its existing
+English keyword arrays (check-in/out, dining, facilities, services,
+room/price words, laundry) for `am`/`zh`/`es`/`ar`, and locale-keyed
+template tables for the handful of sentences the mock itself generates
+(the honest-fallback reply, the room-price sentence wrapper, the
+service-request proposal/confirmation sentences, the translated Confirm-
+button label it points guests at). Everything DB-sourced (knowledge
+content, room names/descriptions) passes through completely untouched —
+the mock never re-translates or rewrites a tool result. Explicitly NOT
+extended: a few other mock-generated sentences (`PERSONAL_INFO_REPLY`,
+`VERIFY_AGAIN_REPLY`, `VERIFY_HOWTO_REPLY`, the reservation/service-list
+summaries) remain English-only — an accepted, documented gap in the mock,
+not a guest-facing product gap (the real provider has no such gap; see
+below). This mock/real distinction is the reason `AiConverseInput.locale`
+(`src/lib/ai/provider.ts`) exists as an optional, purely informational
+field: the Anthropic provider ignores it entirely (the language
+instruction already lives inside `systemPrompt`, which it reads
+natively); the mock uses it only because it never "reads" `systemPrompt`
+as an instruction at all.
+
+**Real-provider (Anthropic) live QA.** No `ANTHROPIC_API_KEY`/
+`AI_PROVIDER` is configured in this environment, so no live multilingual
+QA against the real model has been performed as part of this phase — the
+mock-provider and integration/e2e suites are the only automated coverage
+that exists today. This is an accepted, explicitly-permitted gap (the
+phase brief allows proceeding without it): running a small controlled
+multilingual QA pass against the real Anthropic provider remains an open
+deployment/review checkpoint before this Concierge is used with a live
+key in production.
+
+**Rate limiting is locale-blind.** `verifyReservationRateLimitKey(clientIp)`
+never took a locale parameter and still doesn't — a guest attempting
+verification from `/am/concierge`, then `/zh/concierge`, then
+`/es/concierge` shares exactly one budget for the same client IP; proven
+behaviorally in `tests/unit/ai/rateLimiter.test.ts`. (The demo rate
+limiter itself is still the pre-existing single-process, real-clock,
+in-memory counter documented in `src/lib/ai/rateLimiter.ts` — not
+production-grade, and unrelated to Phase 4; a rate-limit-exhaustion test
+elsewhere in the same server process can transiently block an unrelated
+verification attempt for the rest of that 10-minute window, which is
+expected local-dev behavior, not a Phase 4 defect.)
+
+**Error/failure behavior** reuses Phase 2's existing localized error
+catalog unchanged — a rate-limit block, a provider failure, or an
+unrecognized request all resolve to the same translated, non-leaking
+copy already in place; no stack trace, provider error, prompt content,
+tool argument, or tenant id is ever exposed, in any language.
+
+**Security testing.** `tests/unit/ai/multilingualSecurity.test.ts` proves,
+deterministically, that data-exposure/instruction-reveal attempts phrased
+in `am`/`zh`/`es`/`ar` never surface a planted system-prompt sentinel and
+never fabricate reservation data (the anonymous tool registry structurally
+never includes `getReservationSummary` in the first place — language
+cannot change which tools were offered).
+`tests/integration/conciergeMultilingual.test.ts` proves multilingual
+tenant isolation against a real two-hotel fixture. Prompt-injection
+resistance in this system comes from the architecture itself (whitelisted
+tools, the propose/confirm split, canonical tool arguments) rather than
+from the model being asked nicely to refuse — which is also why the mock
+provider, which does no instruction-following at all, is still a
+meaningful thing to test this way: what's actually under test is the
+surrounding structure, and that structure is language-blind by
+construction.
+
+### Phase 3 addendum (superseded by Phase 4 above, kept for history)
+
+Prior to Phase 4, `src/lib/ai/tools/getHotelKnowledge.ts`/
+`getRoomTypesSummary.ts` (and every other AI tool) called the plain,
 unlocalized `aiKnowledgeDocuments.findByCategory()`/`roomTypes.findMany()`
-— untouched by Phase 3, deliberately, even though a locale-aware
-alternative (`findByCategoryLocalized()`/`findManyLocalized()`) now
-exists in the same file. That layer was built specifically so Phase 4 CAN
-wire multilingual AI grounding cleanly later; it is not activated for AI
-conversation yet.
+— deliberately, even though the locale-aware alternative
+(`findByCategoryLocalized()`/`findManyLocalized()`) already existed in the
+same file. That layer was built specifically so a later phase could wire
+multilingual AI grounding cleanly; Phase 4 is that phase, and the AI tools
+now use the locale-aware reads as described above.
 
 ## Management scope
 

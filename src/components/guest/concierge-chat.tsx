@@ -488,7 +488,16 @@ function ServiceRequestProposalCard({
       <dl className="grid gap-1 text-sm text-basalt-800">
         <div className="flex gap-2">
           <dt className="font-medium">{t("type")}</dt>
-          <dd>{proposal.label}</dd>
+          {/* Multilingual Support Phase 4 — `proposal.label` (from the AI
+              tool's own output) is the canonical English label; the
+              guest-facing DISPLAY uses the translated
+              Concierge.serviceRequestTypes.* catalog instead, keyed by the
+              canonical `proposal.type` enum value — the same "canonical
+              operation value stays language-neutral, only presentation is
+              translated" separation the hidden `type` form field below
+              already relies on. Falls back to the tool's own English
+              label if a type is ever unrecognized by the catalog. */}
+          <dd>{t.has(`serviceRequestTypes.${proposal.type}`) ? t(`serviceRequestTypes.${proposal.type}`) : proposal.label}</dd>
         </div>
         {proposal.notes && (
           <div className="flex gap-2">

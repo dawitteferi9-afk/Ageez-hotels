@@ -219,6 +219,13 @@
       "requestVerificationExpired": "Your booking verification could not be confirmed. Please verify your booking again, then resend your request.",
       "tooManyRequests": "Too many requests submitted in a short time. Please wait a while before trying again, or contact the front desk.",
       "messageTooLong": "Please keep your message under {max} characters."
+    },
+    "serviceRequestTypes": {
+      "AIRPORT_TRANSFER": "Airport Transfer",
+      "LAUNDRY": "Laundry",
+      "ROOM_SERVICE": "Room Service",
+      "RESTAURANT": "Restaurant",
+      "OTHER": "Other"
     }
   },
   "Highlights": {

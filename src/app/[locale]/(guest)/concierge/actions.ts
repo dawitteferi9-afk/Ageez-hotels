@@ -1,7 +1,7 @@
 "use server";
 
 import { headers } from "next/headers";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { getAiProvider, type AiChatTurn, type AiToolCallRecord } from "@/lib/ai/provider";
 import { buildAnonymousConciergeSystemPrompt, buildVerifiedConciergeSystemPrompt } from "@/lib/ai/prompt";
@@ -10,11 +10,8 @@ import { getVerifiedConciergeTools } from "@/lib/ai/tools/verifiedConciergeTools
 import { signVerifiedContextToken, resolveVerifiedReservationContext } from "@/lib/ai/verifiedContext";
 import { checkRateLimit, verifyReservationRateLimitKey, confirmServiceRequestRateLimitKey } from "@/lib/ai/rateLimiter";
 import { MAX_MESSAGE_LENGTH, boundHistory } from "@/lib/ai/messageBounds";
-import {
-  normalizeServiceRequestType,
-  normalizeServiceRequestNotes,
-  serviceRequestTypeLabel,
-} from "@/lib/domain/serviceRequestTypes";
+import { resolveEffectiveLocale } from "@/lib/guest/locale";
+import { normalizeServiceRequestType, normalizeServiceRequestNotes } from "@/lib/domain/serviceRequestTypes";
 
 /**
  * M6 Phase b — the anonymous guest concierge's ONLY server-side entry
@@ -177,6 +174,20 @@ export async function sendConciergeMessageAction(
     contactEmail: hotel.contactEmail,
   };
 
+  // Multilingual Support Phase 4 — the effective CONVERSATION locale.
+  // `getLocale()` is the same trusted, server-derived request context
+  // every other guest page/action already reads (never a raw client-
+  // supplied value) — `resolveEffectiveLocale()` independently
+  // re-validates it against both the platform's known locales and this
+  // hotel's own `enabledLocales` (defense in depth, exactly like every
+  // other locale-consuming code path), falling back to English rather
+  // than ever blocking the conversation. This is PRESENTATION/
+  // conversation-language context only — `hotel.id` (tenant identity) is
+  // resolved completely separately, above, and nothing below lets locale
+  // influence which hotel's data is read, only how its approved content
+  // is presented.
+  const locale = resolveEffectiveLocale(await getLocale(), hotel.enabledLocales);
+
   // A stale/expired/tampered/cross-tenant token fails to resolve here
   // (never throws) — resolveVerifiedReservationContext() never reveals
   // which check failed.
@@ -192,19 +203,24 @@ export async function sendConciergeMessageAction(
   }
 
   const systemPrompt = verifiedContext
-    ? buildVerifiedConciergeSystemPrompt(hotelIdentity)
-    : buildAnonymousConciergeSystemPrompt(hotelIdentity);
+    ? buildVerifiedConciergeSystemPrompt(hotelIdentity, locale)
+    : buildAnonymousConciergeSystemPrompt(hotelIdentity, locale);
 
   const tools =
     verifiedContext && token
-      ? [...getAnonymousConciergeTools(hotel.id), ...getVerifiedConciergeTools(token)]
-      : getAnonymousConciergeTools(hotel.id);
+      ? [...getAnonymousConciergeTools(hotel.id, locale), ...getVerifiedConciergeTools(token, locale)]
+      : getAnonymousConciergeTools(hotel.id, locale);
 
   try {
     // M8c — the provider only ever sees the most recent MAX_HISTORY_MESSAGES
     // turns; the full transcript in `messages` below (returned to the
     // browser) is completely unaffected.
-    const result = await getAiProvider().converse({ systemPrompt, history: boundHistory(messagesWithGuestTurn), tools });
+    const result = await getAiProvider().converse({
+      systemPrompt,
+      history: boundHistory(messagesWithGuestTurn),
+      tools,
+      locale,
+    });
     return {
       messages: [...messagesWithGuestTurn, { role: "assistant", content: result.reply }],
       // Always set from THIS turn's tool calls only (`undefined` if this
@@ -398,9 +414,16 @@ export async function confirmServiceRequestAction(
       type,
       notes,
     });
+    // Multilingual Support Phase 4 — the DISPLAYED label is translated
+    // (Concierge.serviceRequestTypes.*); `type` itself (the value actually
+    // written to the database above) stays the canonical, language-neutral
+    // ServiceRequestType enum untouched — presentation and canonical
+    // operational value are deliberately kept separate (docs/MULTILINGUAL.md's
+    // Phase 4 section).
+    const serviceRequestTypeLabels = await getTranslations("Concierge.serviceRequestTypes");
     return {
       status: "success",
-      requestType: serviceRequestTypeLabel(type),
+      requestType: serviceRequestTypeLabels(type),
       requestStatus: created.status,
     };
   } catch {

@@ -37,8 +37,16 @@ import { SERVICE_REQUEST_TYPES } from "@/lib/domain/serviceRequestTypes";
  * incorrect data. `proposeServiceRequest` follows the identical rule even
  * though it touches no guest data itself — a proposal must never be
  * buildable once verification can no longer be confirmed.
+ *
+ * Multilingual Support Phase 4 — `locale` (default `"en"`) is bound via
+ * closure alongside `token`, same rule as `getAnonymousConciergeTools()`:
+ * resolved server-side before this function is called, never part of a
+ * model-facing `inputSchema`. Only affects `getReservationSummary`'s
+ * translated `roomTypeName` display field (Phase 3 fallback-safe
+ * translation) — `getServiceRequestStatus`/`proposeServiceRequest` return
+ * no translatable hotel-content field, so they're unaffected.
  */
-export function getVerifiedConciergeTools(token: string): AiToolDefinition[] {
+export function getVerifiedConciergeTools(token: string, locale: string = "en"): AiToolDefinition[] {
   return [
     {
       name: "getReservationSummary",
@@ -48,7 +56,7 @@ export function getVerifiedConciergeTools(token: string): AiToolDefinition[] {
       execute: async () => {
         const context = await resolveVerifiedReservationContext(token);
         if (!context) return { found: false };
-        return getReservationSummary(context);
+        return getReservationSummary(context, locale);
       },
     },
     {

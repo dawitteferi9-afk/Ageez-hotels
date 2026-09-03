@@ -50,6 +50,20 @@ export interface AiConverseInput {
   history: AiChatTurn[];
   /** The closed set of tools this conversation may use — callers pass only the tier-appropriate list (e.g. `getAnonymousConciergeTools()`), never a combined "all tools" registry. */
   tools: AiToolDefinition[];
+  /**
+   * Multilingual Support Phase 4 — the effective conversation locale
+   * (`src/lib/guest/locale.ts`'s `resolveEffectiveLocale()`), informational
+   * only. The real language instruction already lives inside `systemPrompt`
+   * itself (`src/lib/ai/prompt.ts`'s language-instruction layer) — the
+   * Anthropic provider reads it from there and never needs this field.
+   * It exists so `createMockProvider()` (a keyword-matching stand-in with
+   * no actual language understanding) can pick which locale's small,
+   * deterministic reply set to use, since it never "reads" `systemPrompt`
+   * as an instruction the way a real model does. Optional and defaults to
+   * `"en"` behavior wherever omitted — every existing caller/test is
+   * unaffected.
+   */
+  locale?: string;
 }
 
 export interface AiConverseResult {

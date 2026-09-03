@@ -18,8 +18,17 @@ import { getRoomTypesSummary } from "./getRoomTypesSummary";
  * Action/route that resolves the current tenant — never part of any
  * tool's model-facing `inputSchema`, so the model has no way to ask for
  * a different hotel's data even in principle.
+ *
+ * Multilingual Support Phase 4 — `locale` (default `"en"`) is bound via
+ * closure exactly the same way `hotelId` is: resolved server-side
+ * (`resolveEffectiveLocale()`, `src/lib/guest/locale.ts`) before this
+ * function is ever called, never part of either tool's model-facing
+ * `inputSchema`, so the model has no way to request a different locale's
+ * data than the one the guest is actually browsing in. Both tools use it
+ * only to select an approved translation (Phase 3), with English fallback
+ * — it changes no security or grounding rule.
  */
-export function getAnonymousConciergeTools(hotelId: string): AiToolDefinition[] {
+export function getAnonymousConciergeTools(hotelId: string, locale: string = "en"): AiToolDefinition[] {
   return [
     {
       name: "getHotelKnowledge",
@@ -38,7 +47,7 @@ export function getAnonymousConciergeTools(hotelId: string): AiToolDefinition[] 
       },
       execute: async (input) => {
         const { category } = input as { category: string };
-        return getHotelKnowledge(hotelId, category);
+        return getHotelKnowledge(hotelId, category, locale);
       },
     },
     {
@@ -49,7 +58,7 @@ export function getAnonymousConciergeTools(hotelId: string): AiToolDefinition[] 
         properties: {},
         additionalProperties: false,
       },
-      execute: async () => getRoomTypesSummary(hotelId),
+      execute: async () => getRoomTypesSummary(hotelId, locale),
     },
   ];
 }

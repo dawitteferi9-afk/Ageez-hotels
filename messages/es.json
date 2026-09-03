@@ -219,6 +219,13 @@
       "requestVerificationExpired": "No se pudo confirmar la verificación de su reserva. Verifique su reserva nuevamente y vuelva a enviar su solicitud.",
       "tooManyRequests": "Se enviaron demasiadas solicitudes en poco tiempo. Espere un momento antes de volver a intentarlo, o contacte con recepción.",
       "messageTooLong": "Mantenga su mensaje por debajo de {max} caracteres."
+    },
+    "serviceRequestTypes": {
+      "AIRPORT_TRANSFER": "Traslado al aeropuerto",
+      "LAUNDRY": "Lavandería",
+      "ROOM_SERVICE": "Servicio a la habitación",
+      "RESTAURANT": "Restaurante",
+      "OTHER": "Otro"
     }
   },
   "Highlights": {

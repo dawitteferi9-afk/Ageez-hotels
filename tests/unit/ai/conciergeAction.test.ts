@@ -21,6 +21,12 @@ const mockHotel = {
   country: "Testland",
   contactEmail: "info@test.example",
   contactPhone: "+1-555-0100",
+  // Multilingual Support Phase 4 — sendConciergeMessageAction() now reads
+  // this to resolve the effective conversation locale
+  // (resolveEffectiveLocale()); a real Hotel row always has it
+  // (Hotel.enabledLocales, Phase 1, @default(["en"])) so the fixture
+  // should too.
+  enabledLocales: ["en", "am", "zh", "es", "ar"],
 };
 
 const getCurrentTenantHotel = vi.fn();

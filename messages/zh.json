@@ -219,6 +219,13 @@
       "requestVerificationExpired": "您的预订验证无法确认。请重新验证您的预订后再次发送请求。",
       "tooManyRequests": "短时间内提交的请求过多。请稍候片刻后再试，或联系前台。",
       "messageTooLong": "请将消息控制在{max}字以内。"
+    },
+    "serviceRequestTypes": {
+      "AIRPORT_TRANSFER": "机场接送",
+      "LAUNDRY": "洗衣服务",
+      "ROOM_SERVICE": "客房服务",
+      "RESTAURANT": "餐厅",
+      "OTHER": "其他"
     }
   },
   "Highlights": {

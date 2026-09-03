@@ -74,6 +74,50 @@ describe("buildAnonymousConciergeSystemPrompt", () => {
     // Same structural rules present in both, just different identity data.
     expect(promptB).toContain("getHotelKnowledge");
   });
+
+  /**
+   * Multilingual Support Phase 4 — the language-instruction layer.
+   * Defaults to English (byte-identical grounding/security rules either
+   * way — only one paragraph is appended/swapped), and every locale gets
+   * its own instruction naming the right script/register per
+   * docs/MULTILINGUAL.md's Phase 4 section.
+   */
+  describe("language instruction (Phase 4)", () => {
+    it("defaults to English when no locale is passed", () => {
+      const prompt = buildAnonymousConciergeSystemPrompt(HOTEL);
+      expect(prompt.toLowerCase()).toMatch(/respond in natural, professional hospitality english/);
+    });
+
+    it("appends the correct language instruction for each locale, without altering the grounding/security rules already asserted above", () => {
+      const am = buildAnonymousConciergeSystemPrompt(HOTEL, "am");
+      expect(am).toMatch(/Amharic/);
+      expect(am).toMatch(/Ethiopic/);
+      expect(am).toContain("getHotelKnowledge"); // grounding rule still present
+
+      const zh = buildAnonymousConciergeSystemPrompt(HOTEL, "zh");
+      expect(zh).toMatch(/Simplified Chinese/);
+
+      const es = buildAnonymousConciergeSystemPrompt(HOTEL, "es");
+      expect(es).toMatch(/Spanish/);
+      expect(es.toLowerCase()).toMatch(/neutral international/);
+
+      const ar = buildAnonymousConciergeSystemPrompt(HOTEL, "ar");
+      expect(ar).toMatch(/Modern Standard Arabic/);
+      expect(ar).toMatch(/Arabic script/);
+    });
+
+    it("never claims a fact merely because it 'sounds natural' in another language — the fact-preservation instruction is present for every locale", () => {
+      for (const locale of ["en", "am", "zh", "es", "ar"] as const) {
+        const prompt = buildAnonymousConciergeSystemPrompt(HOTEL, locale);
+        expect(prompt.toLowerCase()).toMatch(/never add, infer, or embellish a fact/);
+      }
+    });
+
+    it("permits natural language switching if the guest clearly writes in another supported language", () => {
+      const prompt = buildAnonymousConciergeSystemPrompt(HOTEL, "am");
+      expect(prompt.toLowerCase()).toMatch(/you may respond in that language instead/);
+    });
+  });
 });
 
 describe("buildVerifiedConciergeSystemPrompt", () => {
@@ -141,6 +185,14 @@ describe("buildVerifiedConciergeSystemPrompt", () => {
     expect(promptA).not.toContain("Second Hotel");
     expect(promptB).not.toContain("Ageez Grand Hotel");
     expect(promptB).toContain("getReservationSummary");
+  });
+
+  it("Multilingual Support Phase 4: also carries the language instruction, without weakening the verified-tier confirmation rule", () => {
+    const prompt = buildVerifiedConciergeSystemPrompt(HOTEL, "ar");
+    expect(prompt).toMatch(/Modern Standard Arabic/);
+    // The verified-tier confirmation-security rule is present regardless of locale.
+    expect(prompt.toLowerCase()).toMatch(/cannot submit it yourself/);
+    expect(prompt.toLowerCase()).toMatch(/a plain conversational reply is never approval/);
   });
 });
 

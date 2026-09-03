@@ -104,6 +104,27 @@ import type { AiProvider, AiConverseInput, AiConverseResult, AiToolCallRecord } 
  *     restriction, and vice versa.
  */
 
+/**
+ * Multilingual Support Phase 4 — each category's keyword list gained a
+ * SMALL, REPRESENTATIVE set of non-English equivalents (one or two words
+ * per locale, not exhaustive coverage) so the deterministic e2e test
+ * suite can exercise a genuine multilingual round-trip through this
+ * provider (guest question -> mock keyword match -> locale-aware tool
+ * call -> approved translated content) for the specific scenarios
+ * `docs/MULTILINGUAL.md`'s Phase 4 section documents testing. This is
+ * NOT a general multilingual NLP system — deliberately scoped down per
+ * that phase's explicit instruction ("extend the mock only enough to
+ * support deterministic representative multilingual test cases... do
+ * not attempt to build a homemade general multilingual NLP system").
+ * Broad natural multilingual understanding is the REAL Anthropic
+ * provider's job (`../providers/anthropic.ts`) — it needs no such table
+ * at all, since the model actually reads and understands the guest's
+ * question in whatever language it's written, and reads the language
+ * instruction embedded in `systemPrompt` (`../prompt.ts`) directly.
+ * String matching, not case-folding-sensitive scripts — `.toLowerCase()`
+ * on the incoming question is a no-op for Ethiopic/CJK/Arabic script, so
+ * these entries are added exactly as they'd naturally be typed.
+ */
 const KNOWLEDGE_CATEGORY_KEYWORDS: Record<string, string[]> = {
   // Guest-experience Phase A — "breakfast" moved here from `dining`: the
   // actual breakfast-hours fact ("Breakfast is served 6:30-10:30 AM")
@@ -114,20 +135,93 @@ const KNOWLEDGE_CATEGORY_KEYWORDS: Record<string, string[]> = {
   // returned the restaurant/lounge blurb, which never mentions a time at
   // all. No new fact, just correcting which existing document a
   // guest-facing question about an existing fact resolves to.
-  policies: ["check-in", "check in", "checkout", "check-out", "policy", "policies", "breakfast"],
-  dining: ["restaurant", "dining", "food", "buna", "axum"],
+  policies: [
+    "check-in",
+    "check in",
+    "checkout",
+    "check-out",
+    "policy",
+    "policies",
+    "breakfast",
+    // Multilingual Support Phase 4 — am/zh/es/ar for "check-in"/"checkout"/"breakfast".
+    "የመግቢያ",
+    "የመውጫ",
+    "ቁርስ",
+    "入住",
+    "退房",
+    "早餐",
+    "entrada",
+    "salida",
+    "desayuno",
+    "تسجيل الوصول",
+    "المغادرة",
+    "الإفطار",
+  ],
+  dining: ["restaurant", "dining", "food", "buna", "axum", "ምግብ ቤት", "餐厅", "restaurante", "المطعم"],
   // "business center" added — the facilities document already states
   // "...and a business center." (seed fixture, unchanged); this keyword
   // was simply missing, so that existing fact was previously unreachable
   // by a direct "Do you have a business center?" question.
-  facilities: ["facility", "facilities", "gym", "fitness", "conference", "business center"],
-  services: ["service", "laundry", "wifi", "wi-fi", "airport"],
+  facilities: [
+    "facility",
+    "facilities",
+    "gym",
+    "fitness",
+    "conference",
+    "business center",
+    // Multilingual Support Phase 4 — am/zh/es/ar for "fitness"/"facilities".
+    "የአካል ብቃት",
+    "健身",
+    "设施",
+    "gimnasio",
+    "instalaciones",
+    "لياقة",
+    "مرافق",
+  ],
+  services: [
+    "service",
+    "laundry",
+    "wifi",
+    "wi-fi",
+    "airport",
+    // Multilingual Support Phase 4 — am/zh/es/ar for "service"/"laundry".
+    "አገልግሎት",
+    "服务",
+    "servicio",
+    "خدمة",
+  ],
   payment: ["pay", "payment", "price includes"],
   overview: ["about", "overview", "tell me about"],
 };
 
-const NOT_FOUND_REPLY =
-  "I don't have that information — please contact the front desk for details.";
+/**
+ * Multilingual Support Phase 4 — the mock's own generated (non-DB) reply
+ * sentences, translated for the small set of deterministic multilingual
+ * test scenarios this phase requires (`docs/MULTILINGUAL.md`). This is
+ * the bounded, explicitly-scoped exception to "the mock stays English" —
+ * everything else the mock generates itself (`PERSONAL_INFO_REPLY`,
+ * `VERIFY_AGAIN_REPLY`, `VERIFY_HOWTO_REPLY`, the reservation/service-
+ * request-list summaries) intentionally remains English-only; those paths
+ * aren't part of the required multilingual test scenarios, and localizing
+ * every mock-generated sentence would cross into "building a homemade
+ * multilingual NLP system," which this phase explicitly avoids. Real
+ * multilingual quality for these untranslated paths comes from the real
+ * Anthropic provider instead, which needs no such table.
+ */
+const MOCK_LOCALES = ["en", "am", "zh", "es", "ar"] as const;
+type MockLocale = (typeof MOCK_LOCALES)[number];
+
+function normalizeMockLocale(locale?: string): MockLocale {
+  return (MOCK_LOCALES as readonly string[]).includes(locale ?? "") ? (locale as MockLocale) : "en";
+}
+
+const NOT_FOUND_REPLY_BY_LOCALE: Record<MockLocale, string> = {
+  en: "I don't have that information — please contact the front desk for details.",
+  am: "ይህን መረጃ የለኝም — እባክዎ ዝርዝር ለማወቅ የፊት ጠረጴዛውን ያግኙ።",
+  zh: "我没有这项信息——详情请联系前台。",
+  es: "No tengo esa información — por favor, contacte con recepción para más detalles.",
+  ar: "ليست لدي هذه المعلومة — يُرجى التواصل مع مكتب الاستقبال لمزيد من التفاصيل.",
+};
 
 /**
  * A guest asking about *their own* reservation/room/request, as opposed to
@@ -205,8 +299,11 @@ const VERIFY_AGAIN_REPLY =
  * via its own action verb (`book`) already in this list, so nothing is
  * lost by excluding the "want to" shape here specifically.
  */
+// Multilingual Support Phase 4 — am/zh/es/ar "need"/"want" equivalents
+// appended, so the deterministic laundry-request test scenario (see this
+// file's module comment) has a trigger word to match in every locale.
 const SERVICE_REQUEST_CREATE_TRIGGER =
-  /\b(request|book|arrange|order|schedule|need|reserve|please send|please collect|can i get|could i get|i want(?!\s+to\b))\b/;
+  /\b(request|book|arrange|order|schedule|need|reserve|please send|please collect|can i get|could i get|i want(?!\s+to\b))\b|እፈልጋለሁ|ያስፈልገኛል|需要|我要|necesito|quiero|أحتاج|أريد/;
 
 /**
  * Specific-type keyword -> `ServiceRequestType`, checked together with
@@ -215,10 +312,16 @@ const SERVICE_REQUEST_CREATE_TRIGGER =
  * restaurant request" that doesn't name a table/reservation specifically —
  * still requires the trigger word `request` above, so a bare "restaurant"
  * mention elsewhere never matches this on its own.
+ *
+ * Multilingual Support Phase 4 — LAUNDRY gained am/zh/es/ar equivalents
+ * (the one representative service type this phase's required test
+ * scenarios exercise across all five locales — see this file's module
+ * comment on why the other three types weren't given the same
+ * treatment: deliberately bounded scope, not an oversight).
  */
 const SERVICE_REQUEST_TYPE_KEYWORDS: Record<string, string[]> = {
   AIRPORT_TRANSFER: ["airport transfer", "airport pickup", "airport shuttle", "ride to the airport"],
-  LAUNDRY: ["laundry", "dry clean", "dry cleaning"],
+  LAUNDRY: ["laundry", "dry clean", "dry cleaning", "ልብስ ማጠቢያ", "洗衣", "lavandería", "غسيل"],
   ROOM_SERVICE: ["room service", "food to my room", "breakfast to my room"],
   RESTAURANT: ["restaurant reservation", "book a table", "reserve a table", "table for", "restaurant request"],
 };
@@ -226,8 +329,40 @@ const SERVICE_REQUEST_TYPE_KEYWORDS: Record<string, string[]> = {
 /** No specific type keyword matched, but the guest is clearly asking for *something* — maps to `OTHER`, never a guessed specific type. */
 const GENERIC_SERVICE_REQUEST_PHRASES = ["special request", "service request", "a request for"];
 
-const SERVICE_REQUEST_PROPOSAL_DECLINE_REPLY =
-  "I couldn't prepare that as a service request right now — please try naming a specific service (laundry, an airport transfer, room service, or a restaurant reservation), verify your booking again if it's been a while, or contact the front desk.";
+const SERVICE_REQUEST_PROPOSAL_DECLINE_REPLY_BY_LOCALE: Record<MockLocale, string> = {
+  en: "I couldn't prepare that as a service request right now — please try naming a specific service (laundry, an airport transfer, room service, or a restaurant reservation), verify your booking again if it's been a while, or contact the front desk.",
+  am: "አሁን ይህን እንደ አገልግሎት ጥያቄ ማዘጋጀት አልቻልኩም — እባክዎ የተለየ አገልግሎት ይጠቁሙ (ልብስ ማጠቢያ፣ ከአውሮፕላን ማረፊያ ትራንስፖርት፣ የክፍል አገልግሎት ወይም የምግብ ቤት ማስያዣ)፣ ጊዜ ካለፈ ቦታ ማስያዣዎን እንደገና ያረጋግጡ፣ ወይም የፊት ጠረጴዛውን ያግኙ።",
+  zh: "我暂时无法将其准备为服务请求——请尝试说明具体服务（洗衣、机场接送、客房服务或餐厅预订），如果时间较久请重新验证您的预订，或联系前台。",
+  es: "No pude preparar eso como una solicitud de servicio en este momento — intente indicar un servicio específico (lavandería, traslado al aeropuerto, servicio a la habitación o una reserva en el restaurante), vuelva a verificar su reserva si ha pasado un tiempo, o contacte con recepción.",
+  ar: "لم أتمكن من إعداد ذلك كطلب خدمة الآن — يُرجى تحديد خدمة معينة (الغسيل، النقل من المطار، خدمة الغرف، أو حجز في المطعم)، أو إعادة التحقق من حجزك إذا مر وقت طويل، أو التواصل مع مكتب الاستقبال.",
+};
+
+/**
+ * Multilingual Support Phase 4 — guest-facing service-type labels for the
+ * mock's own generated proposal sentence below, mirroring
+ * `messages/<locale>.json`'s `Concierge.serviceRequestTypes` catalog
+ * (kept as a small, separate, intentionally-duplicated table here rather
+ * than importing from `messages/*.json`: `src/lib/ai` is a portable,
+ * Next.js/next-intl-independent layer by design — see this module's own
+ * "vendor-neutral" architecture notes — and must never depend on the
+ * front-end's i18n catalog).
+ */
+const SERVICE_TYPE_LABELS_BY_LOCALE: Record<MockLocale, Record<string, string>> = {
+  en: { AIRPORT_TRANSFER: "Airport Transfer", LAUNDRY: "Laundry", ROOM_SERVICE: "Room Service", RESTAURANT: "Restaurant", OTHER: "Other" },
+  am: { AIRPORT_TRANSFER: "ከአውሮፕላን ማረፊያ አገልግሎት", LAUNDRY: "ልብስ ማጠቢያ", ROOM_SERVICE: "የክፍል አገልግሎት", RESTAURANT: "ምግብ ቤት", OTHER: "ሌላ" },
+  zh: { AIRPORT_TRANSFER: "机场接送", LAUNDRY: "洗衣服务", ROOM_SERVICE: "客房服务", RESTAURANT: "餐厅", OTHER: "其他" },
+  es: { AIRPORT_TRANSFER: "Traslado al aeropuerto", LAUNDRY: "Lavandería", ROOM_SERVICE: "Servicio a la habitación", RESTAURANT: "Restaurante", OTHER: "Otro" },
+  ar: { AIRPORT_TRANSFER: "خدمة النقل من المطار", LAUNDRY: "خدمة الغسيل", ROOM_SERVICE: "خدمة الغرف", RESTAURANT: "المطعم", OTHER: "أخرى" },
+};
+
+/** The translated "Confirm Request" button text per locale (`Concierge.confirmRequest`), so the mock's proposal reply references the button's ACTUAL on-screen label in every locale. */
+const CONFIRM_REQUEST_BUTTON_LABEL_BY_LOCALE: Record<MockLocale, string> = {
+  en: "Confirm Request",
+  am: "ጥያቄ አረጋግጥ",
+  zh: "确认请求",
+  es: "Confirmar solicitud",
+  ar: "تأكيد الطلب",
+};
 
 /**
  * M7a — one fixed reply for every `{ available: false }` tool result,
@@ -327,10 +462,12 @@ function isManagementToolUnavailable(result: unknown): boolean {
 
 export function createMockProvider(): AiProvider {
   return {
-    async converse({ history, tools }: AiConverseInput): Promise<AiConverseResult> {
+    async converse({ history, tools, locale }: AiConverseInput): Promise<AiConverseResult> {
       const lastUserTurn = [...history].reverse().find((turn) => turn.role === "user");
       const question = (lastUserTurn?.content ?? "").toLowerCase();
       const toolCalls: AiToolCallRecord[] = [];
+      // Multilingual Support Phase 4 — see this file's module comment.
+      const mockLocale = normalizeMockLocale(locale);
 
       // M7b correction — see this file's module comment / M6_GUEST_TOOL_NAMES.
       const isM6GuestConversation = tools.some((t) => M6_GUEST_TOOL_NAMES.has(t.name));
@@ -373,7 +510,7 @@ export function createMockProvider(): AiProvider {
           const notes = lastUserTurn?.content ?? "";
           const result = await proposeTool.execute({ type, notes });
           toolCalls.push({ name: proposeTool.name, input: { type, notes }, result });
-          return { reply: summarizeServiceRequestProposal(result), toolCalls };
+          return { reply: summarizeServiceRequestProposal(result, mockLocale), toolCalls };
         }
       }
 
@@ -396,12 +533,24 @@ export function createMockProvider(): AiProvider {
       // `getRoomTypesSummary` tool, still the same deterministic
       // verbatim-from-DB reply (`summarizeRoomTypes`, below) — no new
       // capability, no per-question special-casing of an answer.
-      if (/room type|price|suite|how much|nightly rate|best room|which room|most premium|premium room/.test(question)) {
+      // Multilingual Support Phase 4 — am/zh/es/ar alternatives for
+      // "price"/"room" appended (see this file's module comment on the
+      // deliberately small, representative scope of these additions). "房"
+      // (the generic Chinese "room" character, common to every seeded room
+      // name — 大床房/双床房/客房/套房) is included alongside "房型" so a
+      // guest naming a room by its own translated Chinese name (e.g.
+      // "行政客房") is recognized the same way "ክፍል"/"habitación"/"غرفة"
+      // already are for Amharic/Spanish/Arabic room names.
+      if (
+        /room type|price|suite|how much|nightly rate|best room|which room|most premium|premium room|ዋጋ|ክፍል|价格|多少钱|房型|房|precio|habitación|سعر|غرفة/.test(
+          question
+        )
+      ) {
         const tool = tools.find((t) => t.name === "getRoomTypesSummary");
         if (tool) {
           const result = await tool.execute({});
           toolCalls.push({ name: tool.name, input: {}, result });
-          return { reply: summarizeRoomTypes(result, question), toolCalls };
+          return { reply: summarizeRoomTypes(result, question, mockLocale), toolCalls };
         }
       }
 
@@ -421,7 +570,7 @@ export function createMockProvider(): AiProvider {
         break;
       }
 
-      return { reply: NOT_FOUND_REPLY, toolCalls };
+      return { reply: NOT_FOUND_REPLY_BY_LOCALE[mockLocale], toolCalls };
     },
   };
 }
@@ -453,14 +602,35 @@ function summarizeReservation(result: unknown): string {
  * returned `{type, label, notes}` and explicitly says the model cannot
  * submit it; an invalid one (bad type, or the token no longer resolves)
  * gets the same safe generic decline either way.
+ *
+ * Multilingual Support Phase 4 — `locale` (default `"en"`, so every
+ * existing caller/test that doesn't pass one keeps getting byte-identical
+ * English text) selects both the sentence template and the guest-facing
+ * type label from the small locale-keyed tables above — the LABEL
+ * reflects the guest's language, but `typed.type` (the canonical enum
+ * the confirm form actually submits, rendered by `concierge-chat.tsx`,
+ * not here) is completely untouched.
  */
-function summarizeServiceRequestProposal(result: unknown): string {
-  const typed = result as { valid: boolean; label?: string };
-  if (!typed.valid || !typed.label) return SERVICE_REQUEST_PROPOSAL_DECLINE_REPLY;
-  return (
-    `I've prepared a ${typed.label} request based on what you told me. ` +
-    `Please review the details below and press "Confirm Request" to submit it — I can't submit it for you.`
-  );
+function summarizeServiceRequestProposal(result: unknown, locale: MockLocale = "en"): string {
+  const typed = result as { valid: boolean; type?: string; label?: string };
+  if (!typed.valid || !typed.type) return SERVICE_REQUEST_PROPOSAL_DECLINE_REPLY_BY_LOCALE[locale];
+  const label = SERVICE_TYPE_LABELS_BY_LOCALE[locale][typed.type] ?? typed.label ?? typed.type;
+  const confirmButtonLabel = CONFIRM_REQUEST_BUTTON_LABEL_BY_LOCALE[locale];
+  switch (locale) {
+    case "am":
+      return `${label} ጥያቄ በነገሩኝ መሰረት አዘጋጅቻለሁ። እባክዎ ከታች ያለውን ዝርዝር ይመልከቱ እና ለማስገባት "${confirmButtonLabel}"ን ይጫኑ — እኔ ራሴ ላስገባው አልችልም።`;
+    case "zh":
+      return `我已根据您提供的信息准备了一份${label}请求。请查看下方详情，并点击"${confirmButtonLabel}"提交——我无法替您提交。`;
+    case "es":
+      return `He preparado una solicitud de ${label} según lo que me indicó. Revise los detalles a continuación y pulse "${confirmButtonLabel}" para enviarla — yo no puedo enviarla por usted.`;
+    case "ar":
+      return `لقد أعددتُ طلب ${label} بناءً على ما أخبرتني به. يُرجى مراجعة التفاصيل أدناه والضغط على "${confirmButtonLabel}" لإرساله — لا يمكنني إرساله نيابة عنك.`;
+    default:
+      return (
+        `I've prepared a ${label} request based on what you told me. ` +
+        `Please review the details below and press "${confirmButtonLabel}" to submit it — I can't submit it for you.`
+      );
+  }
 }
 
 function summarizeServiceRequests(result: unknown): string {
@@ -495,8 +665,18 @@ function summarizeServiceRequests(result: unknown): string {
  * room, so `named` stays empty and the full catalog is returned exactly
  * as before — that decision (full list for comparisons, since the mock
  * isn't equipped to reason its way to one) is unchanged.
+ *
+ * Multilingual Support Phase 4 — `result` (from `getRoomTypesSummary()`,
+ * Phase 3-aware) now carries the approved-translated `name`/`description`
+ * for the requested locale (English fallback field-by-field) — this
+ * function never re-translates them, it only wraps them in a
+ * locale-appropriate sentence template (the "(up to N guests, X/night)"
+ * wrapper words). `named` still matches against `rt.name.toLowerCase()`,
+ * which now naturally works for a guest naming a room in ITS OWN
+ * translated name too (e.g. Amharic "ኤክስኪዩቲቭ ክፍል"), with zero extra
+ * per-locale room-name table needed.
  */
-function summarizeRoomTypes(result: unknown, question?: string): string {
+function summarizeRoomTypes(result: unknown, question: string | undefined, locale: MockLocale = "en"): string {
   const roomTypes = result as Array<{
     name: string;
     description?: string;
@@ -505,16 +685,32 @@ function summarizeRoomTypes(result: unknown, question?: string): string {
     currency: string;
   }>;
   if (!Array.isArray(roomTypes) || roomTypes.length === 0) {
-    return NOT_FOUND_REPLY;
+    return NOT_FOUND_REPLY_BY_LOCALE[locale];
   }
   const named = question ? roomTypes.filter((rt) => question.includes(rt.name.toLowerCase())) : [];
   const toDescribe = named.length > 0 ? named : roomTypes;
   return toDescribe
     .map((rt) => {
-      const base = `${rt.name} (up to ${rt.capacity} guests, ${rt.basePrice} ${rt.currency}/night)`;
+      const base = roomTypeWrapper(locale, rt.name, rt.capacity, rt.basePrice, rt.currency);
       return rt.description ? `${base} — ${rt.description}` : base;
     })
     .join(" ");
+}
+
+/** Multilingual Support Phase 4 — the locale-appropriate "(up to N guests, price/night)" wrapper `summarizeRoomTypes()` uses above. */
+function roomTypeWrapper(locale: MockLocale, name: string, capacity: number, price: string, currency: string): string {
+  switch (locale) {
+    case "am":
+      return `${name} (እስከ ${capacity} እንግዶች፣ ${price} ${currency}/ሌሊት)`;
+    case "zh":
+      return `${name}（最多${capacity}位客人，${price} ${currency}/晚）`;
+    case "es":
+      return `${name} (hasta ${capacity} personas, ${price} ${currency}/noche)`;
+    case "ar":
+      return `${name} (حتى ${capacity} ضيوف، ${price} ${currency}/ليلة)`;
+    default:
+      return `${name} (up to ${capacity} guests, ${price} ${currency}/night)`;
+  }
 }
 
 /**
@@ -543,7 +739,10 @@ function summarizeManagementToolResult(toolName: string, result: unknown, questi
       // Structurally unreachable — MANAGEMENT_TOOL_KEYWORDS only ever
       // names the six real tool names above — but fails safely rather
       // than throwing if a future tool is added here without a summarizer.
-      return NOT_FOUND_REPLY;
+      // Management (/management/*) stays English-only (Phase 2/4 scope),
+      // so this always uses the English fallback regardless of guest
+      // locale — there is no guest locale in an M7 conversation anyway.
+      return NOT_FOUND_REPLY_BY_LOCALE.en;
   }
 }
 

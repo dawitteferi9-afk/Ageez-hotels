@@ -1,5 +1,144 @@
 # Changelog
 
+## Multilingual Support Phase 4 — multilingual AI Concierge conversation (2026-09-03)
+Made the Guest AI Concierge genuinely multilingual across all 5 platform
+locales — one Concierge, one tenant, one knowledge base, one security
+architecture, never five per-language copies of any of them. Locale is
+server-derived presentation/conversation context; it has zero influence
+on hotel identity, guest verification, staff RBAC, tenant authorization,
+or mutation authorization. See the new Phase 4 section of
+`docs/MULTILINGUAL.md` (under "AI Concierge boundary") for the full
+architecture.
+
+- **`src/lib/guest/locale.ts`:** new `resolveEffectiveLocale(requestedLocale,
+  enabledLocales)` — validates against both the platform locale list and
+  the tenant's own `enabledLocales`, falling back to English for anything
+  invalid/disabled/malformed; defensive against a non-array
+  `enabledLocales` (never throws).
+- **`src/lib/ai/prompt.ts`:** a language-instruction LAYER
+  (`LANGUAGE_INSTRUCTIONS: Record<AppLocale, string>` +
+  `LANGUAGE_INSTRUCTION_SUFFIX`) appended as the final paragraph of the
+  existing `buildAnonymousConciergeSystemPrompt()`/
+  `buildVerifiedConciergeSystemPrompt()` — not separate per-locale prompt
+  files. Each locale gets its own quality bar (Ethiopic script for
+  Amharic, natural Simplified Chinese, neutral international Spanish,
+  clear MSA Arabic) plus a shared fact-preservation warning.
+- **`src/lib/ai/provider.ts`:** `AiConverseInput` gained an optional,
+  purely informational `locale?: string` — the Anthropic provider ignores
+  it (reads the language instruction from `systemPrompt` itself); the
+  mock provider uses it, since it never "reads" `systemPrompt` as an
+  instruction.
+- **AI tools now use Phase 3's locale-aware reads**, closing the gap the
+  Phase 3 addendum deliberately left open: `getHotelKnowledge()`,
+  `getRoomTypesSummary()`, and `getReservationSummary()` all gained a
+  `locale` parameter (default `"en"`, fully backward-compatible) and now
+  call `findByCategoryLocalized()`/`findManyLocalized()`/
+  `roomTypes.localize()` instead of the plain unlocalized methods.
+  `getAnonymousConciergeTools()`/`getVerifiedConciergeTools()` gained a
+  `locale` closure parameter to thread it through — never part of any
+  tool's model-facing `inputSchema`.
+- **`src/lib/ai/providers/mock.ts`** — the smallest safe multilingual
+  extension for deterministic automated testing (not a homemade
+  multilingual NLP system): representative `am`/`zh`/`es`/`ar` keywords
+  merged into the existing flat keyword arrays (check-in/out, dining,
+  facilities, services, room/price words, laundry), plus new locale-keyed
+  template tables for the handful of sentences the mock itself generates
+  (`NOT_FOUND_REPLY_BY_LOCALE`, a room-price sentence wrapper,
+  `SERVICE_REQUEST_PROPOSAL_DECLINE_REPLY_BY_LOCALE`,
+  `SERVICE_TYPE_LABELS_BY_LOCALE`, `CONFIRM_REQUEST_BUTTON_LABEL_BY_LOCALE`).
+  Every DB-sourced string still passes through completely untouched. A
+  few other mock-only sentences (`PERSONAL_INFO_REPLY`,
+  `VERIFY_AGAIN_REPLY`, `VERIFY_HOWTO_REPLY`, list summaries) remain
+  English-only — a documented, accepted mock limitation, not a
+  guest-facing gap.
+- **Service-request type display, not enum, translation:** a new
+  `Concierge.serviceRequestTypes.*` message-catalog namespace (5 keys × 5
+  locales, 25 new leaf keys) is read by `concierge-chat.tsx`'s proposal
+  card (`t.has()`-guarded, falling back to the tool's own English label);
+  the tool's canonical `serviceRequestTypeLabel()` is unchanged.
+- **`src/app/[locale]/(guest)/concierge/actions.ts`:** derives the
+  effective locale server-side via `getLocale()` +
+  `resolveEffectiveLocale()`, passes it into the system-prompt builder,
+  the tool registries, and the provider `converse()` call;
+  `confirmServiceRequestAction` now renders the confirmed request's type
+  through the new translated namespace.
+- **Starter-question submission stays fixed in English — reassessed per
+  this phase's own brief, not left unchanged by default.** Now that
+  grounding is locale-aware regardless of the submitted text's language,
+  a translated starter-button click already produces a genuinely
+  localized, correctly-grounded reply; proven, not assumed, in the new
+  e2e suite.
+- **Testing:** `tests/unit/ai/multilingualSecurity.test.ts` (new, 12
+  tests) — deterministic, application-layer proof that data-exposure/
+  instruction-reveal attempts phrased in `am`/`zh`/`es`/`ar` never surface
+  a planted system-prompt sentinel and never fabricate reservation data,
+  and that a typed affirmation never itself triggers a service-request
+  tool call. `tests/unit/ai/mockProviderMultilingual.test.ts` (new, 21
+  tests) — the mock's per-locale scenarios A–G (general question, room
+  price, facility question, unsupported fact/no hallucination, service
+  request, fact equivalence). `tests/integration/conciergeMultilingual.test.ts`
+  (new, 8 tests) — multilingual tenant isolation against a real two-hotel
+  fixture (Hotel A's Amharic translation never reaches Hotel B; Hotel B's
+  English fallback never borrows Hotel A's translation) and locale-blind
+  tool schemas. `tests/e2e/conciergeMultilingual.spec.ts` (new, 24 tests)
+  — grounded replies in `am`/`zh`/`es`/`ar` for general/facility/
+  unsupported-fact questions, translated room-name → canonical price
+  resolution, starter-question behavior, a full Amharic verified-guest
+  laundry request through explicit confirmation, Arabic RTL chat layout
+  QA (desktop + mobile, no horizontal overflow), and price/currency fact
+  equivalence across all 5 locales. `tests/unit/ai/rateLimiter.test.ts`
+  and `tests/unit/guest/locale.test.ts`/`tests/unit/ai/prompt.test.ts`
+  extended with Phase 4 coverage.
+- **Two real bugs this phase's own testing caught and fixed (not
+  pre-existing, introduced and caught within this phase):**
+  1. The mock's room-type trigger regex was missing the generic Chinese
+     "room" character (`房`, common to every seeded Chinese room name —
+     大床房/双床房/客房/套房); a guest naming a room in Chinese by its own
+     translated name (e.g. "行政客房", containing no other trigger
+     keyword) fell through to the honest-fallback reply instead of the
+     room's price/details. Fixed by adding `房` alongside the existing
+     `房型` to the trigger regex — matching how `ክፍል`/`habitación`/`غرفة`
+     already worked for Amharic/Spanish/Arabic room names.
+  2. A new e2e fact-equivalence test read the concierge log immediately
+     after submitting a question, before the async reply had landed,
+     intermittently capturing "Thinking…" instead of the real reply.
+     Fixed by waiting for the reply's own content (`toContainText("ETB")`)
+     before asserting on it — the same pattern already used by the
+     test's sibling assertions elsewhere in the same file.
+- **Anthropic live QA:** not performed — no `ANTHROPIC_API_KEY`/
+  `AI_PROVIDER` is configured in this environment. Explicitly permitted by
+  this phase's brief; recorded as an open deployment/review checkpoint,
+  not silently skipped.
+
+**Validation:** `npm run typecheck` (clean), `npm run lint` (clean),
+`npm run build` (clean), unit tests (444/444 — 432 carried over + 12 new),
+integration tests (235/235 — 227 carried over + 8 new), and the full e2e
+regression suite: the new `tests/e2e/conciergeMultilingual.spec.ts`
+(24/24), `tests/e2e/multilingual.spec.ts` (45/45, unchanged, confirming no
+Phase 4 regression), and every pre-Phase-4 e2e file (auth, booking,
+concierge, contactPage, csrfRegression, securityHeaders, xssRegression,
+all 9 management spec files) — 32 + 66 (1 skipped, expected) passed. An
+initial regression pass against `npm run dev` produced a cluster of
+timing failures (stuck "Thinking…"/"Sending…" states across unrelated
+flows, `net::ERR_ABORTED` navigations) under ~15 minutes of sustained
+sequential Playwright load; re-running the identical suite against a
+clean production build (`npm run build && npm run start`) after restoring
+the DB baseline completed in under a minute with zero failures, confirming
+these were dev-server resource-contention artifacts, not product
+regressions — DB baseline was also found dirty from an earlier unrestored
+run during this diagnosis (stale reservations/duplicate XSS test rows)
+and was restored before the clean re-run. One conciergeMultilingual.spec.ts
+test transiently failed when run back-to-back with concierge.spec.ts's own
+rate-limit-exhaustion test in the same long-lived server process (the
+pre-existing, documented single-process in-memory rate limiter's shared
+budget, not a Phase 4 defect — confirmed by re-running the same test alone
+against a freshly-started server, which passed). Manual visual QA of the
+concierge chat UI itself (bubbles, input, starter chips, confirmation
+cards) captured and reviewed for Arabic (RTL, desktop + mobile), Amharic,
+Simplified Chinese, and Spanish — correct script rendering, no tofu/
+clipping, no horizontal overflow, correct bidi numeral/currency handling
+in Arabic.
+
 ## Multilingual Support Phase 3 — hotel business-content translation (2026-09-03)
 Translated the hotel's own business content — `RoomType` names/
 descriptions and `AiKnowledgeDocument` prose (overview, policies, dining,
