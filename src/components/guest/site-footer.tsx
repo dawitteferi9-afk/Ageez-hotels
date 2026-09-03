@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { Container } from "@/components/ui/container";
 
@@ -11,7 +12,15 @@ interface SiteFooterProps {
   checkOutTime: string;
 }
 
-export function SiteFooter({
+/**
+ * Multilingual Support Phase 2 — labels/copy come from the `Footer`
+ * message catalog namespace via `getTranslations()` (Server Component,
+ * same pattern as `SiteHeader`). `hotelName`/`city`/`country`/contact
+ * details/check-in/out times are still live `Hotel` data passed down by
+ * the caller — untouched, unhardcoded, English fallback only applies to
+ * interface chrome, never to these DB-derived values.
+ */
+export async function SiteFooter({
   hotelName,
   city,
   country,
@@ -20,6 +29,8 @@ export function SiteFooter({
   checkInTime,
   checkOutTime,
 }: SiteFooterProps) {
+  const t = await getTranslations("Footer");
+
   return (
     <footer className="border-t border-basalt-700/15 bg-basalt-950 text-parchment-100">
       <Container className="grid gap-10 py-14 md:grid-cols-3">
@@ -31,29 +42,26 @@ export function SiteFooter({
         </div>
 
         <div className="text-sm text-parchment-100/80">
-          <p className="mb-2 font-medium text-parchment-50">Contact</p>
+          <p className="mb-2 font-medium text-parchment-50">{t("contact")}</p>
           {contactEmail && <p>{contactEmail}</p>}
           {contactPhone && <p>{contactPhone}</p>}
         </div>
 
         <div className="text-sm text-parchment-100/80">
-          <p className="mb-2 font-medium text-parchment-50">Hotel Policies</p>
-          <p>Check-in from {checkInTime}</p>
-          <p>Checkout by {checkOutTime}</p>
+          <p className="mb-2 font-medium text-parchment-50">{t("hotelPolicies")}</p>
+          <p>{t("checkInFrom", { time: checkInTime })}</p>
+          <p>{t("checkoutBy", { time: checkOutTime })}</p>
         </div>
       </Container>
 
       <Container className="flex flex-col gap-2 border-t border-parchment-100/10 py-6 text-xs text-parchment-100/50 md:flex-row md:items-center md:justify-between">
-        <p>
-          &copy; {new Date().getFullYear()} {hotelName}. Fictional demo property — Ageez Hotels
-          platform.
-        </p>
+        <p>{t("copyright", { year: new Date().getFullYear(), hotelName })}</p>
         <nav className="flex gap-4">
           <Link href="/about" className="hover:text-parchment-100">
-            About
+            {t("about")}
           </Link>
           <Link href="/contact" className="hover:text-parchment-100">
-            Contact
+            {t("contact_link")}
           </Link>
         </nav>
       </Container>

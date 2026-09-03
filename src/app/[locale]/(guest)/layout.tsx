@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { NextIntlClientProvider, hasLocale } from "next-intl";
-import { setRequestLocale } from "next-intl/server";
+import { getMessages, setRequestLocale } from "next-intl/server";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { routing, type AppLocale } from "@/i18n/routing";
 import { isLocaleEnabledForHotel } from "@/lib/guest/locale";
@@ -61,10 +61,11 @@ export async function generateMetadata(): Promise<Metadata> {
  *     hasn't enabled also 404s — "disabled locale cannot be accessed
  *     for a tenant" from the locked Phase 1 requirements.
  *
- * `NextIntlClientProvider` wraps the tree with `messages={{}}` (Phase 1
- * has no message catalogs yet — see `src/i18n/request.ts`): it's needed
- * even without translations for two reasons, both confirmed by actual
- * runtime bugs during Phase 1 verification, not by inspection:
+ * `NextIntlClientProvider` wraps the tree with real messages (Multilingual
+ * Support Phase 2 — Phase 1 passed `messages={{}}` since no catalog
+ * existed yet). It's needed for client-side `next-intl` for three
+ * reasons, the first two confirmed by actual runtime bugs during Phase 1
+ * verification, not by inspection:
  *  - `LanguageSwitcher` (`src/components/guest/language-switcher.tsx`)
  *    uses next-intl's `usePathname`/`useRouter` (`src/i18n/navigation.ts`),
  *    which read the current locale from this context — without it, a
@@ -73,6 +74,14 @@ export async function generateMetadata(): Promise<Metadata> {
  *    context to keep `<html lang>`/`<html dir>` correct after a
  *    client-side locale switch — see that component's own comment for
  *    why the true root layout's `getLocale()` alone isn't enough.
+ *  - Phase 2 client components that call `useTranslations()`
+ *    (`language-switcher.tsx`, `booking-form.tsx`, `concierge-chat.tsx`)
+ *    need the actual catalog, not an empty object, or every lookup falls
+ *    through to next-intl's missing-message error path. `getMessages()`
+ *    (`next-intl/server`) returns exactly what `src/i18n/request.ts`
+ *    resolved for this request — the same catalog Server Components read
+ *    via `getTranslations()` — so client and server components share one
+ *    source of truth per request.
  */
 export default async function GuestLayout({
   children,
@@ -92,8 +101,10 @@ export default async function GuestLayout({
     notFound();
   }
 
+  const messages = await getMessages();
+
   return (
-    <NextIntlClientProvider locale={locale} messages={{}}>
+    <NextIntlClientProvider locale={locale} messages={messages}>
       <HtmlAttributesSync />
       <SiteHeader hotelName={hotel.name} currentLocale={locale as AppLocale} enabledLocales={hotel.enabledLocales} />
       <main>{children}</main>

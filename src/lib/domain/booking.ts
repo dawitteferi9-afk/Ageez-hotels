@@ -17,6 +17,25 @@ export interface DateRangeValidation {
 }
 
 /**
+ * Multilingual Support Phase 2 — `validateStayDates()`'s error text is now
+ * an optional, injectable parameter (defaulting to the exact original
+ * English strings below), so callers can pass locale-aware text from the
+ * `Validation` message catalog without changing this function's actual
+ * business rules or any existing caller/test that doesn't pass `messages`.
+ */
+export interface StayDateValidationMessages {
+  invalidDates: string;
+  checkInPast: string;
+  checkOutAfterCheckIn: string;
+}
+
+export const DEFAULT_STAY_DATE_MESSAGES: StayDateValidationMessages = {
+  invalidDates: "Enter valid check-in and check-out dates.",
+  checkInPast: "Check-in date cannot be in the past.",
+  checkOutAfterCheckIn: "Check-out date must be after check-in date.",
+};
+
+/**
  * Midnight (local) for a given date — used to compare "today" without a
  * time-of-day component. Exported (M4 Phase 6) so
  * `src/lib/tenant/index.ts`'s Reports aggregation (`todayArrivalsDepartures()`)
@@ -32,15 +51,20 @@ export function startOfDay(date: Date): Date {
  * A stay must start today or later, and check-out must be strictly after
  * check-in (minimum one night). `now` is injectable for testability.
  */
-export function validateStayDates(checkIn: Date, checkOut: Date, now: Date = new Date()): DateRangeValidation {
+export function validateStayDates(
+  checkIn: Date,
+  checkOut: Date,
+  now: Date = new Date(),
+  messages: StayDateValidationMessages = DEFAULT_STAY_DATE_MESSAGES
+): DateRangeValidation {
   if (Number.isNaN(checkIn.getTime()) || Number.isNaN(checkOut.getTime())) {
-    return { valid: false, error: "Enter valid check-in and check-out dates." };
+    return { valid: false, error: messages.invalidDates };
   }
   if (startOfDay(checkIn) < startOfDay(now)) {
-    return { valid: false, error: "Check-in date cannot be in the past." };
+    return { valid: false, error: messages.checkInPast };
   }
   if (checkOut <= checkIn) {
-    return { valid: false, error: "Check-out date must be after check-in date." };
+    return { valid: false, error: messages.checkOutAfterCheckIn };
   }
   return { valid: true };
 }

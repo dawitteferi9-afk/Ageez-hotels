@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { Container } from "@/components/ui/container";
 import { Button } from "@/components/ui/button";
@@ -13,17 +14,17 @@ import { buttonVariants } from "@/components/ui/button";
  * default error overlay.
  */
 export default function GuestError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  const t = useTranslations("Errors");
+
   return (
     <section className="py-24">
       <Container className="flex flex-col items-center gap-6 text-center">
-        <h1 className="font-display text-3xl text-basalt-950">Something went wrong</h1>
-        <p className="max-w-md text-basalt-700">
-          We couldn&apos;t complete that request. Please try again, or head back to the homepage.
-        </p>
+        <h1 className="font-display text-3xl text-basalt-950">{t("heading")}</h1>
+        <p className="max-w-md text-basalt-700">{t("description")}</p>
         <div className="flex gap-3">
-          <Button onClick={reset}>Try Again</Button>
+          <Button onClick={reset}>{t("tryAgain")}</Button>
           <Link href="/" className={buttonVariants({ variant: "outline" })}>
-            Back to Home
+            {t("backToHome")}
           </Link>
         </div>
       </Container>

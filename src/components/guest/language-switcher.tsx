@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { usePathname, useRouter } from "@/i18n/navigation";
 import { LOCALES, type AppLocale } from "@/i18n/routing";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,13 @@ import { cn } from "@/lib/utils";
  * locale-prefixed URL (or another switcher use) reflects the choice —
  * see `src/i18n/routing.ts`'s comment for why *unprefixed* URLs
  * deliberately do NOT auto-follow that cookie.
+ *
+ * Multilingual Support Phase 2 — the "Choose language" label is now
+ * translated (`LanguageSwitcher.chooseLanguage`), but `LOCALE_LABELS`
+ * stays exactly as it was: each language name is written in its OWN
+ * native script regardless of the current locale (an Arabic-locale user
+ * still sees "English"/"中文"/"Español", not translated equivalents) —
+ * per the explicit Phase 2 instruction to keep these self-referential.
  */
 const LOCALE_LABELS: Record<AppLocale, string> = {
   en: "English",
@@ -51,6 +59,7 @@ export function LanguageSwitcher({
   enabledLocales: readonly string[];
   className?: string;
 }) {
+  const t = useTranslations("LanguageSwitcher");
   const pathname = usePathname();
   const router = useRouter();
 
@@ -61,7 +70,7 @@ export function LanguageSwitcher({
 
   return (
     <label className={cn("inline-flex items-center", className)}>
-      <span className="sr-only">Choose language</span>
+      <span className="sr-only">{t("chooseLanguage")}</span>
       <select
         value={currentLocale}
         onChange={(event) => {
@@ -69,7 +78,7 @@ export function LanguageSwitcher({
           if (nextLocale === currentLocale) return;
           router.replace(pathname, { locale: nextLocale });
         }}
-        aria-label="Choose language"
+        aria-label={t("chooseLanguage")}
         className="rounded border border-basalt-700/30 bg-parchment-50 px-2 py-1.5 text-sm font-medium text-basalt-800 transition-colors hover:border-basalt-700/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ochre-500"
       >
         {options.map((locale) => (

@@ -5,6 +5,59 @@
 @import "./tokens.css";
 
 /*
+ * Multilingual Support Phase 2 — per-locale typography overlay.
+ *
+ * This is the ONE place `--font-display`/`--font-body` (the two variables
+ * `tailwind.config.ts`'s `fontFamily.display`/`fontFamily.body` consume)
+ * are actually defined — `src/app/layout.tsx`'s `next/font/google` loaders
+ * feed a DIFFERENT pair of variables, `--font-fraunces`/`--font-inter`,
+ * deliberately never redeclared by any rule below. That indirection is
+ * required, not stylistic: an earlier version of this overlay defined
+ * `--font-display` in terms of itself (via an intermediate variable that
+ * itself referenced `--font-display`), which is a genuine CSS cycle once
+ * both rules apply to the same `<html>` element — the browser makes BOTH
+ * properties invalid at computed-value time, and the font silently stops
+ * applying at all (confirmed as a real bug via this phase's own e2e
+ * verification, not a hypothetical). Building `--font-display`/
+ * `--font-body` from the stable `--font-fraunces`/`--font-inter` leaves
+ * nothing for any rule here to accidentally cycle through.
+ *
+ * Each locale's rule PREPENDS its script-specific font ahead of the Latin
+ * base rather than replacing it — CSS font-family fallback already
+ * resolves per-glyph, so Latin brand text (e.g. "AGEEZ") keeps rendering
+ * in Fraunces/Inter even on an Arabic or Amharic page, while Arabic/
+ * Ethiopic glyphs — which Fraunces/Inter don't cover at all — render via
+ * the added Noto Sans Arabic/Ethiopic font instead of an unstyled OS
+ * fallback. `data-locale` is set server-side by `src/app/layout.tsx` and
+ * kept in sync after a client-side locale switch by `HtmlAttributesSync`
+ * (`src/components/guest/html-attributes-sync.tsx`).
+ *
+ * `zh` (Simplified Chinese) intentionally has no added webfont here — see
+ * `src/app/layout.tsx`'s comment for why — so its rule below only lists
+ * system CJK font families as a fallback tier, ahead of the generic
+ * `serif`/`sans-serif` Tailwind's own config already falls back to.
+ */
+:root {
+  --font-display: var(--font-fraunces), serif;
+  --font-body: var(--font-inter), sans-serif;
+}
+
+:root[data-locale="ar"] {
+  --font-display: var(--font-noto-arabic), var(--font-fraunces), serif;
+  --font-body: var(--font-noto-arabic), var(--font-inter), sans-serif;
+}
+
+:root[data-locale="am"] {
+  --font-display: var(--font-noto-ethiopic), var(--font-fraunces), serif;
+  --font-body: var(--font-noto-ethiopic), var(--font-inter), sans-serif;
+}
+
+:root[data-locale="zh"] {
+  --font-display: var(--font-fraunces), "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-body: var(--font-inter), "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+}
+
+/*
  * M12 Phase 2B — restrained, browser-native cinematic motion for the
  * homepage sections that follow the video hero (`CinematicHero`).
  * Pure CSS, no animation library (locked product decision: no new

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { getLocale, getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { notFound } from "next/navigation";
 import { Users, Crown, ArrowLeft } from "lucide-react";
@@ -51,6 +52,10 @@ export default async function RoomDetailPage({ params }: RoomDetailPageProps) {
   const result = await getRoomType(id);
   if (!result) notFound();
   const { roomType, roomCount } = result;
+  const t = await getTranslations("RoomDetail");
+  const tRooms = await getTranslations("Rooms");
+  const tCommon = await getTranslations("Common");
+  const locale = await getLocale();
 
   const highlights = deriveRoomHighlights(roomType.description, roomType.capacity);
   const displayHighlights = highlights.filter((h) => h.key !== "capacity");
@@ -62,8 +67,8 @@ export default async function RoomDetailPage({ params }: RoomDetailPageProps) {
     <section className="py-16">
       <Container className="flex flex-col gap-6">
         <Link href="/rooms" className="flex items-center gap-2 text-sm text-basalt-700 hover:text-ochre-600">
-          <ArrowLeft className="h-4 w-4" aria-hidden />
-          Back to Rooms & Suites
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" aria-hidden />
+          {t("backToRooms")}
         </Link>
 
         <div className="grid gap-10 lg:grid-cols-2 lg:items-start">
@@ -77,13 +82,17 @@ export default async function RoomDetailPage({ params }: RoomDetailPageProps) {
                 iconClassName="h-16 w-16"
               />
               {premier && (
-                <span className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-basalt-950/90 px-3.5 py-1.5 text-sm font-medium text-parchment-50">
+                <span className="absolute end-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-basalt-950/90 px-3.5 py-1.5 text-sm font-medium text-parchment-50">
                   <Crown className="h-3.5 w-3.5" aria-hidden />
-                  Premier
+                  {tRooms("premier")}
                 </span>
               )}
             </div>
-            <RoomGallery images={photography.gallery} roomName={roomType.name} />
+            <RoomGallery
+              images={photography.gallery}
+              roomName={roomType.name}
+              getAlt={(index) => t("photoAlt", { roomName: roomType.name, number: index + 1 })}
+            />
           </div>
 
           <div className="flex flex-col gap-6">
@@ -92,24 +101,24 @@ export default async function RoomDetailPage({ params }: RoomDetailPageProps) {
               <div className="mt-3 flex flex-wrap items-center gap-6 text-basalt-700">
                 <span className="flex items-center gap-2">
                   <Users className="h-4 w-4" aria-hidden />
-                  Sleeps up to {roomType.capacity}
+                  {tRooms("sleepsUpTo", { count: roomType.capacity })}
                 </span>
-                <span>
-                  {roomCount} {roomCount === 1 ? "room" : "rooms"} of this type
-                </span>
+                <span>{tRooms("roomsOfThisType", { count: roomCount })}</span>
               </div>
             </div>
 
             <p className="font-display text-3xl text-ochre-600">
-              {formatCurrency(roomType.basePrice, roomType.currency)}
-              <span className="ml-1 text-base font-normal text-basalt-700">/ night</span>
+              {formatCurrency(roomType.basePrice, roomType.currency, locale)}
+              <span className="ms-1 text-base font-normal text-basalt-700">{tCommon("perNight")}</span>
             </p>
 
             <p className="text-lg leading-relaxed text-basalt-800">{roomType.description}</p>
 
             {displayHighlights.length > 0 && (
               <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-basalt-700/70">Room Highlights</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-basalt-700/70">
+                  {t("roomHighlights")}
+                </p>
                 <div className="flex flex-wrap gap-2">
                   {displayHighlights.map((highlight) => (
                     <FactChip
@@ -126,7 +135,7 @@ export default async function RoomDetailPage({ params }: RoomDetailPageProps) {
               href={`/rooms/${roomType.id}/book`}
               className={cn(buttonVariants({ size: "lg" }), "self-start")}
             >
-              Book This Room
+              {t("bookThisRoom")}
             </Link>
           </div>
         </div>

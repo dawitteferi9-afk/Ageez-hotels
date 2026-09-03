@@ -4,6 +4,90 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-03 — Multilingual Support Phase 2: interface-chrome translation, content boundary, RTL/typography
+**Status:** Approved and implemented (local commit only — not pushed)
+**Decision:** Translated every guest-facing interface-chrome string into
+all 5 locales (`messages/<locale>.json`, next-intl catalogs), while
+keeping hotel business content (room names/descriptions, overview,
+policies, AI knowledge) exactly what it already was — live database
+values, English until Phase 3. Full detail lives in `docs/MULTILINGUAL.md`
+(new); this entry records the decisions worth flagging specifically.
+
+1. **The content boundary is the single most important rule of this
+   phase, and it's documented in a dedicated file, not just this log.**
+   `docs/MULTILINGUAL.md` now exists as the canonical reference for what
+   Phase 2/3/4 each own — interface chrome vs. hotel business content vs.
+   AI conversation behavior — so this boundary doesn't have to be
+   rediscovered from source comments in a future session.
+2. **Concierge starter-question buttons: translate the LABEL, never the
+   SUBMITTED text.** A judgment call, not explicitly specified by the
+   Product Owner's brief. `src/lib/ai/providers/mock.ts` matches on
+   English keywords only; submitting a translated starter question would
+   silently degrade every non-English guest's answer to the generic
+   fallback instead of the real grounded one. The button's visible label
+   is translated per locale; the value it submits to the chat form is
+   always the fixed English question text
+   (`concierge-chat.tsx`'s `STARTER_QUESTION_CATEGORIES`). A free-typed
+   message is unaffected either way — the mock provider's English-only
+   matching is a pre-existing Phase 4 limitation, not something this
+   decision changes.
+3. **A genuine CSS custom-property cycle, found and fixed via e2e
+   verification, not by inspection.** The per-locale typography overlay
+   (Noto Sans Arabic/Ethiopic prepended ahead of Fraunces/Inter) initially
+   tried to capture the Latin base font stack under an intermediate
+   variable defined in terms of `--font-display` itself. Once a
+   higher-specificity, same-element rule also redefined `--font-display`
+   in terms of that intermediate variable, the two properties formed a
+   real cycle — CSS's spec-mandated behavior is to make BOTH properties
+   invalid at computed-value time, with no console error, silently
+   falling through to a generic OS font. Caught by
+   `tests/e2e/multilingual.spec.ts`'s Ethiopic-font assertion actually
+   failing, not by code review. Fixed by pointing the overlay at two
+   variable names (`--font-fraunces`/`--font-inter`) that no locale rule
+   ever redefines — see `docs/MULTILINGUAL.md`'s Typography section and
+   `globals.css`'s own comment for the full mechanism.
+4. **`ar` locale formatting forces Latin digits (`ar-u-nu-latn`), not
+   CLDR's default Eastern Arabic-Indic numerals.** Another judgment call:
+   without this, `Intl.NumberFormat`/`Intl.DateTimeFormat` under a plain
+   `"ar"` locale render Eastern Arabic-Indic digits (١٢٣٤) by default,
+   which would visually clash with every other Western-digit numeral
+   already on the same page (booking references, room counts). Forcing
+   the Latin numbering system keeps digit rendering consistent across the
+   whole page while still getting genuine Arabic month names/punctuation/
+   RTL ordering from the locale.
+5. **Vitest can't resolve `next-intl/server`'s real implementation — it's
+   inherently Next.js-bundler-specific.** Adding `resolve.conditions:
+   ["react-server"]` to `vitest.config.ts` traded one resolution failure
+   for a deeper one inside `next-intl`'s own `next/headers` import (a
+   Next.js-internal package-export/bundler nuance Vite doesn't replicate;
+   confirmed via `next build`, which handles the real thing cleanly).
+   `tests/unit/setup.ts` instead mocks `next-intl/server` with a
+   translator backed by the REAL `messages/en.json` (so a unit-test mock
+   can never silently drift from the actual shipped English strings) —
+   the standard way to unit-test code that calls Next-bundler-specific
+   APIs outside of Next's own request lifecycle.
+6. **`src/app/[locale]/(guest)/layout.tsx`'s `NextIntlClientProvider` was
+   still passing `messages={{}}` (Phase 1's placeholder) — fixed to pass
+   the real per-request catalog via `getMessages()`.** This was a
+   pre-existing gap this phase had to close: every Client Component that
+   now calls `useTranslations()` (`language-switcher.tsx`,
+   `booking-form.tsx`, `concierge-chat.tsx`) would otherwise hit
+   next-intl's missing-message error path for every single lookup. Server
+   Components (`getTranslations()`) and Client Components
+   (`useTranslations()`) now read from the exact same per-request
+   catalog, so they can never disagree.
+
+Verified: `npm run typecheck` (clean), `npm run lint` (clean), `npm run
+build` (clean), `npm run test` (399/399 unit), `npm run test:integration`
+(213/213), and the full e2e regression suite (booking, concierge,
+contact, CSRF, security headers, XSS, auth, management, plus the new/
+updated `tests/e2e/multilingual.spec.ts`, 41/41) — see
+`docs/CHANGELOG.md`'s Phase 2 entry for the full breakdown, including two
+failures that were diagnosed as e2e-run resource/data-residue artifacts
+(cross-worker rate-limiter/DB-state contention, `DATABASE_URL` not
+exported to a background shell) rather than real regressions, and
+confirmed clean on an isolated rerun after a `db:restore-baseline`.
+
 ## 2026-09-03 — Multilingual Support Phase 1 corrective pass: cookie-only locale memory (never Accept-Language); locale-aware `<Link>` site-wide; a real next-intl typing limitation worked around, not fought
 **Status:** Approved and implemented
 **Decision:** Two additive fixes on top of the already-approved Phase 1

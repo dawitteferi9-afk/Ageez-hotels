@@ -1,13 +1,13 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { getLocale } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getCurrentTenantHotel, withTenant, findAvailableRoom } from "@/lib/tenant";
 import { routing } from "@/i18n/routing";
 import { validateStayDates, nightsBetween, calculateTotalPrice } from "@/lib/domain/booking";
-import { bookingFormSchema, type BookingFormInput, type BookingFormState } from "./schema";
+import { createBookingFormSchema, type BookingFormInput, type BookingFormState } from "./schema";
 
 /** Thrown inside the transaction when no room of the requested type is free for the dates — caught below, never leaks a stack trace to the guest. */
 class NoRoomAvailableError extends Error {}
@@ -26,6 +26,18 @@ export async function createBookingAction(
   _prevState: BookingFormState,
   formData: FormData
 ): Promise<BookingFormState> {
+  const t = await getTranslations("Validation");
+  const bookingFormSchema = createBookingFormSchema({
+    checkInRequired: t("checkInRequired"),
+    checkOutRequired: t("checkOutRequired"),
+    wholeNumber: t("wholeNumber"),
+    atLeastOneGuest: t("atLeastOneGuest"),
+    fullNameRequired: t("fullNameRequired"),
+    validEmail: t("validEmail"),
+    validPhone: t("validPhone"),
+    specialRequestsMax: t("specialRequestsMax"),
+  });
+
   const raw = Object.fromEntries(formData) as Record<string, string>;
   const parsed = bookingFormSchema.safeParse(raw);
 
@@ -44,7 +56,11 @@ export async function createBookingAction(
   const checkIn = new Date(checkInRaw);
   const checkOut = new Date(checkOutRaw);
 
-  const dateCheck = validateStayDates(checkIn, checkOut);
+  const dateCheck = validateStayDates(checkIn, checkOut, new Date(), {
+    invalidDates: t("invalidDates"),
+    checkInPast: t("checkInPast"),
+    checkOutAfterCheckIn: t("checkOutAfterCheckIn"),
+  });
   if (!dateCheck.valid) {
     return { formError: dateCheck.error, values: raw };
   }
@@ -53,12 +69,12 @@ export async function createBookingAction(
   const tenant = withTenant(hotel.id);
   const roomType = await tenant.roomTypes.findUnique(roomTypeId);
   if (!roomType) {
-    return { formError: "This room type could not be found. Please go back and try again." };
+    return { formError: t("roomTypeNotFound") };
   }
 
   if (guestCount > roomType.capacity) {
     return {
-      fieldErrors: { guestCount: `${roomType.name} sleeps up to ${roomType.capacity} guests.` },
+      fieldErrors: { guestCount: t("guestCountExceeds", { roomName: roomType.name, capacity: roomType.capacity }) },
       values: raw,
     };
   }
@@ -98,7 +114,7 @@ export async function createBookingAction(
   } catch (err) {
     if (err instanceof NoRoomAvailableError) {
       return {
-        formError: `No ${roomType.name} is available for ${checkInRaw} → ${checkOutRaw}. Please try different dates.`,
+        formError: t("noRoomAvailable", { roomName: roomType.name, checkIn: checkInRaw, checkOut: checkOutRaw }),
         values: raw,
       };
     }
@@ -107,7 +123,7 @@ export async function createBookingAction(
     // clear retry prompt rather than an auto-retry, per docs/DECISIONS.md.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2034") {
       return {
-        formError: "That room was just booked by someone else. Please try again.",
+        formError: t("justBooked"),
         values: raw,
       };
     }

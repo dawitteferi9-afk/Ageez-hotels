@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { getLocale, getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { notFound } from "next/navigation";
 import { ArrowLeft, BedDouble, Users } from "lucide-react";
@@ -17,7 +18,9 @@ export async function generateMetadata({ params }: BookRoomPageProps): Promise<M
   const { id } = await params;
   const hotel = await getCurrentTenantHotel();
   const roomType = await withTenant(hotel.id).roomTypes.findUnique(id);
-  return roomType ? { title: `Book ${roomType.name}` } : {};
+  if (!roomType) return {};
+  const t = await getTranslations("Booking");
+  return { title: t("bookRoomTitle", { roomName: roomType.name }) };
 }
 
 /**
@@ -37,6 +40,10 @@ export default async function BookRoomPage({ params }: BookRoomPageProps) {
   if (!roomType) notFound();
 
   const boundAction = createBookingAction.bind(null, roomType.id);
+  const t = await getTranslations("Booking");
+  const tRooms = await getTranslations("Rooms");
+  const tCommon = await getTranslations("Common");
+  const locale = await getLocale();
 
   return (
     <section className="py-16">
@@ -45,15 +52,17 @@ export default async function BookRoomPage({ params }: BookRoomPageProps) {
           href={`/rooms/${roomType.id}`}
           className="flex items-center gap-2 text-sm text-basalt-700 hover:text-ochre-600"
         >
-          <ArrowLeft className="h-4 w-4" aria-hidden />
-          Back to {roomType.name}
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" aria-hidden />
+          {t("backTo", { roomName: roomType.name })}
         </Link>
 
         <div>
           <p className="text-sm font-medium uppercase tracking-[0.2em] text-ochre-600">
-            Complete Your Booking
+            {t("completeYourBooking")}
           </p>
-          <h1 className="mt-1 font-display text-3xl text-basalt-950">Book {roomType.name}</h1>
+          <h1 className="mt-1 font-display text-3xl text-basalt-950">
+            {t("bookRoomTitle", { roomName: roomType.name })}
+          </h1>
         </div>
 
         <Card className="overflow-hidden">
@@ -66,13 +75,13 @@ export default async function BookRoomPage({ params }: BookRoomPageProps) {
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-basalt-700">
                 <span className="flex items-center gap-1.5">
                   <Users className="h-4 w-4" aria-hidden />
-                  Sleeps up to {roomType.capacity}
+                  {tRooms("sleepsUpTo", { count: roomType.capacity })}
                 </span>
                 <span className="font-medium text-basalt-950">
-                  {formatCurrency(roomType.basePrice, roomType.currency)}
-                  <span className="font-normal text-basalt-700"> / night</span>
+                  {formatCurrency(roomType.basePrice, roomType.currency, locale)}
+                  <span className="font-normal text-basalt-700"> {tCommon("perNight")}</span>
                 </span>
-                <span>Pay at Hotel</span>
+                <span>{tCommon("payAtHotel")}</span>
               </div>
             </div>
           </CardContent>

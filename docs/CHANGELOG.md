@@ -1,5 +1,117 @@
 # Changelog
 
+## Multilingual Support Phase 2 — guest UI translation (interface chrome), RTL/typography audit (2026-09-03)
+Translated the complete guest-facing interface chrome — navigation,
+buttons, form labels, validation/error messages, accessibility labels,
+footer, AI Concierge UI — into all 5 platform locales (`en`/`am`/`zh`/
+`es`/`ar`). Hotel business content (room names/descriptions, overview,
+policies, AI knowledge) deliberately stays untranslated database content,
+English until Phase 3 — see the new `docs/MULTILINGUAL.md` for the full
+content-boundary reference this and future phases follow.
+
+- **New message catalogs:** `messages/en.json` (canonical, 198 leaf keys
+  across 17 namespaces: `Navigation`, `LanguageSwitcher`, `Common`,
+  `Home`, `Rooms`, `RoomDetail`, `Booking`, `Validation`,
+  `BookingConfirmation`, `Restaurant`, `Services`, `Contact`, `About`,
+  `Concierge`, `Errors`, `NotFound`, `Footer`), plus complete
+  `am.json`/`zh.json`/`es.json`/`ar.json` translations — identical key
+  sets verified programmatically. `src/i18n/request.ts` now loads these
+  real catalogs (Phase 1 shipped with `messages: {}`).
+- **Every guest Server/Client Component wired to `getTranslations()`/
+  `useTranslations()`:** `site-header.tsx`, `site-footer.tsx`,
+  `language-switcher.tsx`, `room-type-card.tsx`, `room-gallery.tsx`,
+  `booking-form.tsx`, `concierge-chat.tsx` (the ~535-line file — every
+  locked e2e-test string, button name, id, and role preserved byte-exact
+  in the English catalog); the homepage, rooms/rooms-detail/booking/
+  booking-confirmation/restaurant/services/contact/about/concierge pages,
+  and the guest `error`/`not-found` boundaries.
+- **Fixed a real Phase 1 gap while wiring this up:**
+  `src/app/[locale]/(guest)/layout.tsx`'s `NextIntlClientProvider` was
+  still passing `messages={{}}` — every Client Component `useTranslations()`
+  call would otherwise hit next-intl's missing-message path. Now passes
+  the real per-request catalog via `getMessages()`.
+- **Validation messages made locale-aware without changing behavior:**
+  `rooms/[id]/book/schema.ts`'s Zod schema became
+  `createBookingFormSchema(messages)` (English-default, backward
+  compatible); `src/lib/domain/booking.ts`'s `validateStayDates()` gained
+  an optional, English-default `messages` parameter. Both wired to
+  `getTranslations("Validation")` in `rooms/[id]/book/actions.ts`. An
+  8th error string this pass discovered wasn't in the original inventory
+  (`MESSAGE_TOO_LONG_ERROR` in `concierge/actions.ts`) was added to all 5
+  catalogs as `Concierge.errors.messageTooLong`.
+- **Locale-aware `Intl` formatting:** `src/lib/utils.ts`'s
+  `formatCurrency()`/`formatDate()` gained an optional `locale` parameter
+  (default `"en-US"` — every existing management-page/test caller
+  unaffected); guest pages now pass the resolved request locale. `ar`
+  maps to `"ar-u-nu-latn"` to keep Western digits consistent across the
+  page (see `docs/MULTILINGUAL.md`).
+- **RTL logical-property audit:** back-navigation arrow icons now
+  `rtl:rotate-180`; absolute-positioned "Premier" badges use `end-*`
+  instead of `right-*`; a trailing currency label uses `ms-*` instead of
+  `ml-*`. Verified via a full grep sweep of `ml-`/`mr-`/`pl-`/`pr-`/
+  `left-`/`right-`/`text-left`/`text-right` across every guest component —
+  no remaining physical-direction utility that was actually about reading
+  direction.
+- **Typography:** added `Noto_Sans_Arabic`/`Noto_Sans_Ethiopic`
+  (`next/font/google`) for full Arabic/Ge'ez glyph coverage; Simplified
+  Chinese deliberately gets no added webfont (system CJK fallback stack
+  instead — see rationale in `docs/MULTILINGUAL.md`). `<html data-locale>`
+  drives a per-locale font-stack overlay in `globals.css`, synced
+  client-side by an extended `HtmlAttributesSync`. **Found and fixed a
+  genuine CSS custom-property cycle** during e2e verification (the
+  overlay silently invalidated `--font-display`/`--font-body` entirely,
+  falling through to a generic OS font with no visible error) — see
+  `docs/DECISIONS.md`'s Phase 2 entry for the mechanism and fix.
+- **Cinematic hero/banner overlay text** (homepage hero CTAs/badge,
+  restaurant page banner heading) translated; no video/timing/animation
+  changed.
+- **Testing infrastructure:** `tests/unit/setup.ts` (new) mocks
+  `next-intl/server` for Vitest, backed by the real `messages/en.json` so
+  unit tests can never silently drift from the shipped English strings —
+  `next-intl/server`'s real implementation is Next-bundler-specific and
+  isn't resolvable under plain Vitest (see `docs/DECISIONS.md`).
+  `tests/e2e/multilingual.spec.ts` extended: Phase 1's navigation tests
+  that clicked/asserted by English text at non-English-locale routes
+  (correctly now failing once real translations exist) were rewritten to
+  use each locale's actual translated text, read directly from the
+  imported catalogs; a new `translated interface chrome (Phase 2)`
+  describe block adds per-locale chrome-translation checks, an Ethiopic-
+  font-active assertion, Arabic RTL no-overflow checks at desktop/mobile,
+  Spanish mobile-layout-robustness, and a same-room-across-all-locales
+  content-boundary check.
+
+**Validation:** `npm run typecheck` (clean), `npm run lint` (clean),
+`npm run build` (clean), `npm run test` (399/399 unit),
+`npm run test:integration` (213/213), `tests/e2e/multilingual.spec.ts`
+(41/41), and the full existing e2e regression suite — booking, concierge,
+contact, CSRF, security headers, XSS, auth, and all 9 management spec
+files (32 + 65 = 97 tests). A handful of failures surfaced mid-session
+during parallel/long-running suite execution (auth generic-error text,
+booking inventory-exhaustion, two concierge verification-flow tests, the
+contact-page nav click, a CSRF staff-creation redirect, and two
+managementStaff tests) — every one was root-caused, not waved away: cross-
+worker shared in-memory rate-limiter/DB-state contention from running
+many spec files in parallel, a `DATABASE_URL` not exported to a
+background shell, and demo-data residue accumulated across this session's
+many earlier e2e runs. `npm run db:restore-baseline` plus an isolated,
+sequential (`--workers=1`) rerun of every one of those files/tests
+confirmed 100% clean — none were Phase 2 regressions. Desktop
+(1440×900) and mobile (390×844) visual QA via screenshots across all 5
+locales on home/rooms/contact confirmed correct RTL mirroring, Ethiopic/
+CJK glyph rendering, no horizontal overflow, and clean Spanish text
+wrapping.
+
+**Files:** see `git diff --stat` for the full list (~32 modified guest
+files, 5 new `messages/*.json`, `tests/unit/setup.ts`,
+`docs/MULTILINGUAL.md`). No `package.json` dependency changes (both new
+fonts are `next/font/google`, already a Next.js-native mechanism).
+Updated `docs/DECISIONS.md`, `docs/CHANGELOG.md` (this entry),
+`docs/MULTILINGUAL.md` (new).
+
+**Not in this phase (tracked, not forgotten):** hotel business-content
+translation (Phase 3), multilingual AI Concierge conversation (Phase 4),
+full hreflang/SEO metadata (Phase 5). See `docs/MULTILINGUAL.md`.
+
 ## Multilingual Support Phase 1 — corrective pass: remember explicit choice, locale-persistent navigation (2026-09-03)
 Independent review of Phase 1 (`ab9717f`) approved the core architecture
 (`next-intl`, `Hotel.enabledLocales`, the switcher, RTL, the `src/

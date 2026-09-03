@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { Sparkles, UtensilsCrossed } from "lucide-react";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
@@ -42,6 +43,8 @@ import { cn } from "@/lib/utils";
  * lives in `src/components/guest/cinematic/` itself, not here.
  */
 export default async function GuestHomePage() {
+  const t = await getTranslations("Home");
+  const tCommon = await getTranslations("Common");
   const hotel = await getCurrentTenantHotel();
   const tenant = withTenant(hotel.id);
 
@@ -81,7 +84,7 @@ export default async function GuestHomePage() {
 
               <div className="mt-2 flex flex-wrap items-center gap-4">
                 <Link href="/rooms" className={buttonVariants({ size: "lg" })}>
-                  Book a Room
+                  {t("bookARoom")}
                 </Link>
                 <Link
                   href="/concierge"
@@ -91,17 +94,15 @@ export default async function GuestHomePage() {
                   )}
                 >
                   <Sparkles className="h-4 w-4 text-ochre-400" aria-hidden />
-                  Ask Our AI Concierge
+                  {t("askAiConcierge")}
                 </Link>
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
                 <AiBadge className="border border-ochre-400/30 bg-transparent text-ochre-300">
-                  AI Concierge
+                  {t("aiConciergeBadge")}
                 </AiBadge>
-                <span className="text-xs text-parchment-100/70">
-                  Instant answers about rooms, dining, and your reservation — any time.
-                </span>
+                <span className="text-xs text-parchment-100/70">{t("aiConciergeCaption")}</span>
               </div>
             </Container>
           </div>
@@ -122,12 +123,14 @@ export default async function GuestHomePage() {
         <Container className="flex flex-col gap-10">
           <Reveal className="flex flex-col gap-2">
             <p className="text-sm font-medium uppercase tracking-[0.2em] text-ochre-600">
-              Room Highlights
+              {t("roomHighlightsEyebrow")}
             </p>
-            <h2 className="font-display text-3xl text-basalt-950">Rooms & Suites</h2>
+            <h2 className="font-display text-3xl text-basalt-950">{t("roomsSuitesHeading")}</h2>
             <p className="text-basalt-700">
-              {roomTypes.length} room types, {roomCounts.reduce((sum, n) => sum + n, 0)} rooms
-              in total.
+              {t("roomTypesSummary", {
+                roomTypeCount: roomTypes.length,
+                roomCount: roomCounts.reduce((sum, n) => sum + n, 0),
+              })}
             </p>
           </Reveal>
           {/*
@@ -160,9 +163,9 @@ export default async function GuestHomePage() {
           <Container className="flex flex-col gap-10">
             <Reveal className="flex flex-col gap-2 text-center">
               <p className="text-sm font-medium uppercase tracking-[0.2em] text-ochre-600">
-                Discover More
+                {t("discoverMoreEyebrow")}
               </p>
-              <h2 className="font-display text-3xl text-basalt-950">Dining & Amenities</h2>
+              <h2 className="font-display text-3xl text-basalt-950">{t("diningAmenitiesHeading")}</h2>
             </Reveal>
             <Reveal className="grid gap-6 md:grid-cols-2">
               {dining && (
@@ -170,10 +173,10 @@ export default async function GuestHomePage() {
                   <div className="flex h-11 w-11 items-center justify-center rounded-full bg-ochre-500/15">
                     <UtensilsCrossed className="h-5 w-5 text-ochre-600" aria-hidden />
                   </div>
-                  <h3 className="font-display text-2xl text-basalt-950">Dining</h3>
+                  <h3 className="font-display text-2xl text-basalt-950">{t("diningHeading")}</h3>
                   <p className="text-basalt-800">{dining.content}</p>
                   <Link href="/restaurant" className="text-sm font-medium text-ochre-600 hover:underline">
-                    Learn more →
+                    {tCommon("learnMore")}
                   </Link>
                 </div>
               )}
@@ -182,10 +185,10 @@ export default async function GuestHomePage() {
                   <div className="flex h-11 w-11 items-center justify-center rounded-full bg-ochre-500/15">
                     <Sparkles className="h-5 w-5 text-ochre-600" aria-hidden />
                   </div>
-                  <h3 className="font-display text-2xl text-basalt-950">Services & Amenities</h3>
+                  <h3 className="font-display text-2xl text-basalt-950">{t("servicesHeading")}</h3>
                   <p className="text-basalt-800">{services.content}</p>
                   <Link href="/services" className="text-sm font-medium text-ochre-600 hover:underline">
-                    Learn more →
+                    {tCommon("learnMore")}
                   </Link>
                 </div>
               )}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { useTranslations } from "next-intl";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,6 +34,7 @@ export function BookingForm({
   capacity: number;
   roomTypeName: string;
 }) {
+  const t = useTranslations("Booking");
   const [state, formAction, isPending] = useActionState(action, {} as BookingFormState);
   const values = state.values ?? {};
   const today = new Date().toISOString().slice(0, 10);
@@ -45,16 +47,16 @@ export function BookingForm({
         </p>
       )}
 
-      <FormSection title="Stay Details">
+      <FormSection title={t("stayDetails")}>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Check-in" error={state.fieldErrors?.checkIn}>
+          <Field label={t("checkIn")} error={state.fieldErrors?.checkIn}>
             <Input type="date" name="checkIn" min={today} defaultValue={values.checkIn} required />
           </Field>
-          <Field label="Check-out" error={state.fieldErrors?.checkOut}>
+          <Field label={t("checkOut")} error={state.fieldErrors?.checkOut}>
             <Input type="date" name="checkOut" min={today} defaultValue={values.checkOut} required />
           </Field>
         </div>
-        <Field label={`Guests (up to ${capacity})`} error={state.fieldErrors?.guestCount}>
+        <Field label={t("guestsUpTo", { capacity })} error={state.fieldErrors?.guestCount}>
           <Input
             type="number"
             name="guestCount"
@@ -66,36 +68,31 @@ export function BookingForm({
         </Field>
       </FormSection>
 
-      <FormSection title="Guest & Contact Details">
+      <FormSection title={t("guestContactDetails")}>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Full name" error={state.fieldErrors?.guestName}>
+          <Field label={t("fullName")} error={state.fieldErrors?.guestName}>
             <Input type="text" name="guestName" autoComplete="name" defaultValue={values.guestName} required />
           </Field>
-          <Field label="Email" error={state.fieldErrors?.guestEmail}>
+          <Field label={t("email")} error={state.fieldErrors?.guestEmail}>
             <Input type="email" name="guestEmail" autoComplete="email" defaultValue={values.guestEmail} required />
           </Field>
         </div>
-        <Field label="Phone" error={state.fieldErrors?.guestPhone}>
+        <Field label={t("phone")} error={state.fieldErrors?.guestPhone}>
           <Input type="tel" name="guestPhone" autoComplete="tel" defaultValue={values.guestPhone} required />
         </Field>
       </FormSection>
 
-      <FormSection
-        title="Special Requests"
-        description="Optional — let us know about any preferences for your stay."
-      >
-        <Field label="Special requests (optional)" error={state.fieldErrors?.specialRequests}>
+      <FormSection title={t("specialRequestsTitle")} description={t("specialRequestsDescription")}>
+        <Field label={t("specialRequestsLabel")} error={state.fieldErrors?.specialRequests}>
           <Textarea name="specialRequests" defaultValue={values.specialRequests} maxLength={500} />
         </Field>
       </FormSection>
 
       <div className="flex flex-col gap-2 border-t border-basalt-700/10 pt-6">
         <Button type="submit" size="lg" disabled={isPending} className="w-full sm:w-auto sm:self-start">
-          {isPending ? "Booking…" : `Confirm Booking — ${roomTypeName}`}
+          {isPending ? t("bookingPending") : t("confirmBooking", { roomName: roomTypeName })}
         </Button>
-        <p className="text-xs text-basalt-700">
-          No payment is required now — you&apos;ll pay at the hotel on arrival.
-        </p>
+        <p className="text-xs text-basalt-700">{t("payAtHotelNote")}</p>
       </div>
     </form>
   );

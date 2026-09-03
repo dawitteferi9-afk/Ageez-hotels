@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Fraunces, Inter } from "next/font/google";
+import { Fraunces, Inter, Noto_Sans_Arabic, Noto_Sans_Ethiopic } from "next/font/google";
 import { getLocale } from "next-intl/server";
 import { cn } from "@/lib/utils";
 import { isRtlLocale } from "@/i18n/routing";
@@ -35,12 +35,25 @@ export const metadata: Metadata = {
  * downloads the font files ONCE at build/dev-server-start time and
  * self-hosts them from this app's own origin afterward; the browser never
  * makes a runtime request to Google Fonts, so there is no per-request
- * external dependency. `variable` wires each loader directly into the
- * exact CSS custom property `tailwind.config.ts`'s `fontFamily.display`/
- * `fontFamily.body` already reference — `tokens.css` no longer needs to
- * (and no longer does) hardcode a static font-family value for either.
- * `display: "swap"` avoids an invisible-text flash if the font briefly
- * hasn't loaded yet.
+ * external dependency. `display: "swap"` avoids an invisible-text flash if
+ * the font briefly hasn't loaded yet.
+ *
+ * Multilingual Support Phase 2 — `variable` now targets `--font-fraunces`/
+ * `--font-inter` (renamed from `--font-display`/`--font-body`), and
+ * `globals.css` is the ONE place that defines `--font-display`/
+ * `--font-body` themselves, per locale (see that file's comment). This
+ * indirection exists to avoid a genuine CSS cycle: the per-locale overlay
+ * needs to prepend a script font ahead of the Latin base while still
+ * falling back to that same Latin base, and a custom property cannot
+ * reference its own cascaded value on the same element (confirmed as a
+ * real bug during this phase's own e2e verification — the font silently
+ * stopped applying at all, computed style falling through to Tailwind's
+ * unrelated default `font-sans` stack, not a fallback anyone chose).
+ * Pointing `--font-fraunces`/`--font-inter` at a name the locale overlay
+ * never touches breaks that cycle. `tailwind.config.ts`'s
+ * `fontFamily.display`/`fontFamily.body` still reference
+ * `var(--font-display)`/`var(--font-body)` unchanged — only what DEFINES
+ * those two variables moved from this file to `globals.css`.
  *
  * Confirmed working in this environment via `npm run build` (see the
  * M9a completion report) — if a future environment cannot reach Google's
@@ -50,13 +63,50 @@ export const metadata: Metadata = {
  */
 const fraunces = Fraunces({
   subsets: ["latin"],
-  variable: "--font-display",
+  variable: "--font-fraunces",
   display: "swap",
 });
 
 const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-body",
+  variable: "--font-inter",
+  display: "swap",
+});
+
+/**
+ * Multilingual Support Phase 2 — typography audit. Fraunces/Inter (above)
+ * only cover Latin glyphs; rendering Arabic or Amharic text through them
+ * falls back to whatever generic serif/sans-serif the OS happens to ship,
+ * an unstyled, un-premium result the Product Owner's brief specifically
+ * flagged as a risk ("do NOT assume the existing Fraunces/Inter pairing
+ * covers Ethiopic/Ge'ez"). Two more `next/font/google` loaders, each into
+ * their OWN CSS variable (`globals.css`'s `[data-locale]` rules layer them
+ * in ahead of `--font-fraunces`/`--font-inter` per locale — Latin brand
+ * text like "AGEEZ" still renders in Fraunces/Inter via CSS's own
+ * per-glyph font-stack fallback):
+ *  - `Noto_Sans_Arabic` for `ar` — Modern Standard Arabic, full Arabic
+ *    script coverage.
+ *  - `Noto_Sans_Ethiopic` for `am` — full Ge'ez/Ethiopic script coverage
+ *    for Amharic.
+ * Simplified Chinese (`zh`) deliberately gets NO new webfont here: every
+ * mainstream OS/browser already ships a solid CJK system font (Windows:
+ * Microsoft YaHei/SimHei; macOS/iOS: PingFang SC; Android: Noto Sans CJK
+ * or Source Han Sans), and `next/font/google`'s CJK subsets are large
+ * (multi-megabyte) downloads — shipping one would directly contradict the
+ * brief's "avoid heavy webfont packages if system fallbacks work better"
+ * guidance for zero visible benefit. `globals.css`'s `--font-body`/
+ * `--font-display` fallback chains list those system CJK families
+ * explicitly for `[data-locale="zh"]` instead.
+ */
+const notoSansArabic = Noto_Sans_Arabic({
+  subsets: ["arabic"],
+  variable: "--font-noto-arabic",
+  display: "swap",
+});
+
+const notoSansEthiopic = Noto_Sans_Ethiopic({
+  subsets: ["ethiopic"],
+  variable: "--font-noto-ethiopic",
   display: "swap",
 });
 
@@ -77,13 +127,27 @@ const inter = Inter({
  * always reports "en" there, exactly as before this milestone. `dir`
  * follows the resolved locale: `rtl` for Arabic, `ltr` for every other
  * locale (`isRtlLocale()`, `src/i18n/routing.ts`).
+ *
+ * Multilingual Support Phase 2 — `data-locale` is set alongside `lang`/
+ * `dir` (and kept in sync client-side by `HtmlAttributesSync` after a
+ * locale switch, mirroring that component's existing `lang`/`dir` logic).
+ * It drives `globals.css`'s per-script font-stack overlay above, and is
+ * a plain presentation attribute — it carries no tenant data and changes
+ * no server behavior. `/management/*`, `/tour`, `/api/*` all resolve
+ * `locale` to `"en"` here (see above) and so always get `data-locale="en"`
+ * — the plain Fraunces/Inter stack, unchanged from before this phase.
  */
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await getLocale();
   const dir = isRtlLocale(locale) ? "rtl" : "ltr";
 
   return (
-    <html lang={locale} dir={dir} className={cn(fraunces.variable, inter.variable)}>
+    <html
+      lang={locale}
+      dir={dir}
+      data-locale={locale}
+      className={cn(fraunces.variable, inter.variable, notoSansArabic.variable, notoSansEthiopic.variable)}
+    >
       <body className="font-body bg-parchment-50 text-basalt-950 antialiased">{children}</body>
     </html>
   );

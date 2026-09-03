@@ -27,9 +27,15 @@ import { isRtlLocale } from "@/i18n/routing";
  * layout — *is* part of the subtree that re-renders on a locale switch),
  * so it always reflects the current route's actual locale, including
  * right after a client-side switch. This component does nothing visible
- * — it only keeps two `<html>` attributes honest via a direct DOM write,
- * the standard, minimal fix for this specific Next.js App Router
+ * — it only keeps three `<html>` attributes honest via a direct DOM
+ * write, the standard, minimal fix for this specific Next.js App Router
  * limitation.
+ *
+ * Multilingual Support Phase 2 — also syncs `data-locale` (added in
+ * `src/app/layout.tsx`, driving `globals.css`'s per-script font-stack
+ * overlay for `am`/`ar`) for the exact same reason `lang`/`dir` need
+ * syncing: without this, switching from e.g. `/en` to `/am` client-side
+ * would leave the Ethiopic font overlay inactive until a full reload.
  */
 export function HtmlAttributesSync() {
   const locale = useLocale();
@@ -37,6 +43,7 @@ export function HtmlAttributesSync() {
   useEffect(() => {
     document.documentElement.lang = locale;
     document.documentElement.dir = isRtlLocale(locale) ? "rtl" : "ltr";
+    document.documentElement.dataset.locale = locale;
   }, [locale]);
 
   return null;

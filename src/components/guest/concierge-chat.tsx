@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Sparkles, Send, ShieldCheck, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +47,15 @@ import type {
  * `message`/`state`/`token` object shapes, the action props, and every
  * `useActionState` call are unchanged — this file only changes markup,
  * classNames, and added (never removed) copy.
+ *
+ * Multilingual Support Phase 2 — every static string below now comes from
+ * the `Concierge` message catalog namespace via `useTranslations()`. This
+ * stays safe for the locked e2e strings above because: (a) those tests
+ * run against unprefixed/English routes, and the English catalog's values
+ * were copied byte-for-byte from what used to be hardcoded here; (b) every
+ * locked ATTRIBUTE (`role`, `name`, `id`) was never text and is untouched.
+ * Non-English locales are free to translate all of this — nothing here
+ * scopes to English only except the underlying test fixtures' own routes.
  */
 /**
  * Guest-experience Phase A (Product Owner approval) — expanded from the
@@ -71,43 +81,54 @@ import type {
  * would risk a misleading answer) and "Is breakfast included?" (whether
  * it's included in the room rate is not an established fact either;
  * replaced with the answerable "What time is breakfast served?").
+ *
+ * Multilingual Support Phase 2 — each question now carries its own
+ * translation key (`labelKey`, looked up in `Concierge.starterQuestions`)
+ * alongside its fixed `en` text. `en` is what actually gets SUBMITTED as
+ * the chat message regardless of UI locale — a deliberate Phase 2 design
+ * choice, not dictated by the spec: the mock AI provider
+ * (`src/lib/ai/providers/mock.ts`) matches on English keywords only, so
+ * submitting a translated question would silently degrade to its fallback
+ * "I don't know" answer for every non-English guest. Only the button's
+ * DISPLAY label is translated; the grounded answer quality stays the same
+ * in every locale. Real multilingual AI conversation is Phase 4.
  */
 const STARTER_QUESTION_CATEGORIES = [
   {
-    label: "Rooms & Booking",
+    categoryKey: "roomsBooking",
     questions: [
-      "What room types do you offer?",
-      "Which room is best for a family?",
-      "What is your most premium room?",
-      "What time is check-in?",
-      "What time is check-out?",
-      "How can I verify my booking?",
+      { labelKey: "roomTypes", en: "What room types do you offer?" },
+      { labelKey: "familyRoom", en: "Which room is best for a family?" },
+      { labelKey: "premiumRoom", en: "What is your most premium room?" },
+      { labelKey: "checkInTime", en: "What time is check-in?" },
+      { labelKey: "checkOutTime", en: "What time is check-out?" },
+      { labelKey: "howToVerify", en: "How can I verify my booking?" },
     ],
   },
   {
-    label: "Dining",
+    categoryKey: "dining",
     questions: [
-      "Tell me about the restaurant.",
-      "What dining options do you have?",
-      "Tell me about the Buna Lounge.",
-      "What time is breakfast served?",
+      { labelKey: "aboutRestaurant", en: "Tell me about the restaurant." },
+      { labelKey: "diningOptions", en: "What dining options do you have?" },
+      { labelKey: "aboutBunaLounge", en: "Tell me about the Buna Lounge." },
+      { labelKey: "breakfastTime", en: "What time is breakfast served?" },
     ],
   },
   {
-    label: "Hotel Facilities",
+    categoryKey: "hotelFacilities",
     questions: [
-      "What facilities do you have?",
-      "Do you have a fitness center?",
-      "Do you have conference facilities?",
-      "Do you have a business center?",
+      { labelKey: "facilities", en: "What facilities do you have?" },
+      { labelKey: "fitnessCenter", en: "Do you have a fitness center?" },
+      { labelKey: "conferenceFacilities", en: "Do you have conference facilities?" },
+      { labelKey: "businessCenter", en: "Do you have a business center?" },
     ],
   },
   {
-    label: "Guest Services",
+    categoryKey: "guestServices",
     questions: [
-      "Do you provide airport pickup?",
-      "What guest services are available?",
-      "How can I request a hotel service?",
+      { labelKey: "airportPickup", en: "Do you provide airport pickup?" },
+      { labelKey: "guestServices", en: "What guest services are available?" },
+      { labelKey: "requestService", en: "How can I request a hotel service?" },
     ],
   },
 ] as const;
@@ -136,6 +157,7 @@ export function ConciergeChat({
   verifyAction: VerifyAction;
   confirmAction: ConfirmAction;
 }) {
+  const t = useTranslations("Concierge");
   const [state, formAction, isPending] = useActionState(action, initialChatState);
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -186,10 +208,10 @@ export function ConciergeChat({
           <Sparkles className="h-5 w-5 text-ochre-600" aria-hidden />
         </div>
         <div className="flex-1">
-          <p className="font-display text-base text-basalt-950">AI Concierge</p>
-          <p className="text-xs text-basalt-700">Grounded in real {hotelName} information</p>
+          <p className="font-display text-base text-basalt-950">{t("chatHeaderTitle")}</p>
+          <p className="text-xs text-basalt-700">{t("chatHeaderSubtitle", { hotelName })}</p>
         </div>
-        <AiBadge className="hidden sm:inline-flex">AI-Powered</AiBadge>
+        <AiBadge className="hidden sm:inline-flex">{t("aiPowered")}</AiBadge>
       </div>
 
       <div className="flex flex-col gap-4 p-5">
@@ -197,12 +219,10 @@ export function ConciergeChat({
           ref={logRef}
           role="log"
           aria-live="polite"
-          aria-label="Conversation with the virtual concierge"
+          aria-label={t("conversationLabel")}
           className="flex max-h-[28rem] min-h-[16rem] flex-col gap-3 overflow-y-auto rounded-lg border border-basalt-700/15 bg-parchment-50 p-4"
         >
-          <ConciergeBubble role="assistant">
-            {`Welcome to ${hotelName}! I'm your AI concierge — ask me about our rooms, dining, facilities, services, or policies. Verify your booking below to ask about your own reservation or requests.`}
-          </ConciergeBubble>
+          <ConciergeBubble role="assistant">{t("welcomeMessage", { hotelName })}</ConciergeBubble>
 
           {state.messages.map((message, index) => (
             <ConciergeBubble key={index} role={message.role}>
@@ -212,7 +232,7 @@ export function ConciergeChat({
 
           {isPending && (
             <ConciergeBubble role="assistant" pending>
-              Thinking…
+              {t("thinking")}
             </ConciergeBubble>
           )}
         </div>
@@ -247,20 +267,20 @@ export function ConciergeChat({
 
         {state.messages.length === 0 && (
           <div className="flex flex-col gap-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-basalt-700">Try asking</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-basalt-700">{t("tryAsking")}</p>
             {STARTER_QUESTION_CATEGORIES.map((category) => (
-              <div key={category.label} className="flex flex-col gap-1.5">
-                <p className="text-xs font-medium text-basalt-700/70">{category.label}</p>
+              <div key={category.categoryKey} className="flex flex-col gap-1.5">
+                <p className="text-xs font-medium text-basalt-700/70">{t(`categories.${category.categoryKey}`)}</p>
                 <div className="flex flex-wrap gap-2">
                   {category.questions.map((question) => (
                     <button
-                      key={question}
+                      key={question.labelKey}
                       type="button"
-                      onClick={() => askStarter(question)}
+                      onClick={() => askStarter(question.en)}
                       disabled={isPending}
                       className="rounded-full border border-basalt-700/25 bg-parchment-50 px-4 py-1.5 text-sm text-basalt-800 transition-colors hover:bg-parchment-100 disabled:pointer-events-none disabled:opacity-50"
                     >
-                      {question}
+                      {t(`starterQuestions.${question.labelKey}`)}
                     </button>
                   ))}
                 </div>
@@ -281,13 +301,13 @@ export function ConciergeChat({
           <div className="flex items-end gap-3">
             <div className="flex-1">
               <Label htmlFor="concierge-message" className="sr-only">
-                Your message
+                {t("yourMessage")}
               </Label>
               <Input
                 id="concierge-message"
                 name="message"
                 ref={inputRef}
-                placeholder="Ask about rooms, dining, facilities…"
+                placeholder={t("messagePlaceholder")}
                 maxLength={MAX_MESSAGE_LENGTH}
                 autoComplete="off"
                 disabled={isPending}
@@ -297,11 +317,11 @@ export function ConciergeChat({
             </div>
             <Button type="submit" disabled={isPending}>
               {isPending ? (
-                "Sending…"
+                t("sending")
               ) : (
                 <>
                   <Send className="h-4 w-4" aria-hidden />
-                  Send
+                  {t("send")}
                 </>
               )}
             </Button>
@@ -309,7 +329,7 @@ export function ConciergeChat({
           <div className="flex items-center justify-between text-xs text-basalt-700/60">
             <span className="flex items-center gap-1">
               <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
-              Grounded answers only — I&apos;ll say when I don&apos;t know something.
+              {t("groundedNote")}
             </span>
             <span ref={counterRef}>0/{MAX_MESSAGE_LENGTH}</span>
           </div>
@@ -338,6 +358,7 @@ function VerifyBookingPanel({
   onVerified: (token: string) => void;
   onClear: () => void;
 }) {
+  const t = useTranslations("Concierge");
   const [verifyState, verifyFormAction, verifyPending] = useActionState(verifyAction, initialVerifyState);
   const [expanded, setExpanded] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
@@ -356,10 +377,10 @@ function VerifyBookingPanel({
       <div className="flex items-center justify-between gap-3 rounded-lg border border-green-300 bg-green-50 px-4 py-2.5 text-sm text-green-800">
         <p role="status" className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden />
-          Booking verified — you can now ask about your reservation and requests.
+          {t("bookingVerified")}
         </p>
         <button type="button" onClick={onClear} className="shrink-0 font-medium underline hover:no-underline">
-          Clear verification
+          {t("clearVerification")}
         </button>
       </div>
     );
@@ -373,7 +394,7 @@ function VerifyBookingPanel({
         className="inline-flex w-fit items-center gap-1.5 self-start rounded-full border border-basalt-700/25 bg-parchment-50 px-4 py-1.5 text-sm font-medium text-basalt-800 transition-colors hover:bg-parchment-100"
       >
         <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
-        Verify My Booking
+        {t("verifyMyBooking")}
       </button>
     );
   }
@@ -385,11 +406,8 @@ function VerifyBookingPanel({
       className="flex flex-col gap-3 rounded-lg border border-basalt-700/15 bg-parchment-50 p-4"
     >
       <div>
-        <p className="text-sm font-medium text-basalt-900">Verify your booking</p>
-        <p className="mt-0.5 text-xs text-basalt-700">
-          Enter your booking reference and the email or phone used when booking. This only confirms
-          your existing reservation — nothing is booked or changed here.
-        </p>
+        <p className="text-sm font-medium text-basalt-900">{t("verifyBookingHeading")}</p>
+        <p className="mt-0.5 text-xs text-basalt-700">{t("verifyBookingDescription")}</p>
       </div>
       {verifyState.error && (
         <p role="alert" className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
@@ -398,20 +416,20 @@ function VerifyBookingPanel({
       )}
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <Label htmlFor="verify-reference">Booking reference</Label>
+          <Label htmlFor="verify-reference">{t("bookingReferenceLabel")}</Label>
           <Input id="verify-reference" name="bookingReference" autoComplete="off" required disabled={verifyPending} />
         </div>
         <div>
-          <Label htmlFor="verify-contact">Email used for booking, or phone if no email was provided</Label>
+          <Label htmlFor="verify-contact">{t("contactFieldLabel")}</Label>
           <Input id="verify-contact" name="contact" autoComplete="off" required disabled={verifyPending} />
         </div>
       </div>
       <div className="flex gap-3">
         <Button type="submit" size="sm" disabled={verifyPending}>
-          {verifyPending ? "Verifying…" : "Verify"}
+          {verifyPending ? t("verifying") : t("verify")}
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={() => setExpanded(false)} disabled={verifyPending}>
-          Cancel
+          {t("cancel")}
         </Button>
       </div>
     </form>
@@ -441,6 +459,7 @@ function ServiceRequestProposalCard({
   token: string | undefined;
   confirmAction: ConfirmAction;
 }) {
+  const t = useTranslations("Concierge");
   const [confirmState, confirmFormAction, confirmPending] = useActionState(confirmAction, initialConfirmState);
   const [cancelled, setCancelled] = useState(false);
 
@@ -452,9 +471,9 @@ function ServiceRequestProposalCard({
         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
         <div>
           <p role="status" className="font-medium">
-            Request submitted — {confirmState.requestType} ({confirmState.requestStatus})
+            {t("requestSubmitted", { type: confirmState.requestType ?? "", status: confirmState.requestStatus ?? "" })}
           </p>
-          <p className="mt-1">The front desk will follow up on your request.</p>
+          <p className="mt-1">{t("frontDeskFollowUp")}</p>
         </div>
       </div>
     );
@@ -464,16 +483,16 @@ function ServiceRequestProposalCard({
     <div className="flex flex-col gap-3 rounded-lg border border-ochre-500/40 bg-parchment-100 p-4">
       <div className="flex items-center gap-2">
         <Sparkles className="h-4 w-4 text-ochre-600" aria-hidden />
-        <p className="text-sm font-medium text-basalt-900">Review your service request</p>
+        <p className="text-sm font-medium text-basalt-900">{t("reviewServiceRequest")}</p>
       </div>
       <dl className="grid gap-1 text-sm text-basalt-800">
         <div className="flex gap-2">
-          <dt className="font-medium">Type:</dt>
+          <dt className="font-medium">{t("type")}</dt>
           <dd>{proposal.label}</dd>
         </div>
         {proposal.notes && (
           <div className="flex gap-2">
-            <dt className="font-medium">Details:</dt>
+            <dt className="font-medium">{t("details")}</dt>
             <dd className="whitespace-pre-line">{proposal.notes}</dd>
           </div>
         )}
@@ -491,13 +510,13 @@ function ServiceRequestProposalCard({
           <input type="hidden" name="type" value={proposal.type} />
           <input type="hidden" name="notes" value={proposal.notes ?? ""} />
           <Button type="submit" size="sm" disabled={confirmPending}>
-            {confirmPending ? "Submitting…" : "Confirm Request"}
+            {confirmPending ? t("submitting") : t("confirmRequest")}
           </Button>
           <Button type="button" variant="ghost" size="sm" onClick={() => setCancelled(true)} disabled={confirmPending}>
-            Cancel
+            {t("cancel")}
           </Button>
         </div>
-        <p className="text-xs text-basalt-700/70">Nothing is submitted until you press Confirm Request.</p>
+        <p className="text-xs text-basalt-700/70">{t("nothingSubmittedNote")}</p>
       </form>
     </div>
   );

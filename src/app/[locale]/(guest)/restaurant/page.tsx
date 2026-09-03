@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { getTranslations } from "next-intl/server";
 import { UtensilsCrossed, Coffee, type LucideIcon } from "lucide-react";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
@@ -8,9 +9,10 @@ import { getVenuePhotography } from "@/lib/guest/venuePhotography";
 import { CinematicScene } from "@/components/guest/cinematic/CinematicScene";
 import { CINEMATIC_SCENES } from "@/lib/guest/cinematicConfig";
 
-export const metadata: Metadata = {
-  title: "Restaurant",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations("Navigation");
+  return { title: t("restaurant") };
+}
 
 const DINING_VENUE_ICONS: Record<string, LucideIcon> = {
   axum: UtensilsCrossed,
@@ -40,6 +42,7 @@ const DINING_VENUE_ICONS: Record<string, LucideIcon> = {
  * it (venue cards, the full dining paragraph) is unchanged.
  */
 export default async function RestaurantPage() {
+  const t = await getTranslations("Restaurant");
   const hotel = await getCurrentTenantHotel();
   const tenant = withTenant(hotel.id);
   const dining = await tenant.aiKnowledgeDocuments.findByCategory("dining");
@@ -59,8 +62,8 @@ export default async function RestaurantPage() {
               className="pointer-events-none absolute inset-0 bg-gradient-to-t from-basalt-950/80 via-basalt-950/20 to-transparent"
             />
             <Container className="relative pb-8 text-parchment-50">
-              <p className="text-sm uppercase tracking-[0.2em] text-ochre-400">Dining</p>
-              <h1 className="font-display text-4xl">Dining at {hotel.name}</h1>
+              <p className="text-sm uppercase tracking-[0.2em] text-ochre-400">{t("eyebrow")}</p>
+              <h1 className="font-display text-4xl">{t("heading", { hotelName: hotel.name })}</h1>
             </Container>
           </div>
         }
@@ -82,13 +85,13 @@ export default async function RestaurantPage() {
           ) : (
             <p className="flex items-center gap-2 text-basalt-700">
               <Coffee className="h-4 w-4" aria-hidden />
-              Dining information is not available yet.
+              {t("noDiningInfo")}
             </p>
           )}
 
           {dining?.content && (
             <div className="flex flex-col gap-2 border-t border-basalt-700/15 pt-8">
-              <h2 className="font-display text-xl text-basalt-950">More About Dining</h2>
+              <h2 className="font-display text-xl text-basalt-950">{t("moreAboutDining")}</h2>
               <p className="max-w-2xl text-base leading-relaxed text-basalt-800">{dining.content}</p>
             </div>
           )}

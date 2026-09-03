@@ -3,22 +3,27 @@ import { hasLocale } from "next-intl";
 import { routing } from "./routing";
 
 /**
- * Multilingual Support Phase 1 — required by next-intl's Next.js plugin
- * for every request (including requests that never went through the
- * `[locale]` segment at all, e.g. `/management/*`, `/tour`, `/api/*` —
- * `requestLocale` resolves to `undefined`/invalid for those, and
- * `hasLocale()` falls back to `routing.defaultLocale`, so calling
- * `getLocale()` anywhere in the app — notably the true root
- * `src/app/layout.tsx`, which renders for every route — always resolves
- * safely to `"en"` rather than throwing).
+ * Required by next-intl's Next.js plugin for every request (including
+ * requests that never went through the `[locale]` segment at all, e.g.
+ * `/management/*`, `/tour`, `/api/*` — `requestLocale` resolves to
+ * `undefined`/invalid for those, and `hasLocale()` falls back to
+ * `routing.defaultLocale`, so calling `getLocale()` anywhere in the app —
+ * notably the true root `src/app/layout.tsx`, which renders for every
+ * route — always resolves safely to `"en"` rather than throwing).
  *
- * `messages` is deliberately an empty object this phase: Phase 1 is
- * routing/foundation only, not the ~1,600-line UI-string extraction
- * (explicitly deferred to Phase 2) — nothing in the app calls
- * `useTranslations()`/`getTranslations()` yet, so there is nothing to
- * load. This is still required shape for `getRequestConfig`, not a
- * placeholder that will silently break anything later — Phase 2 adds
- * real per-locale message catalogs here.
+ * Multilingual Support Phase 2 — `messages` now loads the real per-locale
+ * catalog from `messages/<locale>.json` (English is the canonical source;
+ * `am`/`zh`/`es`/`ar` are complete translations of every key — verified
+ * identical key sets across all five files as part of this phase's own
+ * validation, not assumed). These catalogs are guest-facing INTERFACE
+ * CHROME only — navigation, buttons, form labels, validation/error text,
+ * and similar static UI strings. They never contain hotel-specific
+ * business facts (room descriptions, policies, AI knowledge content):
+ * that content stays exactly what it already was — live `Hotel`/
+ * `RoomType`/`AiKnowledgeDocument` data, read via `getCurrentTenantHotel()`/
+ * `withTenant()` — and continues to render in English until Phase 3 adds
+ * real translation storage for it. See `docs/DECISIONS.md`'s Phase 2
+ * entry for the full content boundary.
  */
 export default getRequestConfig(async ({ requestLocale }) => {
   const requested = await requestLocale;
@@ -26,6 +31,6 @@ export default getRequestConfig(async ({ requestLocale }) => {
 
   return {
     locale,
-    messages: {},
+    messages: (await import(`../../messages/${locale}.json`)).default,
   };
 });

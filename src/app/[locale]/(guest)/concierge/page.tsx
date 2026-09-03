@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { getTranslations } from "next-intl/server";
 import { Info, BedDouble, ShieldCheck, ClipboardList } from "lucide-react";
 import { getCurrentTenantHotel } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
@@ -7,9 +8,10 @@ import { AiBadge } from "@/components/ui/ai-badge";
 import { ConciergeChat } from "@/components/guest/concierge-chat";
 import { sendConciergeMessageAction, verifyReservationContextAction, confirmServiceRequestAction } from "./actions";
 
-export const metadata: Metadata = {
-  title: "AI Concierge",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations("Concierge");
+  return { title: t("pageTitle") };
+}
 
 /**
  * M9d — visual/UX polish only. Every capability chip below names a real,
@@ -20,33 +22,34 @@ export const metadata: Metadata = {
  * housekeeping-beyond-service-request is implied. `ConciergeChat` and
  * the three Server Actions passed to it are unchanged from before this
  * pass.
+ *
+ * Multilingual Support Phase 2 — chip labels now come from
+ * `Concierge.capabilities.*` (looked up via the fixed key order below,
+ * since the catalog stores them as an object, not an array).
  */
-const CAPABILITIES = [
-  { icon: Info, label: "Hotel Info & Policies" },
-  { icon: BedDouble, label: "Rooms & Dining" },
-  { icon: ShieldCheck, label: "Booking Verification" },
-  { icon: ClipboardList, label: "Service Requests" },
+const CAPABILITY_ICONS = [
+  { icon: Info, key: "hotelInfo" },
+  { icon: BedDouble, key: "roomsAndDining" },
+  { icon: ShieldCheck, key: "bookingVerification" },
+  { icon: ClipboardList, key: "serviceRequests" },
 ] as const;
 
 export default async function ConciergePage() {
+  const t = await getTranslations("Concierge");
   const hotel = await getCurrentTenantHotel();
 
   return (
     <section className="py-16">
       <Container className="flex max-w-3xl flex-col gap-8">
         <div className="flex flex-col gap-3">
-          <AiBadge className="w-fit">AI Concierge</AiBadge>
-          <h1 className="font-display text-4xl text-basalt-950">Ask Our AI Concierge</h1>
-          <p className="max-w-2xl text-basalt-700">
-            Get instant, grounded answers about {hotel.name} — rooms, dining, facilities, services,
-            and policies. Verify your booking to ask about your own reservation, and any request the
-            concierge proposes is only submitted after you confirm it.
-          </p>
+          <AiBadge className="w-fit">{t("badge")}</AiBadge>
+          <h1 className="font-display text-4xl text-basalt-950">{t("heading")}</h1>
+          <p className="max-w-2xl text-basalt-700">{t("intro", { hotelName: hotel.name })}</p>
           <div className="flex flex-wrap gap-2">
-            {CAPABILITIES.map(({ icon: Icon, label }) => (
-              <Badge key={label} variant="outline" className="gap-1.5 py-1">
+            {CAPABILITY_ICONS.map(({ icon: Icon, key }) => (
+              <Badge key={key} variant="outline" className="gap-1.5 py-1">
                 <Icon className="h-3.5 w-3.5" aria-hidden />
-                {label}
+                {t(`capabilities.${key}`)}
               </Badge>
             ))}
           </div>

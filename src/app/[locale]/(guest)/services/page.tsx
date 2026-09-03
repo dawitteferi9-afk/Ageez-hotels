@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { getTranslations } from "next-intl/server";
 import {
   Sparkles,
   Building2,
@@ -20,9 +21,10 @@ import { VenueCard } from "@/components/guest/venue-card";
 import { deriveServiceHighlights, deriveFacilityHighlights, deriveFacilityVenues } from "@/lib/guest/knowledgeHighlights";
 import { getVenuePhotography } from "@/lib/guest/venuePhotography";
 
-export const metadata: Metadata = {
-  title: "Services",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations("Navigation");
+  return { title: t("services") };
+}
 
 const SERVICE_ICONS: Record<string, LucideIcon> = {
   "airport-pickup": Plane,
@@ -64,6 +66,7 @@ const FACILITY_ICONS: Record<string, LucideIcon> = {
  * presentation-only and asserts no hotel fact of its own.
  */
 export default async function ServicesPage() {
+  const t = await getTranslations("Services");
   const hotel = await getCurrentTenantHotel();
   const tenant = withTenant(hotel.id);
   const [services, facilities] = await Promise.all([
@@ -79,15 +82,15 @@ export default async function ServicesPage() {
     <section className="py-16">
       <Container className="flex max-w-4xl flex-col gap-12">
         <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium uppercase tracking-[0.2em] text-ochre-600">Services &amp; Facilities</p>
-          <h1 className="font-display text-4xl text-basalt-950">Services &amp; Facilities at {hotel.name}</h1>
+          <p className="text-sm font-medium uppercase tracking-[0.2em] text-ochre-600">{t("eyebrow")}</p>
+          <h1 className="font-display text-4xl text-basalt-950">{t("heading", { hotelName: hotel.name })}</h1>
         </div>
 
         {services?.content && (
           <div className="flex flex-col gap-4">
             <h2 className="flex items-center gap-2 font-display text-2xl text-basalt-950">
               <Sparkles className="h-5 w-5 text-ochre-600" aria-hidden />
-              Guest Services
+              {t("guestServices")}
             </h2>
             {serviceHighlights.length > 0 && (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -108,7 +111,7 @@ export default async function ServicesPage() {
           <div className="flex flex-col gap-4">
             <h2 className="flex items-center gap-2 font-display text-2xl text-basalt-950">
               <Building2 className="h-5 w-5 text-ochre-600" aria-hidden />
-              Facilities
+              {t("facilities")}
             </h2>
             {facilityVenues.length > 0 && (
               <div className="grid gap-6 sm:grid-cols-3">

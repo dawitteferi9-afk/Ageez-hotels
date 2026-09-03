@@ -1,6 +1,7 @@
 "use server";
 
 import { headers } from "next/headers";
+import { getTranslations } from "next-intl/server";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { getAiProvider, type AiChatTurn, type AiToolCallRecord } from "@/lib/ai/provider";
 import { buildAnonymousConciergeSystemPrompt, buildVerifiedConciergeSystemPrompt } from "@/lib/ai/prompt";
@@ -46,8 +47,9 @@ import {
  *
  * A token that WAS submitted but no longer resolves (expired, tampered,
  * wrong-tenant, or otherwise invalid) is never silently treated as "no
- * token at all" — see `STALE_TOKEN_REPLY` below, returned deterministically
- * without ever calling the AI provider or a verified tool for that turn
+ * token at all" — see the `errors("verificationExpired")` reply below,
+ * returned deterministically without ever calling the AI provider or a
+ * verified tool for that turn
  * (docs/DECISIONS.md's M6c security-correction entry). A request with no
  * token submitted in the first place gets the unchanged, original M6b
  * anonymous behavior.
@@ -62,8 +64,8 @@ import {
  * M7's `sendManagementAssistantMessageAction()` — size/count constants and
  * a pure trimming helper only, nothing about identity or tools): a
  * server-side `MAX_MESSAGE_LENGTH` rejection (never a truncation, never
- * appended to the transcript, never sent to the provider — see
- * `MESSAGE_TOO_LONG_ERROR` below), and a `history` bounded to the most
+ * appended to the transcript, never sent to the provider — see the
+ * `errors("messageTooLong", ...)` reply below), and a `history` bounded to the most
  * recent `MAX_HISTORY_MESSAGES` turns before the provider call — the full
  * transcript returned to the browser is unaffected either way.
  *
@@ -122,32 +124,21 @@ function extractServiceRequestProposal(toolCalls: AiToolCallRecord[]): ServiceRe
   return { type: result.type, label: result.label, notes: result.notes ?? null };
 }
 
-const GENERIC_ERROR =
-  "Sorry, I'm having trouble responding right now. Please try again in a moment, or contact the front desk directly.";
-
 /**
- * Shown when a token WAS submitted but `resolveVerifiedReservationContext()`
- * could not confirm it (expired, tampered, wrong-tenant, or any other
- * reason) — never the same reply an anonymous, never-verified guest sees.
- * Deliberately does not distinguish which check failed.
+ * Multilingual Support Phase 2 — every guest-facing string in this file
+ * (all system-level, non-AI-generated copy: generic/rate-limit/expired-
+ * token errors) now comes from `Concierge.errors.*` via `getTranslations()`,
+ * looked up fresh per call rather than as module-level constants (the
+ * locale is only known per-request). Nothing about the actual security,
+ * verification, or rate-limiting logic below changed — only how the
+ * resulting guest-facing text is produced.
  */
-const STALE_TOKEN_REPLY =
-  "Your booking verification could not be confirmed. Please verify your booking again, or contact the front desk for help.";
-
-/**
- * M8c — a server-side-enforced message-length rejection, never a silent
- * truncation. The client's own `maxLength={500}` on the chat input
- * (`concierge-chat.tsx`) is UX only; a direct POST bypasses it entirely,
- * so this is the actual boundary. Deliberately worded the same as every
- * other guest-facing copy in this file — concise, no internal/provider
- * detail.
- */
-const MESSAGE_TOO_LONG_ERROR = `Please keep your message under ${MAX_MESSAGE_LENGTH} characters.`;
 
 export async function sendConciergeMessageAction(
   prevState: ConciergeChatState,
   formData: FormData
 ): Promise<ConciergeChatState> {
+  const errors = await getTranslations("Concierge.errors");
   const raw = formData.get("message");
   const text = typeof raw === "string" ? raw.trim() : "";
   const priorMessages = prevState.messages ?? [];
@@ -163,7 +154,7 @@ export async function sendConciergeMessageAction(
     // transcript (not even as a bare user turn) or sent to the AI
     // provider. Prior transcript/history state is untouched, exactly like
     // the blank-message case above.
-    return { messages: priorMessages, error: MESSAGE_TOO_LONG_ERROR };
+    return { messages: priorMessages, error: errors("messageTooLong", { max: MAX_MESSAGE_LENGTH }) };
   }
 
   const tokenRaw = formData.get("token");
@@ -175,7 +166,7 @@ export async function sendConciergeMessageAction(
   try {
     hotel = await getCurrentTenantHotel();
   } catch {
-    return { messages: messagesWithGuestTurn, error: GENERIC_ERROR };
+    return { messages: messagesWithGuestTurn, error: errors("genericChat") };
   }
 
   const hotelIdentity = {
@@ -197,7 +188,7 @@ export async function sendConciergeMessageAction(
     // if they'd never verified, which is misleading and unsafe-feeling for
     // someone who verified moments ago). Deterministic, no AI provider
     // call, no verified tool access, no disclosure of the actual cause.
-    return { messages: [...messagesWithGuestTurn, { role: "assistant", content: STALE_TOKEN_REPLY }] };
+    return { messages: [...messagesWithGuestTurn, { role: "assistant", content: errors("verificationExpired") }] };
   }
 
   const systemPrompt = verifiedContext
@@ -226,7 +217,7 @@ export async function sendConciergeMessageAction(
     // Deliberately not inspecting/forwarding the error — it may carry a
     // provider-specific message or structure. The guest sees the same
     // generic, front-desk-pointing copy regardless of cause.
-    return { messages: messagesWithGuestTurn, error: GENERIC_ERROR };
+    return { messages: messagesWithGuestTurn, error: errors("genericChat") };
   }
 }
 
@@ -252,12 +243,6 @@ export interface VerifyBookingState {
   error?: string;
 }
 
-const VERIFY_GENERIC_ERROR =
-  "We couldn't verify that booking. Please double-check your booking reference and the email or phone used when booking, or contact the front desk.";
-
-const RATE_LIMIT_ERROR =
-  "Too many verification attempts. Please wait a while before trying again, or contact the front desk.";
-
 async function getClientIpForRateLimit(): Promise<string> {
   const requestHeaders = await headers();
   const forwardedFor = requestHeaders.get("x-forwarded-for");
@@ -276,27 +261,28 @@ export async function verifyReservationContextAction(
   _prevState: VerifyBookingState,
   formData: FormData
 ): Promise<VerifyBookingState> {
+  const errors = await getTranslations("Concierge.errors");
   const clientIp = await getClientIpForRateLimit();
   if (!checkRateLimit(verifyReservationRateLimitKey(clientIp))) {
-    return { error: RATE_LIMIT_ERROR };
+    return { error: errors("tooManyVerificationAttempts") };
   }
 
   const bookingReference = String(formData.get("bookingReference") ?? "").trim();
   const contact = String(formData.get("contact") ?? "").trim();
   if (!bookingReference || !contact) {
-    return { error: VERIFY_GENERIC_ERROR };
+    return { error: errors("verifyCouldNotConfirm") };
   }
 
   let hotel;
   try {
     hotel = await getCurrentTenantHotel();
   } catch {
-    return { error: VERIFY_GENERIC_ERROR };
+    return { error: errors("verifyCouldNotConfirm") };
   }
 
   const match = await withTenant(hotel.id).reservations.verifyGuestBooking(bookingReference, contact);
   if (!match) {
-    return { error: VERIFY_GENERIC_ERROR };
+    return { error: errors("verifyCouldNotConfirm") };
   }
 
   try {
@@ -308,7 +294,7 @@ export async function verifyReservationContextAction(
     return { token };
   } catch {
     // CONCIERGE_TOKEN_SECRET missing/misconfigured — never guest-facing.
-    return { error: VERIFY_GENERIC_ERROR };
+    return { error: errors("verifyCouldNotConfirm") };
   }
 }
 
@@ -372,28 +358,20 @@ export interface ConfirmServiceRequestState {
   error?: string;
 }
 
-const CONFIRM_GENERIC_ERROR =
-  "We couldn't submit that request. Please try again, or contact the front desk for help.";
-
-const CONFIRM_VERIFY_AGAIN_ERROR =
-  "Your booking verification could not be confirmed. Please verify your booking again, then resend your request.";
-
-const CONFIRM_RATE_LIMIT_ERROR =
-  "Too many requests submitted in a short time. Please wait a while before trying again, or contact the front desk.";
-
 export async function confirmServiceRequestAction(
   _prevState: ConfirmServiceRequestState,
   formData: FormData
 ): Promise<ConfirmServiceRequestState> {
+  const errors = await getTranslations("Concierge.errors");
   const clientIp = await getClientIpForRateLimit();
   if (!checkRateLimit(confirmServiceRequestRateLimitKey(clientIp))) {
-    return { status: "error", error: CONFIRM_RATE_LIMIT_ERROR };
+    return { status: "error", error: errors("tooManyRequests") };
   }
 
   const tokenRaw = formData.get("token");
   const token = typeof tokenRaw === "string" ? tokenRaw.trim() : "";
   if (!token) {
-    return { status: "error", error: CONFIRM_VERIFY_AGAIN_ERROR };
+    return { status: "error", error: errors("requestVerificationExpired") };
   }
 
   // Full token-authorization pipeline, independently re-run — never trusts
@@ -401,7 +379,7 @@ export async function confirmServiceRequestAction(
   // this a moment ago.
   const context = await resolveVerifiedReservationContext(token);
   if (!context) {
-    return { status: "error", error: CONFIRM_VERIFY_AGAIN_ERROR };
+    return { status: "error", error: errors("requestVerificationExpired") };
   }
 
   // The client necessarily resubmits the proposed type/notes as untrusted
@@ -409,7 +387,7 @@ export async function confirmServiceRequestAction(
   // here, server-side, rather than trusting them.
   const type = normalizeServiceRequestType(formData.get("type"));
   if (!type) {
-    return { status: "error", error: CONFIRM_GENERIC_ERROR };
+    return { status: "error", error: errors("requestSubmitFailed") };
   }
   const notes = normalizeServiceRequestNotes(formData.get("notes"));
 
@@ -430,6 +408,6 @@ export async function confirmServiceRequestAction(
     // InvalidServiceRequestTypeError, or anything else) — the guest sees
     // the same safe generic message regardless of cause, matching every
     // other action in this file.
-    return { status: "error", error: CONFIRM_GENERIC_ERROR };
+    return { status: "error", error: errors("requestSubmitFailed") };
   }
 }

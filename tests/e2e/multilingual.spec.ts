@@ -1,14 +1,29 @@
 import { test, expect } from "@playwright/test";
+import en from "../../messages/en.json";
+import am from "../../messages/am.json";
+import zh from "../../messages/zh.json";
+import es from "../../messages/es.json";
+import ar from "../../messages/ar.json";
 
 /**
  * Multilingual Support Phase 1 — the routing/foundation e2e coverage the
- * Product Owner explicitly asked to be verified. Content is still
- * English-only this phase (the ~1,600-line UI-string extraction is
- * Phase 2, hotel-content translation tables are Phase 3) — these tests
- * cover routing, `<html lang/dir>`, the language switcher, and that
+ * Product Owner explicitly asked to be verified. Content was still
+ * English-only that phase (the real UI-string catalogs are Phase 2,
+ * hotel-content translation tables are Phase 3) — these tests originally
+ * covered routing, `<html lang/dir>`, the language switcher, and that
  * everything preserved by the locked requirements (booking, management,
- * tenant isolation) genuinely still works, not the (not-yet-existing)
- * translated copy itself.
+ * tenant isolation) genuinely still works, not translated copy itself.
+ *
+ * Multilingual Support Phase 2 — now that real per-locale catalogs exist
+ * (`messages/<locale>.json`, imported directly above so these tests can
+ * never silently drift from the actual shipped strings), the navigation
+ * tests below that click/assert links by name are updated to use each
+ * locale's REAL translated text instead of the English text that used to
+ * render everywhere in Phase 1. A new `translated interface chrome`
+ * describe block further down adds the Phase-2-specific coverage the
+ * Product Owner's brief asked for: per-locale key-UI translation,
+ * Ethiopic/Chinese/RTL-specific checks, and confirmation that hotel DB
+ * content is still English (untranslated) while UI chrome is not.
  */
 
 test.describe("existing unprefixed English URLs are preserved", () => {
@@ -95,7 +110,14 @@ test.describe("language switcher", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/rooms");
 
-    const select = page.getByLabel("Choose language").first();
+    // Multilingual Support Phase 2 — the switcher's own aria-label
+    // ("Choose language") is now translated per locale
+    // (`LanguageSwitcher.chooseLanguage`), so a fixed English-text lookup
+    // would break as soon as the current locale isn't English. `combobox`
+    // is the native `<select>`'s ARIA role regardless of its label's
+    // language, and there's exactly one on the page — a locale-agnostic
+    // way to find the same element.
+    const select = page.getByRole("combobox").first();
     await expect(select).toBeVisible();
     const optionValues = await select.locator("option").evaluateAll((opts) => opts.map((o) => (o as HTMLOptionElement).value));
     expect(optionValues.sort()).toEqual(["am", "ar", "en", "es", "zh"]);
@@ -117,7 +139,7 @@ test.describe("language switcher", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/rooms");
     await page.locator("header details summary").click();
-    const select = page.locator("header details nav").getByLabel("Choose language");
+    const select = page.locator("header details nav").getByRole("combobox");
     await expect(select).toBeVisible();
     await select.selectOption("zh");
     await expect(page).toHaveURL(/\/zh\/rooms$/);
@@ -164,7 +186,7 @@ test.describe("remember explicit user choice (cookie-only, never Accept-Language
 
   test("2. explicit switch to Amharic is remembered on a later visit to the bare site", async ({ page }) => {
     await page.goto("/rooms");
-    await page.getByLabel("Choose language").first().selectOption("am");
+    await page.getByRole("combobox").first().selectOption("am");
     await expect(page).toHaveURL(/\/am\/rooms$/);
 
     // A later visit to the bare, unprefixed homepage — simulating a
@@ -179,7 +201,7 @@ test.describe("remember explicit user choice (cookie-only, never Accept-Language
 
   test("3. explicit switch to Arabic is remembered on a later visit to the bare site", async ({ page }) => {
     await page.goto("/rooms");
-    await page.getByLabel("Choose language").first().selectOption("ar");
+    await page.getByRole("combobox").first().selectOption("ar");
     await expect(page).toHaveURL(/\/ar\/rooms$/);
 
     const response = await page.goto("/");
@@ -193,11 +215,11 @@ test.describe("remember explicit user choice (cookie-only, never Accept-Language
     page,
   }) => {
     await page.goto("/rooms");
-    await page.getByLabel("Choose language").first().selectOption("zh");
+    await page.getByRole("combobox").first().selectOption("zh");
     await expect(page).toHaveURL(/\/zh\/rooms$/);
 
     // Switch explicitly back to English.
-    await page.getByLabel("Choose language").first().selectOption("en");
+    await page.getByRole("combobox").first().selectOption("en");
     await expect(page).toHaveURL(/\/rooms$/); // canonical, unprefixed
 
     // A later bare-site visit must no longer redirect anywhere — the
@@ -232,12 +254,22 @@ test.describe("remember explicit user choice (cookie-only, never Accept-Language
  * A guest browsing a non-English locale must stay in that locale when
  * following ordinary in-site links, across the navigation paths the
  * Product Owner explicitly asked to be audited/fixed.
+ *
+ * Multilingual Support Phase 2 — these tests now click/assert by each
+ * locale's REAL translated link text (from the imported `am`/`zh`/`es`/`ar`
+ * catalogs above) instead of the English text every locale rendered
+ * during Phase 1. This is deliberate, not incidental: it doubles as
+ * confirmation that the header/footer/homepage really do render each
+ * locale's own translation, not a byte-for-byte, per-locale re-statement
+ * of "translation quality" (covered by `translated interface chrome`
+ * further below) but proof the right catalog value reaches the DOM.
  */
 test.describe("locale is preserved through normal guest navigation", () => {
   test("desktop header navigation stays in /am across every nav link", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/am");
-    for (const linkName of ["Rooms & Suites", "Restaurant", "Services", "About", "Contact"]) {
+    const linkNames = [am.Navigation.rooms, am.Navigation.restaurant, am.Navigation.services, am.Navigation.about, am.Navigation.contact];
+    for (const linkName of linkNames) {
       await page.getByRole("link", { name: linkName, exact: true }).first().click();
       await expect(page).toHaveURL(new RegExp(`^http://localhost:3000/am/`));
       await page.goBack();
@@ -248,34 +280,40 @@ test.describe("locale is preserved through normal guest navigation", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/zh");
     await page.locator("header details summary").click();
-    await page.locator("header details nav").getByRole("link", { name: "Contact", exact: true }).click();
+    await page
+      .locator("header details nav")
+      .getByRole("link", { name: zh.Navigation.contact, exact: true })
+      .click();
     await expect(page).toHaveURL(/^http:\/\/localhost:3000\/zh\/contact$/);
   });
 
   test("homepage CTAs (Book a Room, AI Concierge) stay in /es", async ({ page }) => {
     await page.goto("/es");
-    await expect(page.getByRole("link", { name: "Book a Room" })).toHaveAttribute("href", "/es/rooms");
-    await expect(page.getByRole("link", { name: "Ask Our AI Concierge" })).toHaveAttribute("href", "/es/concierge");
+    await expect(page.getByRole("link", { name: es.Home.bookARoom })).toHaveAttribute("href", "/es/rooms");
+    await expect(page.getByRole("link", { name: es.Home.askAiConcierge })).toHaveAttribute("href", "/es/concierge");
   });
 
   test("room card 'View Details' and room-detail 'Book This Room' stay in /am", async ({ page }) => {
     await page.goto("/am/rooms");
-    await page.getByRole("link", { name: "View Details" }).first().click();
+    await page.getByRole("link", { name: am.Rooms.viewDetails }).first().click();
     await expect(page).toHaveURL(/^http:\/\/localhost:3000\/am\/rooms\/[^/]+$/);
-    await page.getByRole("link", { name: "Book This Room" }).click();
+    await page.getByRole("link", { name: am.RoomDetail.bookThisRoom }).click();
     await expect(page).toHaveURL(/^http:\/\/localhost:3000\/am\/rooms\/[^/]+\/book$/);
   });
 
   test("restaurant and services 'Learn more' links from the homepage stay in /ar", async ({ page }) => {
     await page.goto("/ar");
-    const diningLearnMore = page.getByRole("link", { name: "Learn more →" }).first();
+    const diningLearnMore = page.getByRole("link", { name: ar.Common.learnMore }).first();
     await expect(diningLearnMore).toHaveAttribute("href", /^\/ar\/(restaurant|services)$/);
   });
 
   test("footer About/Contact links stay in /zh", async ({ page }) => {
     await page.goto("/zh");
-    await expect(page.locator("footer").getByRole("link", { name: "About" })).toHaveAttribute("href", "/zh/about");
-    await expect(page.locator("footer").getByRole("link", { name: "Contact" })).toHaveAttribute(
+    await expect(page.locator("footer").getByRole("link", { name: zh.Footer.about })).toHaveAttribute(
+      "href",
+      "/zh/about"
+    );
+    await expect(page.locator("footer").getByRole("link", { name: zh.Footer.contact_link })).toHaveAttribute(
       "href",
       "/zh/contact"
     );
@@ -285,8 +323,8 @@ test.describe("locale is preserved through normal guest navigation", () => {
     page,
   }) => {
     await page.goto("/am/rooms");
-    await page.getByRole("link", { name: "View Details" }).first().click();
-    await page.getByRole("link", { name: "Book This Room" }).click();
+    await page.getByRole("link", { name: am.Rooms.viewDetails }).first().click();
+    await page.getByRole("link", { name: am.RoomDetail.bookThisRoom }).click();
     await expect(page).toHaveURL(/^http:\/\/localhost:3000\/am\/rooms\/[^/]+\/book$/);
 
     const isoDate = (daysFromNow: number) => {
@@ -299,20 +337,143 @@ test.describe("locale is preserved through normal guest navigation", () => {
     await page.fill('input[name="guestName"]', "Multilingual Nav Test Guest");
     await page.fill('input[name="guestEmail"]', "multilingual-nav-test@example.com");
     await page.fill('input[name="guestPhone"]', "+251-911-000-999");
-    await page.getByRole("button", { name: /Confirm Booking/ }).click();
+    // Multilingual Support Phase 2 — the submit button's text is now
+    // Amharic ("Confirm Booking — {roomName}" translated), so this locates
+    // it by its stable `type="submit"` attribute inside the booking form
+    // rather than by English text.
+    await page.locator('form button[type="submit"]').click();
 
     // The Server Action's redirect must carry the /am prefix forward —
     // this is the one navigation path this phase explicitly listed
     // ("booking continuation/confirmation navigation where appropriate").
     await expect(page).toHaveURL(/^http:\/\/localhost:3000\/am\/booking\/confirmation\/[^/]+$/);
     await expect(page.locator("html")).toHaveAttribute("lang", "am");
-    await expect(page.getByRole("heading", { name: "Booking Confirmed" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: am.BookingConfirmation.heading })).toBeVisible();
 
     // The confirmation page's own "Back to Home"/"Browse More Rooms"/
     // "Ask Our AI Concierge" links must also stay in /am.
-    await expect(page.getByRole("link", { name: "Back to Home" })).toHaveAttribute("href", "/am");
-    await expect(page.getByRole("link", { name: "Browse More Rooms" })).toHaveAttribute("href", "/am/rooms");
-    await expect(page.getByRole("link", { name: "Ask Our AI Concierge" })).toHaveAttribute("href", "/am/concierge");
+    await expect(page.getByRole("link", { name: am.Common.backToHome })).toHaveAttribute("href", "/am");
+    await expect(page.getByRole("link", { name: am.BookingConfirmation.browseMoreRooms })).toHaveAttribute(
+      "href",
+      "/am/rooms"
+    );
+    await expect(page.getByRole("link", { name: am.Home.askAiConcierge })).toHaveAttribute(
+      "href",
+      "/am/concierge"
+    );
+  });
+});
+
+/**
+ * Multilingual Support Phase 2 — the new coverage this phase's brief
+ * explicitly asked for: per-locale interface-chrome translation, the
+ * locale-specific rendering/layout checks (Ethiopic, Simplified Chinese,
+ * Spanish string length, Arabic RTL), and confirmation that hotel
+ * database content (room names/descriptions) is NOT translated — it
+ * stays identical across every locale, exactly as the Phase 2 content
+ * boundary requires (interface chrome only; hotel facts stay DB-derived,
+ * English, until Phase 3).
+ */
+test.describe("translated interface chrome (Phase 2)", () => {
+  const catalogs = { am, zh, es, ar } as const;
+
+  for (const [locale, catalog] of Object.entries(catalogs)) {
+    test(`${locale}: homepage nav/hero and rooms page render this locale's own translated text, with no leaked English and no missing-message errors`, async ({
+      page,
+    }) => {
+      const response = await page.goto(`/${locale}`);
+      expect(response?.status()).toBe(200);
+
+      // Nav links render the real per-locale strings.
+      await expect(page.getByRole("link", { name: catalog.Navigation.rooms, exact: true }).first()).toBeVisible();
+      await expect(page.getByRole("link", { name: catalog.Navigation.contact, exact: true }).first()).toBeVisible();
+      // Hero CTAs.
+      await expect(page.getByRole("link", { name: catalog.Home.bookARoom })).toBeVisible();
+      await expect(page.getByRole("link", { name: catalog.Home.askAiConcierge })).toBeVisible();
+
+      // No leaked, still-English nav chrome (the exact Phase-1 English
+      // strings that used to render everywhere) — proves this isn't
+      // silently falling back to English for this locale.
+      if (locale !== "en") {
+        await expect(page.getByRole("link", { name: "Contact Us", exact: true })).toHaveCount(0);
+      }
+
+      // next-intl's default dev-mode fallback for a genuinely missing key
+      // renders the literal namespaced key string (e.g. "Home.bookARoom")
+      // — a sweep for that pattern anywhere on the page catches an
+      // unnoticed missing translation without having to check every key.
+      const bodyText = await page.locator("body").innerText();
+      expect(bodyText).not.toMatch(/\b[A-Z][a-zA-Z]+\.[a-zA-Z]+(\.[a-zA-Z]+)?\b.*could not be found/i);
+
+      await page.goto(`/${locale}/rooms`);
+      await expect(page.getByRole("heading", { name: catalog.Rooms.heading, level: 1 })).toBeVisible();
+      await expect(page.getByRole("link", { name: catalog.Rooms.viewDetails }).first()).toBeVisible();
+    });
+  }
+
+  test("am: Ethiopic script renders with the Noto Sans Ethiopic overlay font, not the Latin-only Fraunces/Inter stack alone", async ({
+    page,
+  }) => {
+    await page.goto("/am");
+    await expect(page.locator("html")).toHaveAttribute("data-locale", "am");
+    const heading = page.getByRole("heading", { level: 1 });
+    await expect(heading).toBeVisible();
+    const fontFamily = await heading.evaluate((el) => getComputedStyle(el).fontFamily);
+    // The overlay CSS (`globals.css`'s `:root[data-locale="am"]` rule)
+    // prepends the actual "Noto Sans Ethiopic" family Next.js generates
+    // ahead of Fraunces — confirming the overlay is actually active for
+    // this heading, not just declared somewhere unused.
+    expect(fontFamily.toLowerCase()).toContain("noto sans ethiopic");
+    expect(fontFamily.toLowerCase()).toContain("fraunces");
+  });
+
+  test("ar: right-to-left layout has no horizontal overflow at desktop and mobile widths", async ({ page }) => {
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/ar/rooms");
+      await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+      );
+      // A small tolerance (a few px) for scrollbar/rounding noise, not a
+      // real layout break.
+      expect(overflow).toBeLessThanOrEqual(4);
+    }
+  });
+
+  test("es: longer Spanish strings on the booking form don't overflow the mobile viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/es/rooms");
+    await page.getByRole("link", { name: es.Rooms.viewDetails }).first().click();
+    await page.getByRole("link", { name: es.RoomDetail.bookThisRoom }).click();
+    await expect(page).toHaveURL(/\/es\/rooms\/[^/]+\/book$/);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    );
+    expect(overflow).toBeLessThanOrEqual(4);
+  });
+
+  test("hotel database content (room name/description) is identical across every locale — never translated", async ({
+    page,
+  }) => {
+    await page.goto("/rooms");
+    const firstRoomHref = await page.getByRole("link", { name: en.Rooms.viewDetails }).first().getAttribute("href");
+    expect(firstRoomHref).toBeTruthy();
+
+    await page.goto(firstRoomHref!);
+    const englishName = (await page.getByRole("heading", { level: 1 }).textContent())?.trim();
+    const englishDescription = (await page.locator("p.text-lg.leading-relaxed").textContent())?.trim();
+
+    for (const locale of ["am", "zh", "es", "ar"]) {
+      await page.goto(`/${locale}${firstRoomHref}`);
+      const localizedName = (await page.getByRole("heading", { level: 1 }).textContent())?.trim();
+      const localizedDescription = (await page.locator("p.text-lg.leading-relaxed").textContent())?.trim();
+      expect(localizedName).toBe(englishName);
+      expect(localizedDescription).toBe(englishDescription);
+    }
   });
 });
 

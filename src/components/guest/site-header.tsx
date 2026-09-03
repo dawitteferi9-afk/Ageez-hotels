@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { Menu, Sparkles } from "lucide-react";
 import { Container } from "@/components/ui/container";
@@ -5,16 +6,6 @@ import { buttonVariants } from "@/components/ui/button";
 import { LanguageSwitcher } from "@/components/guest/language-switcher";
 import type { AppLocale } from "@/i18n/routing";
 import { cn } from "@/lib/utils";
-
-/** Guest-site navigation structure. Route labels/paths are app UI, not hotel business data. */
-const NAV_LINKS = [
-  { href: "/", label: "Home" },
-  { href: "/rooms", label: "Rooms & Suites" },
-  { href: "/restaurant", label: "Restaurant" },
-  { href: "/services", label: "Services" },
-  { href: "/about", label: "About" },
-  { href: "/contact", label: "Contact" },
-] as const;
 
 /**
  * M9b — the Concierge link is rendered separately from the plain
@@ -24,7 +15,7 @@ const NAV_LINKS = [
  * Pure presentation — the destination (`/concierge`) and the concierge
  * page/chat itself are completely untouched.
  */
-function ConciergeNavLink({ className }: { className?: string }) {
+function ConciergeNavLink({ label, className }: { label: string; className?: string }) {
   return (
     <Link
       href="/concierge"
@@ -34,21 +25,41 @@ function ConciergeNavLink({ className }: { className?: string }) {
       )}
     >
       <Sparkles className="h-3.5 w-3.5" aria-hidden />
-      AI Concierge
+      {label}
     </Link>
   );
 }
 
-export function SiteHeader({
+/**
+ * Multilingual Support Phase 2 — every nav label now comes from the
+ * `Navigation` message catalog namespace (`messages/<locale>.json`) via
+ * `getTranslations()` (this stays a Server Component, so the async
+ * server API is used, not the client `useTranslations` hook). Route
+ * *paths* (`/rooms`, `/contact`, ...) are unchanged and untranslated —
+ * URLs are app routing, not interface text; `Link`
+ * (`@/i18n/navigation`) still makes them locale-prefixed automatically.
+ */
+export async function SiteHeader({
   hotelName,
   currentLocale,
   enabledLocales,
 }: {
   hotelName: string;
-  /** Multilingual Support Phase 1 — optional so this component still type-checks anywhere it might be reused without a resolved locale context; the guest layout always supplies both. */
+  /** Optional so this component still type-checks anywhere it might be reused without a resolved locale context; the guest layout always supplies both. */
   currentLocale?: AppLocale;
   enabledLocales?: readonly string[];
 }) {
+  const t = await getTranslations("Navigation");
+
+  const navLinks = [
+    { href: "/", label: t("home") },
+    { href: "/rooms", label: t("rooms") },
+    { href: "/restaurant", label: t("restaurant") },
+    { href: "/services", label: t("services") },
+    { href: "/about", label: t("about") },
+    { href: "/contact", label: t("contact") },
+  ] as const;
+
   return (
     // M12 Phase 2B — `relative z-50` added (previously unpositioned):
     // the mobile dropdown's own `z-10` only ranks it above elements *within
@@ -79,7 +90,7 @@ export function SiteHeader({
           infrastructure, just a wider fallback range for it.
         */}
         <nav className="hidden items-center gap-8 lg:flex">
-          {NAV_LINKS.map((link) => (
+          {navLinks.map((link) => (
             <Link
               key={link.href}
               href={link.href}
@@ -88,24 +99,24 @@ export function SiteHeader({
               {link.label}
             </Link>
           ))}
-          <ConciergeNavLink />
+          <ConciergeNavLink label={t("aiConcierge")} />
           {currentLocale && enabledLocales && (
             <LanguageSwitcher currentLocale={currentLocale} enabledLocales={enabledLocales} />
           )}
         </nav>
 
         <Link href="/contact" className={cn(buttonVariants({ size: "sm" }), "hidden shrink-0 lg:inline-flex")}>
-          Contact Us
+          {t("contactUs")}
         </Link>
 
         {/* No-JS mobile menu: a native <details> disclosure keeps the header a Server Component. */}
         <details className="lg:hidden">
           <summary className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded hover:bg-parchment-100">
             <Menu className="h-5 w-5 text-basalt-900" aria-hidden />
-            <span className="sr-only">Open menu</span>
+            <span className="sr-only">{t("openMenu")}</span>
           </summary>
           <nav className="absolute inset-x-0 top-20 z-10 flex flex-col gap-1 border-b border-basalt-700/15 bg-parchment-50 p-4 shadow-md">
-            {NAV_LINKS.map((link) => (
+            {navLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
@@ -114,7 +125,7 @@ export function SiteHeader({
                 {link.label}
               </Link>
             ))}
-            <ConciergeNavLink className="mt-1 w-fit" />
+            <ConciergeNavLink label={t("aiConcierge")} className="mt-1 w-fit" />
             {currentLocale && enabledLocales && (
               <LanguageSwitcher currentLocale={currentLocale} enabledLocales={enabledLocales} className="mt-1" />
             )}

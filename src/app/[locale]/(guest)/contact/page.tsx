@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { getTranslations } from "next-intl/server";
 import { Mail, Phone, MapPin, Clock, type LucideIcon } from "lucide-react";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
@@ -7,9 +8,10 @@ import { buttonVariants } from "@/components/ui/button";
 import { KnowledgeSection } from "@/components/guest/knowledge-section";
 import { cn } from "@/lib/utils";
 
-export const metadata: Metadata = {
-  title: "Contact",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations("Navigation");
+  return { title: t("contact") };
+}
 
 /**
  * Guest Experience Phase B — presentation-only redesign. Same data as
@@ -30,6 +32,7 @@ export const metadata: Metadata = {
  * `site-footer.tsx` already established, rather than inventing a new one.
  */
 export default async function ContactPage() {
+  const t = await getTranslations("Contact");
   const hotel = await getCurrentTenantHotel();
   const tenant = withTenant(hotel.id);
   const policies = await tenant.aiKnowledgeDocuments.findByCategory("policies");
@@ -38,57 +41,55 @@ export default async function ContactPage() {
     <section className="py-16">
       <Container className="flex max-w-3xl flex-col gap-10">
         <div className="flex flex-col gap-2">
-          <h1 className="font-display text-4xl text-basalt-950">Contact {hotel.name}</h1>
-          <p className="max-w-xl text-basalt-700">
-            Reach us directly using the details below, or stop by the front desk once you arrive.
-          </p>
+          <h1 className="font-display text-4xl text-basalt-950">{t("heading", { hotelName: hotel.name })}</h1>
+          <p className="max-w-xl text-basalt-700">{t("subtitle")}</p>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Get in Touch</CardTitle>
-            <CardDescription>Location, contact details, and front-desk hours.</CardDescription>
+            <CardTitle>{t("getInTouch")}</CardTitle>
+            <CardDescription>{t("getInTouchDescription")}</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col divide-y divide-basalt-700/10">
-            <ContactRow icon={MapPin} label="Location">
+            <ContactRow icon={MapPin} label={t("location")}>
               <p className="text-basalt-900">
                 {hotel.city}, {hotel.country}
               </p>
             </ContactRow>
 
             {hotel.contactEmail && (
-              <ContactRow icon={Mail} label="Email">
+              <ContactRow icon={Mail} label={t("email")}>
                 <p className="text-basalt-900">{hotel.contactEmail}</p>
                 <a
                   href={`mailto:${hotel.contactEmail}`}
                   className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-2 w-fit")}
                 >
-                  Email Us
+                  {t("emailUs")}
                 </a>
               </ContactRow>
             )}
 
             {hotel.contactPhone && (
-              <ContactRow icon={Phone} label="Phone">
+              <ContactRow icon={Phone} label={t("phone")}>
                 <p className="text-basalt-900">{hotel.contactPhone}</p>
                 <a
                   href={`tel:${hotel.contactPhone}`}
                   className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-2 w-fit")}
                 >
-                  Call Us
+                  {t("callUs")}
                 </a>
               </ContactRow>
             )}
 
-            <ContactRow icon={Clock} label="Front Desk Hours">
+            <ContactRow icon={Clock} label={t("frontDeskHours")}>
               <p className="text-basalt-900">
-                Check-in from {hotel.checkInTime} &middot; Checkout by {hotel.checkOutTime}
+                {t("frontDeskHoursValue", { checkIn: hotel.checkInTime, checkOut: hotel.checkOutTime })}
               </p>
             </ContactRow>
           </CardContent>
         </Card>
 
-        <KnowledgeSection title="Policies" content={policies?.content ?? null} />
+        <KnowledgeSection title={t("policies")} content={policies?.content ?? null} />
       </Container>
     </section>
   );
