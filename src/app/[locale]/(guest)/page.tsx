@@ -1,4 +1,4 @@
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { Sparkles, UtensilsCrossed } from "lucide-react";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
@@ -45,14 +45,20 @@ import { cn } from "@/lib/utils";
 export default async function GuestHomePage() {
   const t = await getTranslations("Home");
   const tCommon = await getTranslations("Common");
+  const locale = await getLocale();
   const hotel = await getCurrentTenantHotel();
   const tenant = withTenant(hotel.id);
 
+  // Multilingual Support Phase 3 — locale-aware reads (approved translation
+  // if one exists, English fallback field-by-field otherwise). See
+  // `docs/MULTILINGUAL.md`; DB facts (price, capacity, currency) are
+  // untouched by this — only the guest-facing prose fields are resolved
+  // per locale.
   const [roomTypes, overview, dining, services] = await Promise.all([
-    tenant.roomTypes.findMany({ orderBy: { basePrice: "asc" } }),
-    tenant.aiKnowledgeDocuments.findByCategory("overview"),
-    tenant.aiKnowledgeDocuments.findByCategory("dining"),
-    tenant.aiKnowledgeDocuments.findByCategory("services"),
+    tenant.roomTypes.findManyLocalized(locale, { orderBy: { basePrice: "asc" } }),
+    tenant.aiKnowledgeDocuments.findByCategoryLocalized("overview", locale),
+    tenant.aiKnowledgeDocuments.findByCategoryLocalized("dining", locale),
+    tenant.aiKnowledgeDocuments.findByCategoryLocalized("services", locale),
   ]);
 
   const roomCounts = await Promise.all(
@@ -147,6 +153,8 @@ export default async function GuestHomePage() {
                   id={rt.id}
                   name={rt.name}
                   description={rt.description}
+                  sourceName={rt.sourceName}
+                  sourceDescription={rt.sourceDescription}
                   capacity={rt.capacity}
                   basePrice={rt.basePrice}
                   currency={rt.currency}

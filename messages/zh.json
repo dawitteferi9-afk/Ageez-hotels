@@ -221,6 +221,42 @@
       "messageTooLong": "请将消息控制在{max}字以内。"
     }
   },
+  "Highlights": {
+    "rooms": {
+      "king-room": "特大床房",
+      "twin-room": "双床房",
+      "city-view": "城市景观",
+      "upgraded-amenities": "升级设施",
+      "dedicated-workspace": "独立办公区",
+      "lounge-access": "贵宾廊使用权",
+      "multi-bed-suite": "多床套房",
+      "separate-living-area": "独立起居区",
+      "premier-suite": "尊享套房",
+      "private-lounge": "私人休息室",
+      "dining-area": "用餐区",
+      "panoramic-views": "全景视野"
+    },
+    "upToGuests": "最多{count}位客人",
+    "services": {
+      "airport-pickup": "机场接送",
+      "restaurant": "餐厅",
+      "room-service": "客房服务",
+      "laundry": "洗衣服务",
+      "wifi": "免费无线网络",
+      "fitness-center": "健身中心",
+      "business-center": "商务中心",
+      "conference-facilities": "会议设施",
+      "reception": "24小时前台服务"
+    },
+    "conferenceHalls": "{count}间会议厅",
+    "venues": {
+      "axum": { "tagline": "{hotelName}的主餐厅。" },
+      "buna": { "tagline": "酒店内的咖啡廊。" },
+      "conference-facilities": { "name": "会议设施", "tagline": "酒店内的会议及活动场地。" },
+      "fitness-center": { "name": "健身中心", "tagline": "酒店的健身中心。" },
+      "business-center": { "name": "商务中心", "tagline": "酒店的商务中心。" }
+    }
+  },
   "Errors": {
     "heading": "出现错误",
     "description": "我们无法完成该请求。请重试，或返回首页。",

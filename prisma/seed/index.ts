@@ -26,6 +26,10 @@ import {
   DEMO_STAFF_PASSWORD,
   aiKnowledgeFixtures,
 } from "../../src/config/defaults/seed/ageez-grand-hotel";
+import {
+  roomTypeTranslationFixtures,
+  aiKnowledgeTranslationFixtures,
+} from "../../src/config/defaults/seed/ageez-grand-hotel-translations";
 
 const BCRYPT_SALT_ROUNDS = 10;
 
@@ -90,8 +94,29 @@ export async function seedBaseline(client: PrismaClient) {
       roomsCreated++;
     }
     console.log(`RoomType: ${roomType.name} — ${rt.roomCount} rooms (floor ${rt.floor})`);
+
+    // Multilingual Support Phase 3 — approved am/zh/es/ar translations of
+    // this room type's name/description, keyed by the SAME `RoomType.name`
+    // `roomTypeTranslationFixtures` uses. `"en"` never appears here — the
+    // row just upserted above IS the English content.
+    const translations = roomTypeTranslationFixtures[rt.name];
+    if (translations) {
+      for (const [locale, text] of Object.entries(translations)) {
+        await client.roomTypeTranslation.upsert({
+          where: { roomTypeId_locale: { roomTypeId: roomType.id, locale } },
+          update: { name: text.name, description: text.description },
+          create: { roomTypeId: roomType.id, locale, name: text.name, description: text.description },
+        });
+      }
+    }
   }
   console.log(`Rooms upserted: ${roomsCreated}`);
+  console.log(
+    `Room type translations upserted: ${roomTypeFixtures.reduce(
+      (sum, rt) => sum + Object.keys(roomTypeTranslationFixtures[rt.name] ?? {}).length,
+      0
+    )}`
+  );
 
   // Each staff row gets its own bcrypt hash (independently salted) of the
   // same demo password — never store or compare the plaintext directly.
@@ -111,14 +136,30 @@ export async function seedBaseline(client: PrismaClient) {
   }
   console.log(`Staff upserted: ${staffFixtures.length}`);
 
+  let knowledgeTranslationsCreated = 0;
   for (const doc of aiKnowledgeFixtures) {
-    await client.aiKnowledgeDocument.upsert({
+    const knowledgeDoc = await client.aiKnowledgeDocument.upsert({
       where: { hotelId_category: { hotelId: hotel.id, category: doc.category } },
       update: { content: doc.content },
       create: { hotelId: hotel.id, category: doc.category, content: doc.content },
     });
+
+    // Multilingual Support Phase 3 — approved am/zh/es/ar translations of
+    // this document's content, keyed by the SAME `category` value.
+    const translations = aiKnowledgeTranslationFixtures[doc.category];
+    if (translations) {
+      for (const [locale, content] of Object.entries(translations)) {
+        await client.aiKnowledgeDocumentTranslation.upsert({
+          where: { documentId_locale: { documentId: knowledgeDoc.id, locale } },
+          update: { content },
+          create: { documentId: knowledgeDoc.id, locale, content },
+        });
+        knowledgeTranslationsCreated++;
+      }
+    }
   }
   console.log(`AI knowledge documents upserted: ${aiKnowledgeFixtures.length}`);
+  console.log(`AI knowledge document translations upserted: ${knowledgeTranslationsCreated}`);
 }
 
 // Guarded so importing `seedBaseline` (e.g. from

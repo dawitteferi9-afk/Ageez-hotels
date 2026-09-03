@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import {
   Sparkles,
   Building2,
@@ -18,7 +18,12 @@ import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
 import { FactChip } from "@/components/guest/fact-chip";
 import { VenueCard } from "@/components/guest/venue-card";
-import { deriveServiceHighlights, deriveFacilityHighlights, deriveFacilityVenues } from "@/lib/guest/knowledgeHighlights";
+import {
+  deriveServiceHighlights,
+  deriveFacilityHighlights,
+  deriveFacilityVenues,
+  deriveConferenceHallCount,
+} from "@/lib/guest/knowledgeHighlights";
 import { getVenuePhotography } from "@/lib/guest/venuePhotography";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -67,16 +72,23 @@ const FACILITY_ICONS: Record<string, LucideIcon> = {
  */
 export default async function ServicesPage() {
   const t = await getTranslations("Services");
+  const tHighlights = await getTranslations("Highlights");
+  const locale = await getLocale();
   const hotel = await getCurrentTenantHotel();
   const tenant = withTenant(hotel.id);
   const [services, facilities] = await Promise.all([
-    tenant.aiKnowledgeDocuments.findByCategory("services"),
-    tenant.aiKnowledgeDocuments.findByCategory("facilities"),
+    tenant.aiKnowledgeDocuments.findByCategoryLocalized("services", locale),
+    tenant.aiKnowledgeDocuments.findByCategoryLocalized("facilities", locale),
   ]);
 
-  const serviceHighlights = deriveServiceHighlights(services?.content ?? null);
-  const facilityHighlights = deriveFacilityHighlights(facilities?.content ?? null);
-  const facilityVenues = deriveFacilityVenues(services?.content ?? null);
+  // Multilingual Support Phase 3 — chip/venue detection always runs
+  // against the canonical English `sourceContent` (see
+  // `docs/MULTILINGUAL.md`); display prose below uses the locale-resolved
+  // `.content`.
+  const serviceHighlights = deriveServiceHighlights(services?.sourceContent ?? null);
+  const facilityHighlights = deriveFacilityHighlights(facilities?.sourceContent ?? null);
+  const facilityVenues = deriveFacilityVenues(services?.sourceContent ?? null);
+  const conferenceHallCount = deriveConferenceHallCount(facilities?.sourceContent ?? null);
 
   return (
     <section className="py-16">
@@ -98,7 +110,7 @@ export default async function ServicesPage() {
                   <FactChip
                     key={highlight.key}
                     icon={SERVICE_ICONS[highlight.key] ?? Sparkles}
-                    label={highlight.label}
+                    label={tHighlights(`services.${highlight.key}`)}
                   />
                 ))}
               </div>
@@ -118,8 +130,8 @@ export default async function ServicesPage() {
                 {facilityVenues.map((venue) => (
                   <VenueCard
                     key={venue.key}
-                    name={venue.name}
-                    tagline={venue.tagline}
+                    name={tHighlights(`venues.${venue.key}.name`)}
+                    tagline={tHighlights(`venues.${venue.key}.tagline`)}
                     icon={SERVICE_ICONS[venue.key] ?? Building2}
                     imageSrc={getVenuePhotography(venue.key).hero}
                   />
@@ -132,7 +144,11 @@ export default async function ServicesPage() {
                   <FactChip
                     key={highlight.key}
                     icon={FACILITY_ICONS[highlight.key] ?? Building2}
-                    label={highlight.label}
+                    label={
+                      highlight.key === "conference-halls" && conferenceHallCount !== null
+                        ? tHighlights("conferenceHalls", { count: conferenceHallCount })
+                        : tHighlights(`services.${highlight.key}`)
+                    }
                   />
                 ))}
               </div>

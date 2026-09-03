@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { Mail, Phone, MapPin, Clock, type LucideIcon } from "lucide-react";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
@@ -33,9 +33,10 @@ export async function generateMetadata(): Promise<Metadata> {
  */
 export default async function ContactPage() {
   const t = await getTranslations("Contact");
+  const locale = await getLocale();
   const hotel = await getCurrentTenantHotel();
   const tenant = withTenant(hotel.id);
-  const policies = await tenant.aiKnowledgeDocuments.findByCategory("policies");
+  const policies = await tenant.aiKnowledgeDocuments.findByCategoryLocalized("policies", locale);
 
   return (
     <section className="py-16">

@@ -90,11 +90,60 @@ model RoomType {
 
   rooms Room[]
 
+  /// Multilingual Support Phase 3 — approved translations of `name`/
+  /// `description` only. This row (English) is always the canonical
+  /// source of truth; see `RoomTypeTranslation`'s own comment.
+  translations RoomTypeTranslation[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([hotelId, name])
   @@index([hotelId])
+}
+
+/// Multilingual Support Phase 3 — an approved translation of one
+/// `RoomType`'s guest-facing textual fields into one non-English locale.
+/// Deliberately narrow: only `name`/`description` (the two fields Phase 2's
+/// audit classified as translatable prose) — `capacity`/`basePrice`/
+/// `currency` stay on `RoomType` itself, language-neutral operational data
+/// never duplicated here (docs/MULTILINGUAL.md's content boundary).
+///
+/// `locale` is a plain string (not a Prisma enum) so the platform's locale
+/// list can grow without a schema migration — validated at the application
+/// layer against `src/i18n/routing.ts`'s `LOCALES`, matching how
+/// `Hotel.enabledLocales` (a `String[]`) already works. Never `"en"`: the
+/// parent `RoomType` row IS the English content, so an English translation
+/// row would just be a redundant duplicate of it, not a new fact.
+///
+/// `name`/`description` are nullable independently so fallback can work at
+/// FIELD granularity (docs/MULTILINGUAL.md's fallback contract) — e.g. a
+/// locale with an approved translated `name` but no `description` yet
+/// falls back to the canonical English description for that one field
+/// only, never rendering a blank field or falling back to English for
+/// both just because one is missing.
+///
+/// Always resolved through `withTenant(hotelId).roomTypes.findManyLocalized()`/
+/// `findUniqueLocalized()`/`localize()` (`src/lib/tenant/index.ts`) — never
+/// queried directly by `roomTypeId` alone from a route/component, so
+/// tenant isolation is enforced by construction: a translation is only
+/// ever reachable through a `RoomType` row this hotel's own tenant-scoped
+/// query already resolved.
+model RoomTypeTranslation {
+  id         String   @id @default(cuid())
+  roomType   RoomType @relation(fields: [roomTypeId], references: [id], onDelete: Cascade)
+  roomTypeId String
+
+  locale String
+
+  name        String?
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([roomTypeId, locale])
+  @@index([roomTypeId])
 }
 
 enum RoomStatus {
@@ -319,9 +368,50 @@ model AiKnowledgeDocument {
   content  String
   version  Int    @default(1)
 
+  /// Multilingual Support Phase 3 — approved translations of `content`.
+  /// See `AiKnowledgeDocumentTranslation`'s own comment.
+  translations AiKnowledgeDocumentTranslation[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([hotelId, category])
   @@index([hotelId])
+}
+
+/// Multilingual Support Phase 3 — an approved translation of one
+/// `AiKnowledgeDocument`'s `content` into one non-English locale. Same
+/// design as `RoomTypeTranslation` (see its comment for the full
+/// rationale — plain-string `locale`, never `"en"`, nullable for
+/// field-level fallback, tenant isolation enforced by only ever being
+/// resolved through a tenant-scoped parent lookup).
+///
+/// A single free-text `content` field mirrors the parent model exactly —
+/// there is no structured per-venue/per-fact breakdown to translate
+/// separately (see `docs/MULTILINGUAL.md`'s note on
+/// `src/lib/guest/knowledgeHighlights.ts`'s highlight/venue chip LABELS,
+/// which are presentation-layer vocabulary translated via the existing
+/// `messages/<locale>.json` catalogs, not this table — this table only
+/// ever holds a translation of the full source paragraph itself).
+///
+/// This is deliberately ONE knowledge base with approved localized
+/// representations of the SAME facts, not five independently-authored
+/// per-language knowledge bases: a translation is only ever produced BY
+/// translating this row's own parent `content`, never authored
+/// independently, so it can never assert a fact the English source
+/// doesn't already state.
+model AiKnowledgeDocumentTranslation {
+  id         String              @id @default(cuid())
+  document   AiKnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  documentId String
+
+  locale String
+
+  content String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([documentId, locale])
+  @@index([documentId])
 }

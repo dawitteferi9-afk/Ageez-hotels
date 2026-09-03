@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { UtensilsCrossed, Coffee, type LucideIcon } from "lucide-react";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
@@ -43,10 +43,20 @@ const DINING_VENUE_ICONS: Record<string, LucideIcon> = {
  */
 export default async function RestaurantPage() {
   const t = await getTranslations("Restaurant");
+  const tHighlights = await getTranslations("Highlights");
+  const locale = await getLocale();
   const hotel = await getCurrentTenantHotel();
   const tenant = withTenant(hotel.id);
-  const dining = await tenant.aiKnowledgeDocuments.findByCategory("dining");
-  const venues = deriveDiningVenues(dining?.content ?? null, hotel.name);
+  const dining = await tenant.aiKnowledgeDocuments.findByCategoryLocalized("dining", locale);
+  // Multilingual Support Phase 3 — venue detection always runs against the
+  // canonical English `sourceContent`, never the locale-resolved
+  // `dining.content` (see `docs/MULTILINGUAL.md`); each detected venue's
+  // display name/tagline then comes from the `Highlights.venues` message
+  // catalog instead of `deriveDiningVenues()`'s own hardcoded English
+  // fields — the venue's PROPER NAME (e.g. "Axum Restaurant") stays
+  // exactly as `deriveDiningVenues()` returns it in every locale (brand
+  // identity, never translated); only its short tagline is translated.
+  const venues = deriveDiningVenues(dining?.sourceContent ?? null, hotel.name);
 
   return (
     <>
@@ -76,7 +86,7 @@ export default async function RestaurantPage() {
                 <VenueCard
                   key={venue.key}
                   name={venue.name}
-                  tagline={venue.tagline}
+                  tagline={tHighlights(`venues.${venue.key}.tagline`, { hotelName: hotel.name })}
                   icon={DINING_VENUE_ICONS[venue.key] ?? UtensilsCrossed}
                   imageSrc={getVenuePhotography(venue.key).hero}
                 />

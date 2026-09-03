@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
 import { RoomTypeCard } from "@/components/guest/room-type-card";
@@ -18,10 +18,11 @@ export async function generateMetadata(): Promise<Metadata> {
 /** M9b — visual/UX polish only; same queries as before this pass. */
 export default async function RoomsPage() {
   const t = await getTranslations("Rooms");
+  const locale = await getLocale();
   const hotel = await getCurrentTenantHotel();
   const tenant = withTenant(hotel.id);
 
-  const roomTypes = await tenant.roomTypes.findMany({ orderBy: { basePrice: "asc" } });
+  const roomTypes = await tenant.roomTypes.findManyLocalized(locale, { orderBy: { basePrice: "asc" } });
   const roomCounts = await Promise.all(
     roomTypes.map((rt) => tenant.rooms.count({ roomTypeId: rt.id }))
   );
@@ -52,6 +53,8 @@ export default async function RoomsPage() {
               id={rt.id}
               name={rt.name}
               description={rt.description}
+              sourceName={rt.sourceName}
+              sourceDescription={rt.sourceDescription}
               capacity={rt.capacity}
               basePrice={rt.basePrice}
               currency={rt.currency}

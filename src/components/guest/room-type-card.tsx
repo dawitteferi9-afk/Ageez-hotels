@@ -17,6 +17,21 @@ export interface RoomTypeCardProps {
   basePrice: { toString(): string };
   currency: string;
   roomCount?: number;
+  /**
+   * Multilingual Support Phase 3 — the CANONICAL English name/description,
+   * always. `name`/`description` above may now be a locale-resolved
+   * translation (falling back to English field-by-field) — highlight-chip
+   * detection and the room-photography lookup must always match against
+   * the English source text regardless of UI locale (translating the text
+   * they match against would silently make chips/photos vanish for every
+   * non-English locale), so this card always detects/looks-up photography
+   * from `sourceName`/`sourceDescription` and only ever DISPLAYS
+   * `name`/`description`. Optional and defaults to `name`/`description`
+   * themselves, so any caller not yet locale-aware (none remain, kept for
+   * defensive backward compatibility) still behaves exactly as before.
+   */
+  sourceName?: string;
+  sourceDescription?: string;
 }
 
 /**
@@ -43,9 +58,17 @@ export interface RoomTypeCardProps {
  * Multilingual Support Phase 2 — this stays a Server Component (async
  * now) so it can call `getTranslations()` for its interface chrome
  * ("Premier" badge, "Sleeps up to", room-count plural, "View Details",
- * "/ night"). `name`/`description`/highlight labels are still derived
- * from live `RoomType` data (`deriveRoomHighlights()`) — those stay
- * English/DB-sourced until Phase 3, per the content boundary.
+ * "/ night").
+ *
+ * Multilingual Support Phase 3 — `name`/`description` may now be an
+ * approved translation (falling back to English field-by-field via
+ * `withTenant().roomTypes.findManyLocalized()`); highlight-chip
+ * DETECTION and the photography lookup always run against
+ * `sourceName`/`sourceDescription` (always English) instead, so they
+ * never silently break for a non-English locale — only the chip LABELS
+ * themselves (and the "Premier" badge text) are translated, via the new
+ * `Highlights` message catalog namespace, keyed by the same stable `key`
+ * `deriveRoomHighlights()` already returns.
  */
 export async function RoomTypeCard({
   id,
@@ -55,14 +78,17 @@ export async function RoomTypeCard({
   basePrice,
   currency,
   roomCount,
+  sourceName = name,
+  sourceDescription = description,
 }: RoomTypeCardProps) {
   const t = await getTranslations("Rooms");
   const tCommon = await getTranslations("Common");
+  const tHighlights = await getTranslations("Highlights");
   const locale = await getLocale();
-  const highlights = deriveRoomHighlights(description, capacity);
+  const highlights = deriveRoomHighlights(sourceDescription, capacity);
   const displayHighlights = highlights.filter((h) => h.key !== "capacity").slice(0, 2);
   const primaryIcon = ROOM_HIGHLIGHT_ICONS[displayHighlights[0]?.key ?? ""] ?? DEFAULT_ROOM_ICON;
-  const photography = getRoomPhotography(name);
+  const photography = getRoomPhotography(sourceName);
   const premier = isPremierRoom(highlights);
 
   return (
@@ -94,7 +120,7 @@ export async function RoomTypeCard({
                 key={highlight.key}
                 className="rounded-full bg-parchment-100 px-2.5 py-1 text-xs font-medium text-basalt-700"
               >
-                {highlight.label}
+                {tHighlights(`rooms.${highlight.key}`)}
               </span>
             ))}
           </div>

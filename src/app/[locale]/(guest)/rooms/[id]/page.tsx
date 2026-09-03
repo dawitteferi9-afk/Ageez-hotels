@@ -18,10 +18,10 @@ interface RoomDetailPageProps {
   params: Promise<{ id: string }>;
 }
 
-async function getRoomType(id: string) {
+async function getRoomType(id: string, locale: string) {
   const hotel = await getCurrentTenantHotel();
   const tenant = withTenant(hotel.id);
-  const roomType = await tenant.roomTypes.findUnique(id);
+  const roomType = await tenant.roomTypes.findUniqueLocalized(id, locale);
   if (!roomType) return null;
   const roomCount = await tenant.rooms.count({ roomTypeId: roomType.id });
   return { hotel, roomType, roomCount };
@@ -29,7 +29,8 @@ async function getRoomType(id: string) {
 
 export async function generateMetadata({ params }: RoomDetailPageProps): Promise<Metadata> {
   const { id } = await params;
-  const result = await getRoomType(id);
+  const locale = await getLocale();
+  const result = await getRoomType(id, locale);
   if (!result) return {};
   return { title: result.roomType.name };
 }
@@ -49,18 +50,23 @@ export async function generateMetadata({ params }: RoomDetailPageProps): Promise
  */
 export default async function RoomDetailPage({ params }: RoomDetailPageProps) {
   const { id } = await params;
-  const result = await getRoomType(id);
+  const locale = await getLocale();
+  const result = await getRoomType(id, locale);
   if (!result) notFound();
   const { roomType, roomCount } = result;
   const t = await getTranslations("RoomDetail");
   const tRooms = await getTranslations("Rooms");
   const tCommon = await getTranslations("Common");
-  const locale = await getLocale();
+  const tHighlights = await getTranslations("Highlights");
 
-  const highlights = deriveRoomHighlights(roomType.description, roomType.capacity);
+  // Multilingual Support Phase 3 — highlight detection and the photography
+  // lookup always run against the canonical English source text
+  // (`sourceDescription`/`sourceName`), never the locale-resolved
+  // `roomType.description`/`.name` — see `RoomTypeCard`'s comment for why.
+  const highlights = deriveRoomHighlights(roomType.sourceDescription, roomType.capacity);
   const displayHighlights = highlights.filter((h) => h.key !== "capacity");
   const primaryIcon = ROOM_HIGHLIGHT_ICONS[displayHighlights[0]?.key ?? ""] ?? DEFAULT_ROOM_ICON;
-  const photography = getRoomPhotography(roomType.name);
+  const photography = getRoomPhotography(roomType.sourceName);
   const premier = isPremierRoom(highlights);
 
   return (
@@ -124,7 +130,7 @@ export default async function RoomDetailPage({ params }: RoomDetailPageProps) {
                     <FactChip
                       key={highlight.key}
                       icon={ROOM_HIGHLIGHT_ICONS[highlight.key] ?? DEFAULT_ROOM_ICON}
-                      label={highlight.label}
+                      label={tHighlights(`rooms.${highlight.key}`)}
                     />
                   ))}
                 </div>

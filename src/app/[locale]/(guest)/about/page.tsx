@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
 import { KnowledgeSection } from "@/components/guest/knowledge-section";
@@ -11,9 +11,10 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function AboutPage() {
   const t = await getTranslations("About");
+  const locale = await getLocale();
   const hotel = await getCurrentTenantHotel();
   const tenant = withTenant(hotel.id);
-  const overview = await tenant.aiKnowledgeDocuments.findByCategory("overview");
+  const overview = await tenant.aiKnowledgeDocuments.findByCategoryLocalized("overview", locale);
 
   const facts: Array<[string, string]> = [
     [t("location"), `${hotel.city}, ${hotel.country}`],

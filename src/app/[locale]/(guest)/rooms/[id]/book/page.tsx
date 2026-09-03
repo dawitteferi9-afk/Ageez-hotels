@@ -16,8 +16,9 @@ interface BookRoomPageProps {
 
 export async function generateMetadata({ params }: BookRoomPageProps): Promise<Metadata> {
   const { id } = await params;
+  const locale = await getLocale();
   const hotel = await getCurrentTenantHotel();
-  const roomType = await withTenant(hotel.id).roomTypes.findUnique(id);
+  const roomType = await withTenant(hotel.id).roomTypes.findUniqueLocalized(id, locale);
   if (!roomType) return {};
   const t = await getTranslations("Booking");
   return { title: t("bookRoomTitle", { roomName: roomType.name }) };
@@ -35,15 +36,15 @@ export async function generateMetadata({ params }: BookRoomPageProps): Promise<M
  */
 export default async function BookRoomPage({ params }: BookRoomPageProps) {
   const { id } = await params;
+  const locale = await getLocale();
   const hotel = await getCurrentTenantHotel();
-  const roomType = await withTenant(hotel.id).roomTypes.findUnique(id);
+  const roomType = await withTenant(hotel.id).roomTypes.findUniqueLocalized(id, locale);
   if (!roomType) notFound();
 
   const boundAction = createBookingAction.bind(null, roomType.id);
   const t = await getTranslations("Booking");
   const tRooms = await getTranslations("Rooms");
   const tCommon = await getTranslations("Common");
-  const locale = await getLocale();
 
   return (
     <section className="py-16">

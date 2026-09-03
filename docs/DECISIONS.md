@@ -4,6 +4,103 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-03 — Multilingual Support Phase 3: hotel business-content translation, tenant-scoped translation tables, English fallback
+**Status:** Approved and implemented (local commit only — not pushed)
+**Decision:** Added two narrow, typed translation tables
+(`RoomTypeTranslation`, `AiKnowledgeDocumentTranslation`) and a
+tenant-scoped, locale-aware content-resolution layer
+(`src/lib/tenant/index.ts`'s `findManyLocalized()`/`findUniqueLocalized()`/
+`localize()`/`findByCategoryLocalized()`), and populated the demo tenant
+with approved am/zh/es/ar translations of every `RoomType`/
+`AiKnowledgeDocument` guest-facing field. Full architecture in
+`docs/MULTILINGUAL.md`'s Phase 3 section; this entry records the
+decisions worth flagging specifically.
+
+1. **Typed translation tables, not a generic EAV/polymorphic translation
+   system.** Exactly two tables, one per translated parent model, each
+   with only the fields that are actually translatable prose
+   (`name`/`description` for `RoomType`; `content` for
+   `AiKnowledgeDocument`) — never a generic
+   `Translation(modelName, fieldName, recordId, locale, value)` table.
+   The narrower shape is simpler to reason about, gets real foreign keys
+   and a real compound-unique constraint instead of a string-typed
+   `modelName` discriminator, and matches the actual scope (exactly two
+   models needed translation after the audit — see `docs/MULTILINGUAL.md`'s
+   content-model section for what was and wasn't classified as
+   translatable).
+2. **`locale` is a plain string column, never a Prisma enum.** Matches
+   `Hotel.enabledLocales`'s existing `String[]` convention and means
+   adding a future locale never requires a schema migration for these
+   tables — only a new catalog file and new translation rows.
+3. **No English translation rows.** The parent `RoomType`/
+   `AiKnowledgeDocument` row IS the English content; an `[id, "en"]`
+   translation row would just be a redundant, driftable duplicate of it.
+   `isTranslatableLocale()` in `src/lib/tenant/index.ts` treats `"en"` as
+   a special case that skips the translation lookup entirely.
+4. **Nullable translation fields, for field-level fallback.** A
+   translation with an approved `name` but no `description` yet falls
+   back to the canonical English description for that ONE field, not the
+   whole record — the locked fallback contract
+   (`docs/MULTILINGUAL.md`'s Fallback contract section). Chose nullable
+   columns over (e.g.) a sparse per-field table specifically so this is a
+   simple `??` at read time, not a second join.
+5. **Detection vs. display is now an explicit, typed two-field shape
+   (`Localized*` types carry both `name`/`description`/`content` AND
+   `sourceName`/`sourceDescription`/`sourceContent`), not an
+   afterthought.** `src/lib/guest/roomHighlights.ts`/
+   `knowledgeHighlights.ts`'s highlight/venue-chip detection
+   phrase-matches specific English text — translating the text passed
+   into those functions would have silently made every highlight chip
+   and venue card vanish for every non-English locale (a real failure
+   mode identified during the Phase 3 audit, not discovered by
+   accident). Every locale-aware read returns both the resolved-for-
+   display text and the always-English source text side by side, and
+   every caller that does detection/photography-lookup uses the source
+   field, never the display field.
+6. **Highlight/venue-chip LABELS moved to the message catalogs
+   (extending Phase 2's `Highlights` namespace), not into a translation
+   table.** These are presentation-layer vocabulary ("City View", "Free
+   Wi-Fi", a facility-card tagline) — generic UI-adjacent labels that
+   happen to be keyed by a concept name, not hotel-specific facts. Only
+   the actual `AiKnowledgeDocument.content` paragraph they're derived
+   from is a translation-table concern.
+7. **Venue proper names ("Axum Restaurant"/"Buna Lounge") stay Latin/
+   unchanged wherever they're a structured element (a venue-card title),
+   but are naturally transliterated within translated PROSE** — matching
+   the treatment Phase 2 already established for these same names inside
+   AI Concierge starter questions. Two different, both correct, contexts;
+   see `docs/MULTILINGUAL.md`'s "Brand / proper names" section.
+8. **`Hotel.city`/`.country` were audited and deliberately left
+   untranslated.** A real hospitality-site pattern (an address stays
+   legible for practical use — a taxi driver, a postal system —
+   regardless of UI language), and neither the Product Owner's brief nor
+   the actual guest UI treats them as anything beyond a short locality
+   label. Revisit only with a concrete reason to.
+9. **Tenant isolation is enforced by construction, not by an added
+   check.** Every locale-aware read resolves its CANONICAL row through
+   the exact same `hotelId`-scoped query pattern already used before this
+   phase, and only then looks up a translation by that already-verified
+   row's own id — there is no code path that queries a translation table
+   by a client-supplied id directly. Proven against a real two-hotel
+   fixture in `tests/integration/contentTranslations.test.ts`.
+10. **AI tools (`getHotelKnowledge.ts`, `getRoomTypesSummary.ts`, etc.)
+    deliberately still call the plain, unlocalized read methods.** The
+    locale-aware layer exists so Phase 4 can wire multilingual AI
+    grounding cleanly later; this phase does not activate that behavior.
+
+Verified: `npm run typecheck` (clean), `npm run lint` (clean), `npm run
+build` (clean), `npm run test` (399/399 unit, unchanged from Phase 2 —
+`deriveRoomHighlights()`/`knowledgeHighlights()` themselves were never
+modified, only their callers), `npm run test:integration` (227/227 — 213
+existing + 14 new in `contentTranslations.test.ts`), and the full e2e
+regression suite (`tests/e2e/multilingual.spec.ts` extended to 45 tests
+covering translated DB content/booking-identity preservation, plus
+booking/concierge/contact/CSRF/security-headers/XSS/auth/all 9
+management spec files) — see `docs/CHANGELOG.md`'s Phase 3 entry for the
+full breakdown.
+
+---
+
 ## 2026-09-03 — Multilingual Support Phase 2: interface-chrome translation, content boundary, RTL/typography
 **Status:** Approved and implemented (local commit only — not pushed)
 **Decision:** Translated every guest-facing interface-chrome string into

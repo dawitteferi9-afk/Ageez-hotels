@@ -25,6 +25,8 @@ import {
   SERVICE_REQUEST_TYPES,
   type ServiceRequestType,
 } from "@/lib/domain/serviceRequestTypes";
+import type { RoomType, AiKnowledgeDocument } from "@prisma/client";
+import { LOCALES, type AppLocale } from "@/i18n/routing";
 
 /**
  * Centralized tenant-aware data access (docs/ARCHITECTURE.md,
@@ -354,6 +356,68 @@ type ScopedAiKnowledgeDocumentArgs = Omit<Prisma.AiKnowledgeDocumentFindManyArgs
   where?: Omit<Prisma.AiKnowledgeDocumentWhereInput, "hotelId">;
 };
 
+/**
+ * Multilingual Support Phase 3 — the locale-aware content-resolution
+ * layer. This is the ONE place guest pages resolve translated hotel
+ * content, so locale-fallback logic is never duplicated per page
+ * (docs/MULTILINGUAL.md).
+ *
+ * `LocalizedRoomType`/`LocalizedAiKnowledgeDocument` carry BOTH the
+ * locale-resolved (translated, falling back to English field-by-field)
+ * text AND the always-canonical-English `source*` fields side by side.
+ * This is deliberate, not redundant: some existing callers need the
+ * ENGLISH text specifically, regardless of UI locale —
+ * `src/lib/guest/roomPhotography.ts`'s `getRoomPhotography()` is keyed by
+ * the exact live English `RoomType.name`, and
+ * `src/lib/guest/roomHighlights.ts`/`knowledgeHighlights.ts`'s
+ * `derive*()` functions phrase-match specific English phrases to decide
+ * WHETHER a highlight/venue chip renders at all — translating the text
+ * they match against would silently break that detection for every
+ * non-English locale (chips/venue cards would just vanish), which is
+ * exactly the failure mode this two-field shape avoids. Detection always
+ * uses `source*`; on-screen prose always uses the locale-resolved field.
+ */
+export type LocalizedRoomType = RoomType & {
+  /** Always the canonical English `name` — for photography lookups and any other exact-English-match code. */
+  sourceName: string;
+  /** Always the canonical English `description` — for highlight-phrase detection. */
+  sourceDescription: string;
+};
+
+export type LocalizedAiKnowledgeDocument = AiKnowledgeDocument & {
+  /** Always the canonical English `content` — for highlight/venue-phrase detection. */
+  sourceContent: string;
+};
+
+/** `"en"` needs no translation lookup at all — the row already IS the English content. */
+function isTranslatableLocale(locale: string): locale is Exclude<AppLocale, "en"> {
+  return (LOCALES as readonly string[]).includes(locale) && locale !== "en";
+}
+
+function applyRoomTypeTranslation(
+  roomType: RoomType,
+  translation: { name: string | null; description: string | null } | null
+): LocalizedRoomType {
+  return {
+    ...roomType,
+    name: translation?.name ?? roomType.name,
+    description: translation?.description ?? roomType.description,
+    sourceName: roomType.name,
+    sourceDescription: roomType.description,
+  };
+}
+
+function applyKnowledgeDocumentTranslation(
+  doc: AiKnowledgeDocument,
+  translation: { content: string | null } | null
+): LocalizedAiKnowledgeDocument {
+  return {
+    ...doc,
+    content: translation?.content ?? doc.content,
+    sourceContent: doc.content,
+  };
+}
+
 type ScopedGuestArgs = Omit<Prisma.GuestFindManyArgs, "where"> & {
   where?: Omit<Prisma.GuestWhereInput, "hotelId">;
 };
@@ -653,6 +717,63 @@ export function withTenant(hotelId: string) {
         prisma.roomType.findMany({ ...args, where: { ...args?.where, hotelId } }),
       findUnique: (roomTypeId: string) =>
         prisma.roomType.findFirst({ where: { id: roomTypeId, hotelId } }),
+
+      /**
+       * Multilingual Support Phase 3 — locale-aware room-type list read
+       * (guest `/rooms`, homepage). `"en"` skips the translation lookup
+       * entirely (the rows already are the English content). Tenant
+       * isolation: `rows` is already `hotelId`-scoped by the `findMany`
+       * above, so the translation lookup below (`roomTypeId IN (ids)`)
+       * can only ever touch translations belonging to THIS hotel's own
+       * room types — there is no path from an arbitrary/foreign
+       * `roomTypeId` into this query.
+       */
+      findManyLocalized: async (locale: string, args?: ScopedRoomTypeArgs): Promise<LocalizedRoomType[]> => {
+        const rows = await prisma.roomType.findMany({ ...args, where: { ...args?.where, hotelId } });
+        if (!isTranslatableLocale(locale)) {
+          return rows.map((r) => applyRoomTypeTranslation(r, null));
+        }
+        const translations = await prisma.roomTypeTranslation.findMany({
+          where: { roomTypeId: { in: rows.map((r) => r.id) }, locale },
+        });
+        const byRoomTypeId = new Map(translations.map((t) => [t.roomTypeId, t]));
+        return rows.map((r) => applyRoomTypeTranslation(r, byRoomTypeId.get(r.id) ?? null));
+      },
+
+      /**
+       * Multilingual Support Phase 3 — locale-aware single room-type read
+       * (guest room detail, booking pages). Tenant isolation: the row is
+       * fetched via the SAME `hotelId`-scoped `findFirst()` pattern
+       * `findUnique` above already uses — a cross-tenant or nonexistent
+       * id returns `null` before the translation table is ever touched,
+       * exactly like every other scoped lookup in this file.
+       */
+      findUniqueLocalized: async (roomTypeId: string, locale: string): Promise<LocalizedRoomType | null> => {
+        const row = await prisma.roomType.findFirst({ where: { id: roomTypeId, hotelId } });
+        if (!row) return null;
+        if (!isTranslatableLocale(locale)) return applyRoomTypeTranslation(row, null);
+        const translation = await prisma.roomTypeTranslation.findUnique({
+          where: { roomTypeId_locale: { roomTypeId: row.id, locale } },
+        });
+        return applyRoomTypeTranslation(row, translation);
+      },
+
+      /**
+       * Multilingual Support Phase 3 — applies a translation to a
+       * `RoomType` row a caller already fetched through this SAME tenant
+       * instance (e.g. the booking confirmation page's nested
+       * `reservation.room.roomType`) — no second tenant-scoped fetch of
+       * the parent needed, since the caller already proved ownership by
+       * having the row at all. Only the translation table (keyed by that
+       * already-trusted `roomType.id`) is queried here.
+       */
+      localize: async (roomType: RoomType, locale: string): Promise<LocalizedRoomType> => {
+        if (!isTranslatableLocale(locale)) return applyRoomTypeTranslation(roomType, null);
+        const translation = await prisma.roomTypeTranslation.findUnique({
+          where: { roomTypeId_locale: { roomTypeId: roomType.id, locale } },
+        });
+        return applyRoomTypeTranslation(roomType, translation);
+      },
     },
 
     rooms: {
@@ -741,6 +862,39 @@ export function withTenant(hotelId: string) {
         prisma.aiKnowledgeDocument.findUnique({
           where: { hotelId_category: { hotelId, category } },
         }),
+
+      /**
+       * Multilingual Support Phase 3 — locale-aware knowledge-document
+       * read (guest homepage/restaurant/services/about/contact pages).
+       * `"en"` skips the translation lookup entirely. Tenant isolation:
+       * the document is resolved via the SAME `hotelId`-scoped
+       * `findUnique` `findByCategory` above already uses — a document
+       * belonging to a different hotel is structurally unreachable (the
+       * `hotelId_category` compound key requires this exact `hotelId`),
+       * so the translation lookup that follows (keyed by that document's
+       * own `id`) can never cross a tenant boundary either. Deliberately
+       * NOT used by the AI Concierge/management assistant tools
+       * (`src/lib/ai/tools/getHotelKnowledge.ts`,
+       * `getRoomTypesSummary.ts`) — those keep calling the plain,
+       * unlocalized `findByCategory()`/`roomTypes.findMany()` above,
+       * exactly as before this phase (Phase 4 boundary: this layer is
+       * built so Phase 4 CAN use it later, not activated for AI
+       * conversation yet).
+       */
+      findByCategoryLocalized: async (
+        category: string,
+        locale: string
+      ): Promise<LocalizedAiKnowledgeDocument | null> => {
+        const doc = await prisma.aiKnowledgeDocument.findUnique({
+          where: { hotelId_category: { hotelId, category } },
+        });
+        if (!doc) return null;
+        if (!isTranslatableLocale(locale)) return applyKnowledgeDocumentTranslation(doc, null);
+        const translation = await prisma.aiKnowledgeDocumentTranslation.findUnique({
+          where: { documentId_locale: { documentId: doc.id, locale } },
+        });
+        return applyKnowledgeDocumentTranslation(doc, translation);
+      },
     },
 
     guests: {

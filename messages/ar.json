@@ -221,6 +221,42 @@
       "messageTooLong": "يُرجى أن تكون رسالتك أقل من {max} حرفًا."
     }
   },
+  "Highlights": {
+    "rooms": {
+      "king-room": "غرفة كينج",
+      "twin-room": "غرفة توأم",
+      "city-view": "إطلالة على المدينة",
+      "upgraded-amenities": "مرافق مطوَّرة",
+      "dedicated-workspace": "مساحة عمل مخصصة",
+      "lounge-access": "إمكانية الوصول إلى الصالة",
+      "multi-bed-suite": "جناح متعدد الأسرّة",
+      "separate-living-area": "منطقة معيشة منفصلة",
+      "premier-suite": "الجناح الفاخر",
+      "private-lounge": "صالة خاصة",
+      "dining-area": "منطقة لتناول الطعام",
+      "panoramic-views": "إطلالات بانورامية"
+    },
+    "upToGuests": "لعدد يصل إلى {count} ضيوف",
+    "services": {
+      "airport-pickup": "خدمة النقل من المطار",
+      "restaurant": "المطعم",
+      "room-service": "خدمة الغرف",
+      "laundry": "خدمة الغسيل",
+      "wifi": "واي فاي مجاني",
+      "fitness-center": "مركز اللياقة البدنية",
+      "business-center": "مركز الأعمال",
+      "conference-facilities": "مرافق المؤتمرات",
+      "reception": "استقبال على مدار الساعة"
+    },
+    "conferenceHalls": "{count} قاعات مؤتمرات",
+    "venues": {
+      "axum": { "tagline": "المطعم الرئيسي في {hotelName}." },
+      "buna": { "tagline": "صالة قهوة داخل الفندق." },
+      "conference-facilities": { "name": "مرافق المؤتمرات", "tagline": "مساحة للاجتماعات والفعاليات في الفندق." },
+      "fitness-center": { "name": "مركز اللياقة البدنية", "tagline": "مركز اللياقة البدنية في الفندق." },
+      "business-center": { "name": "مركز الأعمال", "tagline": "مركز الأعمال في الفندق." }
+    }
+  },
   "Errors": {
     "heading": "حدث خطأ ما",
     "description": "تعذّر إتمام هذا الطلب. يُرجى المحاولة مرة أخرى، أو العودة إلى الصفحة الرئيسية.",

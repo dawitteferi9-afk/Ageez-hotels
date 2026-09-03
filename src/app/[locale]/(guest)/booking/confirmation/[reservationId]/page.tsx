@@ -35,7 +35,8 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function BookingConfirmationPage({ params }: ConfirmationPageProps) {
   const { reservationId } = await params;
   const hotel = await getCurrentTenantHotel();
-  const reservation = await withTenant(hotel.id).reservations.findById(reservationId);
+  const tenant = withTenant(hotel.id);
+  const reservation = await tenant.reservations.findById(reservationId);
   if (!reservation) notFound();
 
   const t = await getTranslations("BookingConfirmation");
@@ -46,6 +47,11 @@ export default async function BookingConfirmationPage({ params }: ConfirmationPa
   const nights = nightsBetween(reservation.checkIn, reservation.checkOut);
   const reference = formatBookingReference(hotel.name, reservation.id);
   const statusLabel = t(`status.${reservation.status}`);
+  // Multilingual Support Phase 3 — applies an approved translation to the
+  // room type already resolved (tenant-scoped) via `reservation.room.roomType`
+  // above, purely for on-screen display. `reservation.room.roomTypeId` (the
+  // actual booking identity) is completely untouched by this.
+  const roomType = await tenant.roomTypes.localize(reservation.room.roomType, locale);
 
   return (
     <section className="py-16">
@@ -67,23 +73,20 @@ export default async function BookingConfirmationPage({ params }: ConfirmationPa
 
         <Card>
           <CardHeader className="flex-row items-center justify-between">
-            <CardTitle>{reservation.room.roomType.name}</CardTitle>
+            <CardTitle>{roomType.name}</CardTitle>
             <Badge>{statusLabel}</Badge>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
               <Fact label={t("bookingReference")} value={reference} />
-              <Fact
-                label={t("room")}
-                value={`${reservation.room.roomNumber} (${reservation.room.roomType.name})`}
-              />
+              <Fact label={t("room")} value={`${reservation.room.roomNumber} (${roomType.name})`} />
               <Fact label={t("checkIn")} value={formatDate(reservation.checkIn, "long", locale)} />
               <Fact label={t("checkOut")} value={formatDate(reservation.checkOut, "long", locale)} />
               <Fact label={t("nights")} value={String(nights)} />
               <Fact label={t("guests")} value={String(reservation.guestCount)} />
               <Fact
                 label={t("total")}
-                value={formatCurrency(reservation.totalPrice, reservation.room.roomType.currency, locale)}
+                value={formatCurrency(reservation.totalPrice, roomType.currency, locale)}
               />
               <Fact label={t("payment")} value={tCommon("payAtHotel")} />
             </dl>

@@ -221,6 +221,42 @@
       "messageTooLong": "Mantenga su mensaje por debajo de {max} caracteres."
     }
   },
+  "Highlights": {
+    "rooms": {
+      "king-room": "Habitación King",
+      "twin-room": "Habitación Twin",
+      "city-view": "Vistas a la ciudad",
+      "upgraded-amenities": "Comodidades superiores",
+      "dedicated-workspace": "Espacio de trabajo independiente",
+      "lounge-access": "Acceso al salón privado",
+      "multi-bed-suite": "Suite con varias camas",
+      "separate-living-area": "Sala de estar independiente",
+      "premier-suite": "Suite premier",
+      "private-lounge": "Salón privado",
+      "dining-area": "Zona de comedor",
+      "panoramic-views": "Vistas panorámicas"
+    },
+    "upToGuests": "{count, plural, one {Hasta # persona} other {Hasta # personas}}",
+    "services": {
+      "airport-pickup": "Traslado desde el aeropuerto",
+      "restaurant": "Restaurante",
+      "room-service": "Servicio a la habitación",
+      "laundry": "Lavandería",
+      "wifi": "Wi-Fi gratis",
+      "fitness-center": "Gimnasio",
+      "business-center": "Centro de negocios",
+      "conference-facilities": "Instalaciones para conferencias",
+      "reception": "Recepción 24 horas"
+    },
+    "conferenceHalls": "{count, plural, one {# sala de conferencias} other {# salas de conferencias}}",
+    "venues": {
+      "axum": { "tagline": "El restaurante principal de {hotelName}." },
+      "buna": { "tagline": "Un salón de café en el hotel." },
+      "conference-facilities": { "name": "Instalaciones para conferencias", "tagline": "Espacio para reuniones y eventos en el hotel." },
+      "fitness-center": { "name": "Gimnasio", "tagline": "El gimnasio del hotel." },
+      "business-center": { "name": "Centro de negocios", "tagline": "El centro de negocios del hotel." }
+    }
+  },
   "Errors": {
     "heading": "Algo salió mal",
     "description": "No pudimos completar esa solicitud. Inténtelo de nuevo, o vuelva a la página de inicio.",

@@ -1,5 +1,104 @@
 # Changelog
 
+## Multilingual Support Phase 3 — hotel business-content translation (2026-09-03)
+Translated the hotel's own business content — `RoomType` names/
+descriptions and `AiKnowledgeDocument` prose (overview, policies, dining,
+facilities, services, payment) — into all 4 non-English platform locales
+for the Ageez Grand Hotel demo tenant, via two new typed translation
+tables with field-level English fallback. Interface chrome (Phase 2)
+stays untouched; see the new `docs/MULTILINGUAL.md` Phase 3 section and
+`docs/TRANSLATION_AUDIT.md` for the full architecture and en→am/zh/es/ar
+content mapping.
+
+- **Schema (additive migration `20260903082242_add_content_translation_tables`):**
+  `RoomTypeTranslation` (`roomTypeId` FK cascade, `locale` string,
+  nullable `name`/`description`, `@@unique([roomTypeId, locale])`) and
+  `AiKnowledgeDocumentTranslation` (`documentId` FK cascade, `locale`,
+  nullable `content`, `@@unique([documentId, locale])`). Zero changes to
+  any existing table; verified every existing row (1 Hotel, 5 RoomType,
+  52 Room, 5 StaffUser, 6 AiKnowledgeDocument) survived unchanged.
+- **`src/lib/tenant/index.ts`:** `roomTypes.findManyLocalized(locale, args?)`/
+  `findUniqueLocalized(id, locale)`/`localize(roomType, locale)` and
+  `aiKnowledgeDocuments.findByCategoryLocalized(category, locale)` — the
+  one place guest pages resolve translated content. Each returns BOTH the
+  locale-resolved text (English fallback per field) AND the always-
+  English `source*` fields, so highlight/venue-chip DETECTION
+  (`src/lib/guest/roomHighlights.ts`/`knowledgeHighlights.ts`, which
+  phrase-matches specific English text) and `getRoomPhotography()`'s
+  exact-name lookup never silently break for a non-English locale — a
+  real failure mode caught during this phase's own audit, not by
+  accident. Tenant isolation enforced by construction: every translation
+  lookup only ever touches an already-`hotelId`-scoped parent row's own
+  id, never a client-supplied id directly.
+- **Guest pages wired to the locale-aware layer:** homepage, `/rooms`,
+  `/rooms/[id]`, `/rooms/[id]/book`, booking confirmation (via the new
+  `roomTypes.localize()` on the already-fetched nested `roomType`),
+  `/restaurant`, `/services`, `/about`, `/contact`. AI Concierge tools
+  (`getHotelKnowledge.ts`, `getRoomTypesSummary.ts`) deliberately
+  untouched — still call the plain unlocalized methods (Phase 4
+  boundary).
+- **`messages/<locale>.json` gained a new `Highlights` namespace** (room-
+  feature chip labels, service/facility chip labels, venue-card taglines)
+  — presentation-layer vocabulary, not hotel-specific facts, so it lives
+  in the existing Phase 2 catalog mechanism rather than a translation
+  table. `room-type-card.tsx` and the room-detail/restaurant/services
+  pages now resolve chip/venue labels through it, keyed by the same
+  stable `key` `deriveRoomHighlights()`/`deriveDiningVenues()`/etc.
+  already returned.
+- **Demo content:** `src/config/defaults/seed/ageez-grand-hotel-translations.ts`
+  (new) holds the approved am/zh/es/ar translations of all 5 room types
+  and 6 knowledge documents — 44 translation rows total (20 room-type +
+  24 knowledge-document). `prisma/seed/index.ts`'s `seedBaseline()`
+  upserts them right after each English parent, so `npm run db:seed`/
+  `npm run db:restore-baseline` deterministically leave the database with
+  canonical English plus all four approved translations.
+- **Testing:** `tests/integration/contentTranslations.test.ts` (new, 14
+  tests) — fallback (missing translation → English; missing field within
+  a translation → English for that field only), uniqueness constraints,
+  tenant isolation against a real two-hotel fixture, price/capacity/id
+  preservation across locales. `tests/e2e/multilingual.spec.ts` extended
+  with a `translated hotel database content (Phase 3)` describe block —
+  translated room/knowledge text reaching the page (read from the real
+  fixture file, never hardcoded expectations), price/capacity/currency
+  byte-identical across locales, and a full `/es` booking whose total
+  price and room identity are proven to resolve the correct canonical
+  `RoomType` (Executive Room, 2 nights × ETB 7,000 = 14,000) regardless
+  of UI locale. One pre-existing Phase 2 test (`hotel database content
+  ... is identical across every locale`) was rewritten — its premise
+  (DB content never translated) is now Phase 3's own job, so it was
+  replaced with an id/booking-identity-preservation check instead.
+
+**Validation:** `npm run typecheck` (clean), `npm run lint` (clean),
+`npm run build` (clean), `npm run test` (399/399 unit — unchanged from
+Phase 2, since `deriveRoomHighlights()`/`knowledgeHighlights()` themselves
+were never modified, only their callers), `npm run test:integration`
+(227/227 — 213 existing + 14 new), `tests/e2e/multilingual.spec.ts`
+(45/45, after fixing 3 newly-written tests whose room-card click
+locators needed to target the actual `View Details`/`Book This Room`
+links rather than a non-interactive heading), and the full existing e2e
+regression suite (booking, concierge, contact, CSRF, security headers,
+XSS, auth, all 9 management spec files). Desktop (1440×900) and mobile
+(390×844) visual QA via screenshots across all 5 locales on home/rooms/
+room-detail/restaurant/services/about/contact confirmed translated room
+descriptions, service/facility chips, and venue-card taglines render
+correctly with no layout regressions, correct RTL, and correct Ethiopic/
+CJK glyph rendering.
+
+**Files:** see `git diff --stat` for the full list. New:
+`prisma/migrations/20260903082242_add_content_translation_tables/`,
+`src/config/defaults/seed/ageez-grand-hotel-translations.ts`,
+`tests/integration/contentTranslations.test.ts`,
+`docs/TRANSLATION_AUDIT.md`. No `package.json` dependency changes.
+Updated `docs/DECISIONS.md`, `docs/CHANGELOG.md` (this entry),
+`docs/MULTILINGUAL.md`.
+
+**Not in this phase (tracked, not forgotten):** multilingual AI Concierge
+conversation (Phase 4 — the locale-aware content layer is built so Phase
+4 can use it, but AI tools still read unlocalized content), full
+hreflang/SEO metadata (Phase 5), `/tour` localization (documented
+boundary — outside `[locale]` routing entirely, a routing-architecture
+change beyond this phase's scope). See `docs/MULTILINGUAL.md`.
+
 ## Multilingual Support Phase 2 — guest UI translation (interface chrome), RTL/typography audit (2026-09-03)
 Translated the complete guest-facing interface chrome — navigation,
 buttons, form labels, validation/error messages, accessibility labels,

@@ -4,6 +4,10 @@ import am from "../../messages/am.json";
 import zh from "../../messages/zh.json";
 import es from "../../messages/es.json";
 import ar from "../../messages/ar.json";
+import {
+  roomTypeTranslationFixtures,
+  aiKnowledgeTranslationFixtures,
+} from "../../src/config/defaults/seed/ageez-grand-hotel-translations";
 
 /**
  * Multilingual Support Phase 1 — the routing/foundation e2e coverage the
@@ -456,24 +460,131 @@ test.describe("translated interface chrome (Phase 2)", () => {
     expect(overflow).toBeLessThanOrEqual(4);
   });
 
-  test("hotel database content (room name/description) is identical across every locale — never translated", async ({
+  test("hotel database content (room name/description) resolves the SAME room across every locale, by id — Phase 3 translates the text, never the booking identity", async ({
     page,
   }) => {
     await page.goto("/rooms");
     const firstRoomHref = await page.getByRole("link", { name: en.Rooms.viewDetails }).first().getAttribute("href");
     expect(firstRoomHref).toBeTruthy();
-
-    await page.goto(firstRoomHref!);
-    const englishName = (await page.getByRole("heading", { level: 1 }).textContent())?.trim();
-    const englishDescription = (await page.locator("p.text-lg.leading-relaxed").textContent())?.trim();
+    const roomId = firstRoomHref!.replace(/^\/rooms\//, "");
 
     for (const locale of ["am", "zh", "es", "ar"]) {
       await page.goto(`/${locale}${firstRoomHref}`);
-      const localizedName = (await page.getByRole("heading", { level: 1 }).textContent())?.trim();
-      const localizedDescription = (await page.locator("p.text-lg.leading-relaxed").textContent())?.trim();
-      expect(localizedName).toBe(englishName);
-      expect(localizedDescription).toBe(englishDescription);
+      // Same room id in the URL, and the "Book This Room" link (located by
+      // its stable `/book`-suffixed href, not by its now-translated text)
+      // still points at that same id's own book route — the URL/id itself
+      // is the booking identity, and Phase 3 never touches it.
+      const bookHref = await page.locator('a[href$="/book"]').first().getAttribute("href");
+      expect(bookHref).toContain(roomId);
     }
+  });
+});
+
+/**
+ * Multilingual Support Phase 3 — hotel BUSINESS content (RoomType name/
+ * description, AiKnowledgeDocument prose) is now approved-translated per
+ * locale via `RoomTypeTranslation`/`AiKnowledgeDocumentTranslation`
+ * (`src/lib/tenant/index.ts`'s `findManyLocalized()`/`findUniqueLocalized()`/
+ * `findByCategoryLocalized()`). These tests prove the translated text
+ * actually reaches the page (reading the real translation fixtures
+ * directly, so they can never silently drift from what's actually
+ * seeded), that booking identity/pricing survive translation completely
+ * unchanged, and that DB-content translation is genuinely per-field
+ * (never a whole-record swap) — see `docs/MULTILINGUAL.md`.
+ */
+const presidentialSuiteTranslations = roomTypeTranslationFixtures["Presidential Suite"]!;
+const executiveRoomTranslations = roomTypeTranslationFixtures["Executive Room"]!;
+const diningTranslations = aiKnowledgeTranslationFixtures.dining!;
+const servicesTranslations = aiKnowledgeTranslationFixtures.services!;
+
+test.describe("translated hotel database content (Phase 3)", () => {
+  test("room name/description are approved-translated per locale, matching the seeded fixture text exactly", async ({
+    page,
+  }) => {
+    for (const [locale, translation] of Object.entries(presidentialSuiteTranslations)) {
+      await page.goto(`/${locale}/rooms`);
+      // The room-card container is the stable `.rounded-lg.border` locator
+      // every other e2e spec in this project already relies on (see
+      // `RoomTypeCard`'s own comment) — filtered to the one card whose
+      // text includes this locale's translated name, since the card's own
+      // heading text isn't itself a link (only its "View Details" link,
+      // now translated too, actually navigates).
+      const card = page.locator(".rounded-lg.border").filter({ hasText: translation.name });
+      await expect(card).toBeVisible();
+      await card.getByRole("link").click();
+      await expect(page.getByRole("heading", { name: translation.name, level: 1 })).toBeVisible();
+      await expect(page.getByText(translation.description)).toBeVisible();
+    }
+  });
+
+  test("room price/capacity/currency are byte-identical across every locale — only the text is translated", async ({
+    page,
+  }) => {
+    await page.goto("/rooms");
+    const firstRoomHref = await page.getByRole("link", { name: en.Rooms.viewDetails }).first().getAttribute("href");
+    await page.goto(firstRoomHref!);
+    const englishPrice = (await page.locator("p.font-display.text-3xl.text-ochre-600").textContent())?.trim();
+    // Extract the digits only — locale-aware `Intl` formatting legitimately
+    // changes digit grouping/currency-code position (Phase 2 scope), but
+    // never the underlying number.
+    const englishDigits = englishPrice?.replace(/[^\d]/g, "");
+    expect(englishDigits).toBeTruthy();
+
+    for (const locale of ["am", "zh", "es", "ar"]) {
+      await page.goto(`/${locale}${firstRoomHref}`);
+      const localizedPrice = (await page.locator("p.font-display.text-3xl.text-ochre-600").textContent())?.trim();
+      const localizedDigits = localizedPrice?.replace(/[^\d]/g, "");
+      expect(localizedDigits).toBe(englishDigits);
+    }
+  });
+
+  test("dining/services knowledge-document prose is approved-translated, matching the seeded fixture text exactly", async ({
+    page,
+  }) => {
+    for (const locale of ["am", "zh", "es", "ar"] as const) {
+      await page.goto(`/${locale}/restaurant`);
+      await expect(page.getByText(diningTranslations[locale])).toBeVisible();
+
+      await page.goto(`/${locale}/services`);
+      await expect(page.getByText(servicesTranslations[locale])).toBeVisible();
+    }
+  });
+
+  test("the booking flow's price/room identity are unaffected by which locale the guest booked in", async ({
+    page,
+  }) => {
+    await page.goto("/es/rooms");
+    const executiveCard = page.locator(".rounded-lg.border").filter({ hasText: executiveRoomTranslations.es.name });
+    await expect(executiveCard).toBeVisible();
+    await executiveCard.getByRole("link").click();
+    await expect(page).toHaveURL(/\/es\/rooms\/[^/]+$/);
+    // "Book This Room", located by its stable `/book`-suffixed href
+    // rather than its (now Spanish-translated) text.
+    await page.locator('a[href$="/book"]').first().click();
+    await expect(page).toHaveURL(/\/es\/rooms\/[^/]+\/book$/);
+
+    const isoDate = (daysFromNow: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + daysFromNow);
+      return d.toISOString().slice(0, 10);
+    };
+    await page.fill('input[name="checkIn"]', isoDate(50));
+    await page.fill('input[name="checkOut"]', isoDate(52)); // 2 nights
+    await page.fill('input[name="guestName"]', "Phase 3 Content Test Guest");
+    await page.fill('input[name="guestEmail"]', "phase3-content-test@example.com");
+    await page.fill('input[name="guestPhone"]', "+251-911-000-777");
+    await page.locator('form button[type="submit"]').click();
+
+    await expect(page).toHaveURL(/\/es\/booking\/confirmation\/[^/]+$/);
+    // Executive Room is ETB 7,000/night (src/config/defaults/seed/ageez-grand-hotel.ts)
+    // — 2 nights must total 14,000, regardless of the Spanish UI locale
+    // the booking was made in, and the room name shown must be the
+    // Spanish-translated Executive Room name, proving both resolved from
+    // the SAME canonical RoomType.
+    await expect(page.getByRole("heading", { name: executiveRoomTranslations.es.name })).toBeVisible();
+    const totalRow = page.locator("dt", { hasText: "Total" }).locator("xpath=following-sibling::dd[1]");
+    const totalText = (await totalRow.textContent())?.replace(/[^\d]/g, "");
+    expect(totalText).toBe("14000");
   });
 });
 

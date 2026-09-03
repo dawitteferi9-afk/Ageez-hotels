@@ -221,6 +221,42 @@
       "messageTooLong": "እባክዎ መልእክትዎ ከ{max} ፊደላት በታች እንዲሆን ያድርጉ።"
     }
   },
+  "Highlights": {
+    "rooms": {
+      "king-room": "ኪንግ ክፍል",
+      "twin-room": "ትዊን ክፍል",
+      "city-view": "የከተማ እይታ",
+      "upgraded-amenities": "የተሻሻሉ አገልግሎቶች",
+      "dedicated-workspace": "የተለየ የስራ ቦታ",
+      "lounge-access": "ወደ ላውንጅ መግቢያ",
+      "multi-bed-suite": "ብዙ አልጋ ያለው ስዊት",
+      "separate-living-area": "የተለየ የመቀመጫ ቦታ",
+      "premier-suite": "ልዩ ስዊት",
+      "private-lounge": "የግል ላውንጅ",
+      "dining-area": "የምግብ ቦታ",
+      "panoramic-views": "ሰፊ እይታዎች"
+    },
+    "upToGuests": "እስከ {count} እንግዶች",
+    "services": {
+      "airport-pickup": "ከአውሮፕላን ማረፊያ አገልግሎት",
+      "restaurant": "ምግብ ቤት",
+      "room-service": "የክፍል አገልግሎት",
+      "laundry": "ልብስ ማጠቢያ",
+      "wifi": "ነፃ ዋይ ፋይ",
+      "fitness-center": "የአካል ብቃት ማዕከል",
+      "business-center": "የቢዝነስ ማዕከል",
+      "conference-facilities": "የስብሰባ ምቾቶች",
+      "reception": "24 ሰዓት አቀባበል"
+    },
+    "conferenceHalls": "{count} የስብሰባ አዳራሾች",
+    "venues": {
+      "axum": { "tagline": "የ{hotelName} ዋና ምግብ ቤት።" },
+      "buna": { "tagline": "በሆቴሉ ውስጥ ያለ የቡና ላውንጅ።" },
+      "conference-facilities": { "name": "የስብሰባ ምቾቶች", "tagline": "በሆቴሉ ውስጥ የስብሰባ እና የዝግጅት ቦታ።" },
+      "fitness-center": { "name": "የአካል ብቃት ማዕከል", "tagline": "የሆቴሉ የአካል ብቃት ማዕከል።" },
+      "business-center": { "name": "የቢዝነስ ማዕከል", "tagline": "የሆቴሉ የቢዝነስ ማዕከል።" }
+    }
+  },
   "Errors": {
     "heading": "የሆነ ችግር ተፈጥሯል",
     "description": "ያንን ጥያቄ ማጠናቀቅ አልቻልንም። እባክዎ እንደገና ይሞክሩ፣ ወይም ወደ መነሻ ገጽ ይመለሱ።",

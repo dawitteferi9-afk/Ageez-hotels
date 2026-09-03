@@ -21,28 +21,153 @@ all of them.
 | Phase | Scope | Status |
 |---|---|---|
 | **Phase 1** | Routing foundation: `[locale]` segment, `next-intl` wiring, language switcher, `<html lang/dir>`, cookie-based "remember explicit choice," locale-aware `<Link>` site-wide. No real translated text yet. | Done |
-| **Phase 2** | **Interface chrome translation.** Every static guest-facing UI string — navigation, buttons, form labels, validation/error text, accessibility labels, footer, AI Concierge UI chrome — translated into all 5 locales via `messages/<locale>.json`. RTL logical-property audit. Per-script typography. Locale-aware `Intl` date/currency formatting. | Done (this doc's current state) |
-| **Phase 3** | **Hotel business-content translation.** `Hotel`/`RoomType`/`AiKnowledgeDocument` fields (names, descriptions, policies, overview) gain real per-locale storage and are translated. Not started — these still render in English (their one and only stored language) regardless of UI locale. | Not started |
+| **Phase 2** | **Interface chrome translation.** Every static guest-facing UI string — navigation, buttons, form labels, validation/error text, accessibility labels, footer, AI Concierge UI chrome — translated into all 5 locales via `messages/<locale>.json`. RTL logical-property audit. Per-script typography. Locale-aware `Intl` date/currency formatting. | Done |
+| **Phase 3** | **Hotel business-content translation.** `RoomType.name`/`.description` and `AiKnowledgeDocument.content` gain real per-locale storage (`RoomTypeTranslation`/`AiKnowledgeDocumentTranslation`) and are translated for the demo tenant into all 4 non-English locales, with field-level English fallback. | Done (this doc's current state) |
 | **Phase 4** | **Multilingual AI Concierge conversation.** The concierge actually understands and replies in the guest's chosen locale. Not started — the mock provider is still effectively English-keyword-matched; Phase 2 kept it that way on purpose (see below). | Not started |
 
-**The Phase 2 rule, stated plainly:** if a string is part of the app's own
-interface (a button, a label, a nav link, a validation message, an
-accessibility label) it belongs in `messages/<locale>.json` and gets
-translated. If a string is a fact about *this specific hotel* (a room's
-name/description, the hotel's overview paragraph, its policies, its AI
-knowledge base) it stays exactly what it already was — a live database
-value, read via `getCurrentTenantHotel()`/`withTenant()`, rendered as-is
-regardless of UI locale, in English until Phase 3 gives it real
-translated storage. `AGEEZ GRAND HOTEL` is a brand/proper name and is
-never reinvented per language — it appears in the message catalogs (e.g.
-`Footer.copyright`) only via `{hotelName}` interpolation of that same
-live value, never as translated/hardcoded text.
+**The Phase 2/3 rule, stated plainly:** if a string is part of the app's
+own interface (a button, a label, a nav link, a validation message, an
+accessibility label) it belongs in `messages/<locale>.json` (Phase 2). If
+a string is a fact about *this specific hotel* (a room's name/
+description, the hotel's overview paragraph, its policies, its AI
+knowledge base) it's read from the tenant-scoped, locale-aware content-
+resolution layer in `src/lib/tenant/index.ts` (Phase 3) — an APPROVED
+TRANSLATION of that same fact if one exists for the current locale,
+falling back to the exact English source field-by-field otherwise; never
+a re-derived or independently-authored fact. `AGEEZ GRAND HOTEL` is a
+brand/proper name and is never reinvented per language — it appears in
+the message catalogs (e.g. `Footer.copyright`) only via `{hotelName}`
+interpolation of the live `Hotel.name` value, never as translated/
+hardcoded text; the same rule applies to venue proper names like "Axum
+Restaurant"/"Buna Lounge" wherever they appear as a structured card
+title (see "Brand / proper names" below).
 
-`tests/e2e/multilingual.spec.ts`'s `hotel database content ... is
-identical across every locale` test enforces this mechanically: it reads
-the same room's name/description at `/rooms/[id]` and at
-`/am/rooms/[id]`/`/zh/...`/`/es/...`/`/ar/...` and asserts byte-identical
-text.
+`tests/e2e/multilingual.spec.ts`'s `translated hotel database content
+(Phase 3)` describe block enforces this mechanically: it reads the exact
+translation-fixture text and asserts it reaches the page per locale, that
+a room's id/price/capacity/currency stay byte-identical across every
+locale (only the text differs), and that a booking made while browsing
+in `/es` still resolves and prices the correct canonical `RoomType`.
+
+## Phase 3 — hotel business-content translation
+
+### Content model
+
+Two narrow, purpose-built translation tables (not a generic EAV/
+polymorphic translation system — an explicit architectural decision, see
+`docs/DECISIONS.md`'s Phase 3 entry):
+
+- **`RoomTypeTranslation`** — `roomTypeId` (FK, cascade-deleted with its
+  parent), `locale` (plain string, never a Prisma enum — extensible
+  without a migration, matching `Hotel.enabledLocales`'s own `String[]`
+  convention), nullable `name`/`description`. `@@unique([roomTypeId, locale])`.
+- **`AiKnowledgeDocumentTranslation`** — `documentId` (FK, cascade), `locale`,
+  nullable `content`. `@@unique([documentId, locale])`.
+
+Both live in `prisma/schema.prisma`; migration
+`20260903082242_add_content_translation_tables` is purely additive (two
+new tables, zero changes to any existing table) and was verified to
+preserve every existing row (`Hotel`/`RoomType`/`Room`/`StaffUser`/
+`AiKnowledgeDocument` counts identical before/after).
+
+Deliberately NOT translated (language-neutral operational data, stays on
+the canonical parent row only — never duplicated into a translation
+table): `RoomType.capacity`/`.basePrice`/`.currency`, `Hotel.checkInTime`/
+`.checkOutTime`/`.currency`/`.city`/`.country`/`.contactEmail`/
+`.contactPhone`, every reservation/room/service-request/maintenance
+operational field, all ids and timestamps. `Hotel.city`/`.country`
+("Addis Ababa, Ethiopia") were audited and deliberately left untranslated
+this phase too — real addresses are conventionally kept legible for
+practical use (a taxi driver, a postal system) regardless of UI language,
+and neither appears anywhere except as a short locality label; revisit
+only if a future phase has a concrete reason to.
+
+### Fallback contract
+
+Locked behavior, enforced by `applyRoomTypeTranslation()`/
+`applyKnowledgeDocumentTranslation()` in `src/lib/tenant/index.ts`:
+translation exists → use it; translation (or one of its fields) is
+missing → silently fall back to the canonical English value for THAT
+FIELD, never a blank field, never a thrown error, never a live machine
+translation. `"en"` itself skips the translation lookup entirely — the
+parent row already IS the English content.
+
+### Tenant isolation
+
+Every locale-aware read (`roomTypes.findManyLocalized()`/
+`findUniqueLocalized()`/`localize()`, `aiKnowledgeDocuments.findByCategoryLocalized()`)
+resolves the CANONICAL row through the exact same `hotelId`-scoped query
+`withTenant()` already used before this phase, and only THEN looks up its
+translation by that already-tenant-verified row's own id — there is no
+code path that queries a translation table by a client-supplied
+`roomTypeId`/`documentId` directly. A cross-tenant or nonexistent id
+returns `null` before the translation table is ever touched, identical to
+every other scoped lookup in this file. Proven against a real database in
+`tests/integration/contentTranslations.test.ts` (two fixture hotels, one
+hotel's translation lookup for the other's own room type id/knowledge
+document).
+
+### Detection vs. display — a real bug this phase caught and fixed
+
+`src/lib/guest/roomHighlights.ts`/`knowledgeHighlights.ts`'s `derive*()`
+functions decide WHETHER a highlight chip or venue card renders at all by
+phrase-matching specific English text (e.g. `/city views?/i`). Once
+`RoomType.description`/`AiKnowledgeDocument.content` could be a
+translation, passing the LOCALE-RESOLVED text into these functions would
+have silently made every chip/venue card vanish for every non-English
+locale (the English phrases would simply never match translated prose).
+Every `Localized*` type (`LocalizedRoomType`/`LocalizedAiKnowledgeDocument`)
+therefore carries BOTH fields side by side — `name`/`description`/
+`content` (locale-resolved, for on-screen prose) and `sourceName`/
+`sourceDescription`/`sourceContent` (always English, for `derive*()`
+detection and `getRoomPhotography()`'s exact-name lookup). The
+highlight/venue chip LABELS themselves (once a chip is known to apply)
+are then translated via the new `Highlights` message-catalog namespace
+(Phase 2's existing mechanism, extended — not a new one), keyed by the
+exact same stable `key` `derive*()` already returns — not the translation
+tables above, since these are presentation-layer vocabulary ("City
+View", "Free Wi-Fi"), not hotel-specific facts.
+
+### Translation approval workflow (this phase's demo content)
+
+`src/config/defaults/seed/ageez-grand-hotel-translations.ts` holds the
+approved am/zh/es/ar text, keyed by the same `RoomType.name`/
+`AiKnowledgeDocument.category` values the English fixture
+(`ageez-grand-hotel.ts`) uses. `prisma/seed/index.ts`'s `seedBaseline()`
+upserts each translation row right after upserting its English parent, so
+`npm run db:seed`/`npm run db:restore-baseline` always leave the database
+with canonical English content plus all four approved translations,
+deterministically. `docs/TRANSLATION_AUDIT.md` is the reviewable
+en→am/zh/es/ar mapping for every string in that fixture file — a
+developer-facing artifact only; the database/seed files remain the one
+runtime source of truth.
+
+### Restaurant/services/facilities boundary
+
+Audited per this phase's explicit instruction to STOP rather than move
+content into the database "merely to satisfy this phase." Every guest-
+facing descriptive fact on `/restaurant`/`/services` already derives from
+a live `AiKnowledgeDocument` row (`dining`/`services`/`facilities`
+categories) — there is no source-code-configuration content boundary to
+flag here; the highlight/venue-card LABELS are the one piece that's
+presentation-layer vocabulary rather than hotel fact (see "Detection vs.
+display" above), and stay in the message catalogs accordingly.
+
+### 360° tour (`/tour`) boundary
+
+`/tour` (`src/app/tour/page.tsx`) is a top-level route outside the
+`[locale]` segment entirely (M11's deliberate design — full-screen, no
+guest-site chrome, keeps the `pannellum` dependency out of the normal
+site bundle) — there is no resolved locale available to it at all. It
+reads the Presidential Suite's `RoomType` row via the plain, unlocalized
+`roomTypes.findMany()` (unchanged by this phase) and always shows English
+content, matching its pre-Phase-3 behavior exactly. Bringing `/tour`
+under locale routing would be a routing-architecture change well beyond
+this phase's approved scope (explicitly called out as a STOP condition);
+documented here for a future focused phase rather than forced now.
+
+See "AI Concierge boundary" further below for how the AI tool layer
+relates to this phase's new locale-aware content-resolution layer.
 
 ## Message catalog structure
 
@@ -94,6 +219,24 @@ catalog, so server- and client-rendered chrome can never disagree.
   them. Several strings inside `concierge-chat.tsx` are exact-byte-match
   locked because `tests/e2e/concierge.spec.ts`/`tests/e2e/xssRegression.spec.ts`
   assert them by exact text against unprefixed/English routes.
+
+## Brand / proper names
+
+`Ageez Grand Hotel` (and `AGEEZ GRAND HOTEL` as it appears on the
+building signage in cinematic footage) is never reinvented per
+language — always the same Latin brand string, in every locale, sourced
+from the live `Hotel.name` field via `{hotelName}` interpolation, never
+hardcoded or translated text. The same rule applies to venue proper
+names — "Axum Restaurant"/"Buna Lounge" — wherever they appear as a
+structured element (a `VenueCard` title, a `DiningVenueRule.name`): the
+brand string stays exactly as-is in every locale. Inside flowing PROSE —
+a translated `AiKnowledgeDocument.content` sentence, or an AI Concierge
+starter question — a natural transliteration into the target script
+(e.g. "አክሱም ሬስቶራንት"/"مطعم أكسوم" for Axum Restaurant in Amharic/Arabic) is
+used instead, matching how a hospitality document written natively in
+that language would actually present the name; both are legitimate,
+intentional, and don't conflict — see `docs/TRANSLATION_AUDIT.md`'s
+`dining` entry for the exact venue-name treatment per locale.
 
 ## RTL (Arabic)
 
@@ -163,6 +306,15 @@ matches on English keywords only, and submitting a translated question
 would silently degrade every non-English guest to the generic fallback
 answer instead of the real grounded one. Real multilingual AI
 conversation is Phase 4's job, not Phase 2's.
+
+**Phase 3 addendum:** `src/lib/ai/tools/getHotelKnowledge.ts`/
+`getRoomTypesSummary.ts` (and every other AI tool) still call the plain,
+unlocalized `aiKnowledgeDocuments.findByCategory()`/`roomTypes.findMany()`
+— untouched by Phase 3, deliberately, even though a locale-aware
+alternative (`findByCategoryLocalized()`/`findManyLocalized()`) now
+exists in the same file. That layer was built specifically so Phase 4 CAN
+wire multilingual AI grounding cleanly later; it is not activated for AI
+conversation yet.
 
 ## Management scope
 

@@ -221,6 +221,42 @@
       "messageTooLong": "Please keep your message under {max} characters."
     }
   },
+  "Highlights": {
+    "rooms": {
+      "king-room": "King Room",
+      "twin-room": "Twin Room",
+      "city-view": "City View",
+      "upgraded-amenities": "Upgraded Amenities",
+      "dedicated-workspace": "Dedicated Workspace",
+      "lounge-access": "Lounge Access",
+      "multi-bed-suite": "Multi-Bed Suite",
+      "separate-living-area": "Separate Living Area",
+      "premier-suite": "Premier Suite",
+      "private-lounge": "Private Lounge",
+      "dining-area": "Dining Area",
+      "panoramic-views": "Panoramic Views"
+    },
+    "upToGuests": "{count, plural, one {Up to # Guest} other {Up to # Guests}}",
+    "services": {
+      "airport-pickup": "Airport Pickup",
+      "restaurant": "Restaurant",
+      "room-service": "Room Service",
+      "laundry": "Laundry",
+      "wifi": "Free Wi-Fi",
+      "fitness-center": "Fitness Center",
+      "business-center": "Business Center",
+      "conference-facilities": "Conference Facilities",
+      "reception": "24-Hour Reception"
+    },
+    "conferenceHalls": "{count, plural, one {# Conference Hall} other {# Conference Halls}}",
+    "venues": {
+      "axum": { "tagline": "{hotelName}'s main restaurant." },
+      "buna": { "tagline": "A coffee lounge at the hotel." },
+      "conference-facilities": { "name": "Conference Facilities", "tagline": "Meeting and event space at the hotel." },
+      "fitness-center": { "name": "Fitness Center", "tagline": "The hotel's fitness center." },
+      "business-center": { "name": "Business Center", "tagline": "The hotel's business center." }
+    }
+  },
   "Errors": {
     "heading": "Something went wrong",
     "description": "We couldn't complete that request. Please try again, or head back to the homepage.",
