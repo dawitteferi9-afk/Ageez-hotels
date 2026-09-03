@@ -1,5 +1,91 @@
 # Changelog
 
+## Multilingual Support Phase 1 — corrective pass: remember explicit choice, locale-persistent navigation (2026-09-03)
+Independent review of Phase 1 (`ab9717f`) approved the core architecture
+(`next-intl`, `Hotel.enabledLocales`, the switcher, RTL, the `src/
+middleware.ts` fix) but held the push pending two corrections. Neither
+changes routing architecture, RBAC, tenant isolation, auth, reservation/
+service workflows, or `/management`/`/tour` scope — both are additive
+fixes within the already-approved design.
+
+**1. Remember explicit user choice, without Accept-Language auto-negotiation.**
+`next-intl`'s own `localeDetection` flag gates its Accept-Language header
+check AND its cookie check together (confirmed by reading its source) —
+so it stayed `false` (no header-based negotiation, ever), and
+`src/middleware.ts` gained its own narrower, cookie-only read: for a
+genuinely unprefixed request, if the `NEXT_LOCALE` cookie (the same one
+the language switcher already writes via next-intl's own
+`useRouter().replace(pathname, { locale })` — that write path needed no
+change) names a recognized, non-default locale, redirect to that
+locale's prefixed URL. An explicit locale-prefixed URL always wins over
+any stored cookie. `src/i18n/routing.ts`'s `localeCookie` is now
+explicitly configured with a one-year `maxAge` (next-intl's
+un-configured default has none, so it would only last one browser
+session) so a real return visit — not just the same tab — restores the
+choice.
+- `src/middleware.ts`: `hasExplicitLocalePrefix()` +
+  `localeFromCookiePreference()`, both pure/small, reading the cookie
+  before delegating to `intlMiddleware`.
+- `src/i18n/routing.ts`: `LOCALE_COOKIE_NAME` exported (single source of
+  truth, no more relying on next-intl's internal default string), plus
+  the explicit `localeCookie` config.
+
+**2. Preserve locale through normal guest navigation.** Every internal
+`<Link>` across the guest site now imports `Link` from
+`src/i18n/navigation.ts` (next-intl's locale-aware component — a
+drop-in replacement, same props) instead of `next/link` directly:
+`SiteHeader` (desktop + mobile nav, the hotel-name/logo link, the
+Concierge pill, Contact Us), `SiteFooter` (About/Contact), `RoomTypeCard`
+("View Details"), the homepage (Book a Room, Ask Our AI Concierge, the
+Dining/Services "Learn more" links), the room detail page (back link,
+"Book This Room"), the booking-continuation page (back link), the
+booking confirmation page (Back to Home, Browse More Rooms, Ask Our AI
+Concierge), and the guest `error`/`not-found` boundaries. The booking
+Server Action (`rooms/[id]/book/actions.ts`) now resolves the current
+locale via `getLocale()` (`next-intl/server`) and builds its confirmation
+redirect's path prefix manually against `routing.defaultLocale` — not
+via next-intl's own navigation `redirect()`, whose published types
+resolve to its react-client entry point regardless of actual runtime
+context and don't type a server-usable `redirect` at all (a real,
+confirmed rough edge, not a guess — see `docs/DECISIONS.md`).
+`src/i18n/navigation.ts` no longer exports `redirect`/`getPathname` for
+this same reason.
+- Deliberately unchanged: `/management/*`, `/tour`, `/api/*` — none of
+  these live under `[locale]`, and none of their internal links were
+  touched.
+- Deliberately unchanged: `panorama-tour.tsx` (the M11 `/tour` component,
+  outside `[locale]` by design).
+
+Verified: `npm run typecheck` (clean), `npm run lint` (clean), `npm run
+build` (clean, `ƒ Middleware` still correctly bundled at 98.9 kB, the
+same pre-existing non-fatal `next-auth`/`jose` warning as Phase 1's own
+build, unrelated to this pass). 399/399 unit tests, 213/213 integration
+tests (unchanged from Phase 1 — this pass added no new schema/logic
+those suites cover). `tests/e2e/multilingual.spec.ts` grew from 21 to 33
+tests (the 5 explicit-memory scenarios the Product Owner listed, plus 7
+navigation-preservation checks spanning desktop/mobile nav, homepage
+CTAs, room cards, restaurant/services links, the footer, and a full
+real booking-flow run ending on a locale-correct confirmation page) —
+33/33 pass, including one pre-existing Phase 1 test
+(`Arabic pages render right-to-left...`) that needed updating: it
+happened to visit unprefixed `/` right after `/ar` within the same
+browser context, which — now that explicit choices are remembered — is
+the NEW, correct redirect-to-`/ar` behavior, not a regression; the test
+now uses explicit locale-prefixed URLs for its LTR assertions instead,
+which correctly isolates "does this locale render ltr" from the memory
+feature. Full regression re-run: `booking.spec.ts`, `auth.spec.ts`,
+`concierge.spec.ts`, `contactPage.spec.ts`, `securityHeaders.spec.ts`
+(26/26), `csrfRegression.spec.ts`, `management.spec.ts`,
+`managementDashboard.spec.ts`, `xssRegression.spec.ts` — all pass; 3
+tests in the last batch initially failed with timeout/worker-crash
+signatures during a 15-minute serial run and were confirmed, by
+re-running them alone immediately after a clean process/memory reset, to
+be the same resource-exhaustion class of flake seen earlier in this same
+session (a long-running dev server process growing past 2GB, webpack
+worker-process crashes, test-context teardown timeouts) — none of the 3
+touch anything this pass changed (management dashboard AI-banner
+navigation, MaintenanceIssue/ServiceRequest XSS handling).
+
 ## Multilingual Support Phase 1 — routing/locale foundation (2026-09-03)
 Product Owner-approved foundation for guest-site multilingual support:
 `en` (default), `am`, `zh`, `es`, `ar` (RTL), default-locale-unprefixed

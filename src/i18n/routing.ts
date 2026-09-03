@@ -16,19 +16,32 @@ import { defineRouting } from "next-intl/routing";
  * byte-for-byte. Every other locale gets an explicit prefix (`/am/...`,
  * `/zh/...`, `/es/...`, `/ar/...`).
  *
- * `localeDetection: false` — deliberately NOT using Accept-Language/
- * cookie-based automatic redirection on unprefixed paths. With
- * detection on, next-intl's middleware would 302-redirect an unprefixed
- * URL (e.g. a guest's bookmarked `/rooms`, or a booking-confirmation
- * email link) to a different locale-prefixed URL for any visitor whose
- * browser/cookie indicates a non-English preference — which is exactly
- * what "preserve every existing unprefixed English URL / preserve
- * existing booking links" (the locked routing decision) rules out. With
- * detection off, unprefixed URLs deterministically always serve English
- * for every visitor, and the only way to reach another locale is the
- * explicit language switcher or a locale-prefixed URL directly — see
- * `docs/DECISIONS.md`'s matching entry for the full reasoning and the
- * empirical check that confirmed this.
+ * `localeDetection: false` — next-intl's own built-in automatic
+ * detection is OFF. This one flag gates BOTH its Accept-Language header
+ * check AND its cookie check together (confirmed by reading next-intl's
+ * own `resolveLocaleFromPrefix()` source — both are behind the same
+ * `if (!locale && routing.localeDetection)` guard), and the locked
+ * requirement needs exactly one of those two disabled forever
+ * (Accept-Language) while the other (an explicit prior choice) is
+ * restored. So `localeDetection` stays `false` — this guarantees
+ * next-intl itself never redirects an unprefixed URL based on a
+ * visitor's browser language, full stop, no exceptions — and
+ * `middleware.ts` implements its OWN narrower, cookie-only "remember an
+ * explicit choice" redirect on top, reading (never writing beyond what
+ * next-intl already writes) the same `LOCALE_COOKIE_NAME` cookie below.
+ * See `middleware.ts` and `docs/DECISIONS.md`'s corrective-pass entry
+ * for the exact behavior and why this split was necessary.
+ *
+ * `localeCookie` stays on (next-intl's default) so the language switcher
+ * (`src/components/guest/language-switcher.tsx`, via next-intl's own
+ * `useRouter().replace(pathname, { locale })`) keeps writing this same
+ * cookie the instant a guest makes an explicit choice — that write path
+ * needed no change; only the *read* path (next-intl's own automatic
+ * detection) needed to be replaced with the narrower, cookie-only
+ * version. Configured explicitly (name + a real `maxAge`, instead of
+ * next-intl's un-configured default, which has no `maxAge` at all and
+ * so would only last the browser session) so an explicit choice survives
+ * a real return visit, not just the same session.
  */
 export const LOCALES = ["en", "am", "zh", "es", "ar"] as const;
 export type AppLocale = (typeof LOCALES)[number];
@@ -42,9 +55,17 @@ export function isRtlLocale(locale: string): boolean {
   return (RTL_LOCALES as readonly string[]).includes(locale);
 }
 
+export const LOCALE_COOKIE_NAME = "NEXT_LOCALE";
+const LOCALE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365; // one year
+
 export const routing = defineRouting({
   locales: LOCALES,
   defaultLocale: DEFAULT_LOCALE,
   localePrefix: "as-needed",
   localeDetection: false,
+  localeCookie: {
+    name: LOCALE_COOKIE_NAME,
+    maxAge: LOCALE_COOKIE_MAX_AGE_SECONDS,
+    sameSite: "lax",
+  },
 });

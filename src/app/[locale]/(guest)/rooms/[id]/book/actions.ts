@@ -1,9 +1,11 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { getLocale } from "next-intl/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getCurrentTenantHotel, withTenant, findAvailableRoom } from "@/lib/tenant";
+import { routing } from "@/i18n/routing";
 import { validateStayDates, nightsBetween, calculateTotalPrice } from "@/lib/domain/booking";
 import { bookingFormSchema, type BookingFormInput, type BookingFormState } from "./schema";
 
@@ -112,5 +114,21 @@ export async function createBookingAction(
     throw err;
   }
 
-  redirect(`/booking/confirmation/${reservationId}`);
+  // Multilingual Support Phase 1 corrective pass — locale-aware redirect:
+  // a guest who filled out this form while browsing e.g. /am/rooms/.../book
+  // must land on /am/booking/confirmation/[id], not the English default.
+  // `getLocale()` resolves the current request's locale from the same
+  // request-scoped context `[locale]/(guest)/layout.tsx` established
+  // (this action runs as part of that same request) — no locale needs to
+  // be threaded through the form itself. The prefix is built manually
+  // (rather than via next-intl's own navigation `redirect`/`getPathname`)
+  // because next-intl's published types for those resolve to its
+  // react-client entry point regardless of runtime context, which does
+  // not type a server-usable `redirect` — a known rough edge in its
+  // dual react-server/react-client package structure, not something to
+  // fight with a type-cast. This mirrors exactly what `as-needed`
+  // prefixing means: no prefix for the default locale, `/xx` otherwise.
+  const locale = await getLocale();
+  const localePrefix = locale === routing.defaultLocale ? "" : `/${locale}`;
+  redirect(`${localePrefix}/booking/confirmation/${reservationId}`);
 }

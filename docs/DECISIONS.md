@@ -4,6 +4,74 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-03 — Multilingual Support Phase 1 corrective pass: cookie-only locale memory (never Accept-Language); locale-aware `<Link>` site-wide; a real next-intl typing limitation worked around, not fought
+**Status:** Approved and implemented
+**Decision:** Two additive fixes on top of the already-approved Phase 1
+architecture, required before push by independent review.
+
+1. **"Remember explicit choice" is cookie-only, implemented as a small
+   custom check in `src/middleware.ts`, not via next-intl's own
+   `localeDetection` flag.** Reading next-intl's `resolveLocaleFromPrefix()`
+   source directly (not assumed) confirmed `localeDetection` gates BOTH
+   its Accept-Language check and its cookie check behind the same
+   boolean — there is no built-in way to have one without the other.
+   Since the locked requirements need cookie-based memory but an
+   absolute, permanent ban on Accept-Language negotiation, next-intl's
+   own detection stays fully off (`localeDetection: false`, unchanged
+   from Phase 1) and `middleware.ts` reads the `NEXT_LOCALE` cookie
+   itself, only for genuinely unprefixed requests, only to redirect to
+   that locale's prefix. The cookie's *write* path needed no change —
+   next-intl's own `useRouter().replace(pathname, {locale})` (used by
+   the language switcher since Phase 1) already writes it via
+   `document.cookie` client-side on every explicit switch; only a
+   *read* path had to be added, and it was built narrow and explicit
+   rather than by re-enabling next-intl's broader (header-inclusive)
+   mechanism and trying to suppress half of it.
+2. **Every internal guest `<Link>` now uses `src/i18n/navigation.ts`'s
+   locale-aware `Link`, not `next/link`'s directly** — resolving the
+   Phase 1-documented "known limitation" (an internal link used to drop
+   back to the English/unprefixed next page while browsing a non-default
+   locale). This was always going to be needed before shipping a
+   guest-visible locale feature; Phase 1 deferred it explicitly, this
+   pass delivers it. Scope stayed exactly to guest components/pages —
+   `/management/*`, `/tour`, `/api/*` are untouched, matching the locked
+   "do not locale-prefix" boundary.
+3. **A real, confirmed next-intl typing limitation, not a guess:**
+   `next-intl`'s `package.json` exports map ties `./navigation`'s
+   `types` condition to its react-client build's `.d.ts` unconditionally
+   — `moduleResolution: "bundler"` and Next.js's own runtime module
+   resolution correctly pick the react-server implementation at build
+   time (so the *code* works), but `tsc`'s type-checking always sees the
+   client types, which do not export a server-usable `redirect` at all.
+   Discovered by an actual `tsc` failure ("missing return statement") in
+   the booking Server Action, not by reading next-intl's docs and
+   guessing. Rather than fighting this with a type assertion, the
+   Server Action instead calls `getLocale()` (`next-intl/server`,
+   correctly typed and already the established pattern for resolving
+   locale in server contexts) and builds the redirect path manually
+   against `routing.defaultLocale` — three lines, fully typed, and
+   `src/i18n/navigation.ts` no longer exports `redirect`/`getPathname`
+   at all, so this rough edge can't be silently reintroduced by a future
+   `import { redirect } from "@/i18n/navigation"`.
+4. **A stale Phase 1 test needed correcting, not the app:**
+   `multilingual.spec.ts`'s RTL/LTR test visited `/ar` then bare `/`
+   within one browser context, expecting `/` to still render LTR — once
+   explicit-choice memory (fix #1) existed, that same-context revisit to
+   `/` now correctly redirects to `/ar`, which is the intended new
+   behavior, not a regression. Fixed by asserting LTR against explicit
+   locale-prefixed URLs (`/am`, `/zh`, `/es`) instead of relying on bare
+   `/` staying English regardless of context history — this also more
+   precisely isolates what the test actually means to check.
+**Rationale:** CLAUDE.md rule 1 — item 3 in particular was verified by
+reproducing the actual `tsc` error and reading next-intl's shipped
+`package.json`/`.d.ts` files directly rather than assumed from general
+familiarity with the library; item 4 was diagnosed by reading the
+failing test's actual execution order rather than assuming the app was
+at fault. Both are recorded so a future session doesn't rediscover
+either the hard way.
+
+---
+
 ## 2026-09-03 — Multilingual Support Phase 1: middleware relocated to `src/middleware.ts` (a real, pre-existing detection bug, not a redesign); next-intl routing/config choices
 **Status:** Approved and implemented
 **Decision, and the discovery behind it:** While implementing Phase 1's
