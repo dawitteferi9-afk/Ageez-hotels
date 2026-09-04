@@ -4,6 +4,74 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-05 — Production hotfix: `/` <-> `/en` redirect loop, root cause and defensive fix
+**Status:** Approved and implemented (local commit only — not pushed)
+**Decision:** Vercel production served a deterministic 307 loop between
+the unprefixed English homepage and `/en`. Root-caused via static
+analysis of every redirect/rewrite mechanism in the app plus empirical
+reproduction attempts against a local production build; fixed with two
+small, additive, defense-in-depth changes confined to `src/middleware.ts`
+(logic extracted to a new `src/lib/locale/routingGuards.ts` for
+testability — see that file's own comment).
+
+1. **Root cause.** `src/middleware.ts`'s cookie-preference redirect is
+   the ONLY `NextResponse.redirect` call site in this app (confirmed by
+   repo-wide search); every other redirect is `next-intl`'s own
+   `intlMiddleware`. With `routing.localeDetection: false`, next-intl's
+   installed `resolveLocale.js` can only resolve an unprefixed request's
+   locale to `routing.defaultLocale` — it never consults cookie or
+   Accept-Language for an unprefixed path — so it structurally cannot
+   redirect `/` to `/en`; our own `localeFromCookiePreference()`
+   explicitly excludes the default locale, so it can't either. A dozen
+   empirical variations (cookie states, casing, trailing slash, double
+   slash, query strings, missing env vars) against a local production
+   build reproduced none of it. Since the redirect TO `/en` cannot
+   originate from this app's own routing logic under its current,
+   correct config, the most plausible explanation — consistent with
+   "production only, deterministic, build succeeds" — is a STALE,
+   SHARED-CACHED redirect for the unprefixed route: `NextResponse.
+   redirect()` sets no `Cache-Control` by default, leaving it eligible
+   for caching by a CDN/proxy, so any prior/transient/misconfigured
+   redirect-to-`/en` response, once cached, would keep fighting against
+   next-intl's own (correct, one-directional) `/en -> /` canonicalization
+   forever — exactly the observed alternation, and exactly why a fresh
+   local server (no cache layer) never reproduces it.
+2. **Fix, not a workaround.** Two additive changes, neither disabling nor
+   redesigning multilingual routing: (a) every redirect this middleware
+   issues now carries `Cache-Control: no-store`, closing the caching
+   failure mode outright; (b) an unconditional structural guard
+   (`isRedirectToEnglishPrefix()`) inspects any computed redirect for an
+   already-unprefixed request and suppresses it if the target is `/en`
+   or `/en/...`, serving the request directly instead — making the
+   invariant true BY CONSTRUCTION regardless of whether the caching
+   theory is exactly right, and independent of `next-intl`'s internals,
+   which this app does not control.
+3. **Extraction, not a design change.** The four pure decision functions
+   moved from `src/middleware.ts` into `src/lib/locale/routingGuards.ts`
+   for exactly one reason: `src/middleware.ts` imports `next-intl/
+   middleware`, whose compiled output cannot be resolved by plain
+   Vitest/Node ESM resolution (confirmed directly) — the identical class
+   of problem `src/lib/auth/edge.ts`/`index.ts` already exists to solve
+   for NextAuth's Node entry pulling in `next/server`. Same fix shape,
+   applied here for the same reason, so the new regression tests
+   (`tests/unit/middleware.test.ts`) could exercise this logic directly.
+4. **No change to the approved contract.** English stays unprefixed at
+   `/`; `/en` still canonicalizes away, one-directionally; `/am`/`/zh`/
+   `/es`/`/ar` remain locale-prefixed; `localeDetection` stays `false`;
+   the `NEXT_LOCALE` cookie still preserves an explicit choice;
+   `/management` remains English-only and untouched. No auth, RBAC,
+   tenant-isolation, booking/business logic, schema, or dependency was
+   touched.
+**Rationale:** Restores production without disabling multilingual
+support, closes a real (if unconfirmed-in-the-exact-mechanism) failure
+mode outright via caching hygiene, and makes the specific reported
+symptom (`/` redirected to `/en`) structurally impossible going forward
+regardless of root-cause certainty — appropriate rigor for a production
+incident where the exact upstream trigger (stale CDN cache vs. some other
+transient state) cannot be directly inspected from this environment.
+
+---
+
 ## 2026-09-04 — Multilingual Support Phase 5: SEO/hreflang closeout, one central helper, locked indexability policy
 **Status:** Approved and implemented (local commit only — not pushed)
 **Decision:** Closed the multilingual milestone by making Phases 1–4's

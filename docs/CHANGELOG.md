@@ -1,5 +1,46 @@
 # Changelog
 
+## Production hotfix — `/` <-> `/en` redirect loop (2026-09-05)
+Vercel production reported a deterministic 307 loop (`/ -> /en -> / -> /en
+-> ...`, `ERR_TOO_MANY_REDIRECTS`) not reproducible against a local
+production build. Root cause and fix recorded in `docs/DECISIONS.md`'s
+matching entry and in `src/middleware.ts`'s own module comment.
+
+- **`src/lib/locale/routingGuards.ts`** (new): the four pure locale-
+  routing decision functions (`hasExplicitLocalePrefix`,
+  `localeFromCookiePreference`, `withNoStore`, `isRedirectToEnglishPrefix`)
+  moved out of `src/middleware.ts` into their own module — `src/
+  middleware.ts` imports `next-intl/middleware`, whose compiled output
+  cannot be resolved by plain Vitest/Node ESM resolution, so this logic
+  needed a Vitest-importable home (same fix shape as the pre-existing
+  `src/lib/auth/edge.ts`/`index.ts` split, for the same class of problem).
+- **`src/middleware.ts`**: every redirect this middleware issues now gets
+  `Cache-Control: no-store` (closes the most likely root cause — a
+  `NextResponse.redirect()` carries no cache header by default, leaving
+  it eligible for stale caching by a CDN/proxy/browser); and an
+  unconditional structural guard now suppresses any redirect that would
+  send an already-unprefixed (canonical English) request to `/en` or
+  `/en/...`, regardless of which mechanism produced it — serving the
+  original request directly instead. No auth/RBAC/tenant/database code
+  touched; no dependency added; no locale/routing contract changed (`/`
+  still English, `/en` still canonicals away, `/am`/`/zh`/`/es`/`/ar`
+  unaffected).
+- **New `tests/unit/middleware.test.ts`** (30 tests): proves
+  `localeFromCookiePreference()` can never return `"en"` for any cookie
+  value, `isRedirectToEnglishPrefix()` correctly flags only `/en`/
+  `/en/...` targets (never `/`, never another locale, never a false
+  positive on paths like `/enterprise`), `withNoStore()` sets
+  `Cache-Control: no-store` only on actual redirects, and — end-to-end-in-
+  miniature — no `/ <-> /en` cycle is reachable for representative
+  English (`/`, `/rooms`, `/restaurant`, `/services`, `/contact`,
+  `/about`) and non-English (`/am`, `/zh/rooms`, `/es/contact`,
+  `/ar/services`) routes.
+- Verified: `typecheck`/`lint`/`build` clean; `npm run test` 503/503
+  (unit, +30); full multilingual + auth + management Playwright suite
+  (58 tests, production build, `--workers=1`) 58/58 passed, including the
+  exact `/en` canonicalization regression test. DB baseline restored
+  after the run.
+
 ## Multilingual Support Phase 5 — SEO, hreflang, and final multilingual closeout (2026-09-04)
 The milestone's closeout phase: made the four locale-aware guest
 experiences already built (Phases 1–4) correctly discoverable and

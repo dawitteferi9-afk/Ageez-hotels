@@ -1,52 +1,80 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import createIntlMiddleware from "next-intl/middleware";
-import { hasLocale } from "next-intl";
 import { auth } from "@/lib/auth/edge";
-import { routing, LOCALE_COOKIE_NAME } from "@/i18n/routing";
+import { routing } from "@/i18n/routing";
+import {
+  hasExplicitLocalePrefix,
+  localeFromCookiePreference,
+  withNoStore,
+  isRedirectToEnglishPrefix,
+} from "@/lib/locale/routingGuards";
 
 const intlMiddleware = createIntlMiddleware(routing);
 
 /**
- * True if `pathname` already carries an explicit locale segment (`/am`,
- * `/am/rooms`, `/en`, `/en/rooms`, ...) — including the default locale's
- * own explicit prefix, which next-intl's own `as-needed` handling
- * canonicalizes to the unprefixed URL further down the pipeline. An
- * explicit URL always wins over any stored preference; this function
- * exists so the cookie-based redirect below only ever applies to a
- * genuinely unprefixed request (`/`, `/rooms`, ...).
- */
-function hasExplicitLocalePrefix(pathname: string): boolean {
-  return routing.locales.some((locale) => pathname === `/${locale}` || pathname.startsWith(`/${locale}/`));
-}
-
-/**
- * Multilingual Support Phase 1 (corrective pass) — "remember explicit
- * user choice," reading (never inventing) the same `NEXT_LOCALE` cookie
- * the language switcher already writes on every explicit switch (via
- * next-intl's own `useRouter().replace(pathname, { locale })` — see
- * `src/i18n/routing.ts`'s comment for why that write path needed no
- * change). For a genuinely unprefixed request whose cookie names a
- * *recognized, non-default* locale, this redirects to that locale's
- * prefixed equivalent of the same path — the ONLY thing this function
- * ever reads to make that decision is the cookie; it never looks at
- * `Accept-Language` or any other header, so `routing.localeDetection:
- * false` (no automatic browser-language negotiation, ever) remains
- * fully true regardless of this function's existence.
+ * PRODUCTION HOTFIX (2026-09-05) — `/ <-> /en` redirect loop.
  *
- * `locale` — from either the cookie or the URL — is ordinary
- * presentation/request context here, exactly as everywhere else in this
- * app's locale handling; it is never treated as an authentication or
- * authorization signal, and this function runs before (is irrelevant
- * to) the `/management` auth branch below, which is keyed on `pathname`
- * only.
+ * Symptom: the Vercel production deployment (build succeeded, "Ready")
+ * served a deterministic 307 loop — `/ -> /en -> / -> /en -> ...` —
+ * reproducible only in production, never against a local `next start`.
+ *
+ * Investigation: `src/middleware.ts` is the only place in this app that
+ * issues a redirect (confirmed by a repo-wide search — the cookie-
+ * preference branch below is the sole `NextResponse.redirect` call site);
+ * every other redirect comes from `next-intl`'s own `intlMiddleware`, a
+ * third-party black box. With `routing.localeDetection: false`,
+ * next-intl's own locale-resolution algorithm (traced through its
+ * installed source, `resolveLocale.js`) can ONLY resolve an unprefixed
+ * request's locale to `routing.defaultLocale` ("en") — it never consults
+ * the cookie or `Accept-Language` for an unprefixed path — so
+ * `intlMiddleware` cannot itself redirect `/` (or any other unprefixed
+ * English URL) TO `/en`; confirmed empirically too, against a production
+ * build, across a dozen request variations (no cookie, `NEXT_LOCALE=en`,
+ * a non-default-locale cookie, mixed case, trailing slash, double slash,
+ * query strings, and a missing-env-vars run) — none reproduced a `/ ->
+ * /en` hop. Our OWN cookie-preference branch below is likewise
+ * structurally incapable of targeting `/en`:
+ * `localeFromCookiePreference()` (`src/lib/locale/routingGuards.ts`)
+ * explicitly excludes `routing.defaultLocale`.
+ *
+ * Given the redirect TO `/en` cannot originate from this app's own
+ * routing logic under its current, correct configuration, the most
+ * plausible explanation for a loop that appears ONLY on Vercel and
+ * disappears when tested fresh is a STALE, SHARED-CACHED redirect
+ * response for the unprefixed route: `NextResponse.redirect()` calls
+ * carry no `Cache-Control` header by default, which leaves them eligible
+ * for caching by Vercel's edge network / an intermediate proxy / the
+ * browser itself. A redirect cached from any prior, transient, or
+ * misconfigured state (a stale deployment, an edge config drift, or any
+ * future regression) would keep being replayed for `/` indefinitely,
+ * fighting against `intlMiddleware`'s own (correct, uncached-by-default)
+ * `/en -> /` canonicalization on every alternate hop — producing exactly
+ * the observed deterministic alternation, and explaining why it cannot be
+ * reproduced against a fresh local server with no cache layer in front of
+ * it.
+ *
+ * Fix (both defensive, additive — no business logic, auth, tenant, or
+ * database code touched; see `src/lib/locale/routingGuards.ts` for the
+ * implementations and why they live in a separate, Vitest-importable
+ * module):
+ *
+ *  1. `withNoStore()` marks every redirect this middleware issues
+ *     `Cache-Control: no-store` — no shared cache can ever again serve a
+ *     stale locale-redirect decision for any route. This closes the
+ *     caching-based failure mode outright, going forward.
+ *  2. `isRedirectToEnglishPrefix()`, checked below, is a structural,
+ *     unconditionally-enforced invariant: if a genuinely unprefixed
+ *     request (already the canonical English URL) is ever about to be
+ *     redirected to `/en` or `/en/...` — by `intlMiddleware`, by a future
+ *     change to this file, or by anything else in this pipeline — it is
+ *     detected and suppressed, and the request is served directly
+ *     instead. This makes "an unprefixed English URL is never redirected
+ *     to /en" true BY CONSTRUCTION, independent of whichever exact
+ *     mechanism produced the original incident, and independent of
+ *     `next-intl`'s internals, which this app does not control.
+ *
+ * See `tests/unit/middleware.test.ts` for the regression coverage.
  */
-function localeFromCookiePreference(request: NextRequest): string | null {
-  const cookieLocale = request.cookies.get(LOCALE_COOKIE_NAME)?.value;
-  if (!cookieLocale) return null;
-  if (!hasLocale(routing.locales, cookieLocale)) return null;
-  if (cookieLocale === routing.defaultLocale) return null; // already home; nothing to redirect to
-  return cookieLocale;
-}
 
 /**
  * This file now does three jobs, composed rather than merged: the
@@ -102,16 +130,28 @@ export default auth((request) => {
     return;
   }
 
-  if (!hasExplicitLocalePrefix(pathname)) {
+  const explicitPrefix = hasExplicitLocalePrefix(pathname);
+
+  if (!explicitPrefix) {
     const preferredLocale = localeFromCookiePreference(request);
     if (preferredLocale) {
       const url = request.nextUrl.clone();
       url.pathname = `/${preferredLocale}${pathname === "/" ? "" : pathname}`;
-      return NextResponse.redirect(url);
+      return withNoStore(NextResponse.redirect(url));
     }
   }
 
-  return intlMiddleware(request);
+  const response = intlMiddleware(request);
+
+  // See the hotfix comment above: an already-unprefixed (canonical)
+  // English request must never be sent to `/en` — if it somehow were,
+  // serve the original request directly instead of following that
+  // redirect.
+  if (!explicitPrefix && isRedirectToEnglishPrefix(response, request)) {
+    return NextResponse.next();
+  }
+
+  return withNoStore(response);
 });
 
 /**
