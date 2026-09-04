@@ -4,7 +4,103 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
-## 2026-09-05 — Production hotfix: `/` <-> `/en` redirect loop, root cause and defensive fix
+## 2026-09-05 — Production hotfix round 2: `/` <-> `/en` redirect loop, ACTUAL root cause (`auth()` + `AUTH_URL` origin substitution)
+**Status:** Approved and implemented (local commit only — not pushed)
+**Decision:** Round 1 (previous entry, below) was real, valid hardening
+but did not fix the loop — a brand-new Vercel deployment (ruling out
+stale/shared cache) still looped. The actual root cause was traced to,
+and confirmed directly in, the installed `next-auth` package source.
+
+1. **Root cause, at the library-source level.**
+   `node_modules/next-auth/lib/env.js`:
+   ```js
+   export function reqWithEnvURL(req) {
+     const url = process.env.AUTH_URL ?? process.env.NEXTAUTH_URL;
+     if (!url) return req;
+     const { origin: envOrigin } = new URL(url);
+     const { href, origin } = req.nextUrl;
+     return new NextRequest(href.replace(origin, envOrigin), req);
+   }
+   ```
+   and `lib/index.js`'s `handleAuth()`: `const request = reqWithEnvURL(args[0])`,
+   then `userMiddlewareOrRoute(augmentedReq, ...)` where `augmentedReq IS
+   request`. Whenever `AUTH_URL`/`NEXTAUTH_URL` is set, `auth()`'s
+   middleware wrapper UNCONDITIONALLY rebuilds the incoming request with
+   its origin replaced by that env var's origin, then invokes the wrapped
+   callback with the REBUILT request — independent of `authConfig.
+   trustHost` (`trustHost` only ever affects session/CSRF cookie trust,
+   never this substitution). The prior `middleware.ts` wrapped ALL
+   guest/locale routing inside `auth((request) => {...})`, so
+   `intlMiddleware` — and therefore every locale decision downstream —
+   operated on this origin-substituted request instead of the real one.
+2. **Reproduced directly, not just inferred.** Running this app locally
+   with `AUTH_URL` pointed at an unreachable host and a request `Host`
+   header different from the server's real address reproduced the exact
+   failure mode: `Failed to proxy http://<AUTH_URL host>/en [Error:
+   getaddrinfo ENOTFOUND ...]`. This is direct proof that next-intl's
+   internal same-origin rewrite (unprefixed `/` → its internal `/en`
+   representation, needed to match the `[locale]` dynamic segment — see
+   `middleware.ts`'s `/tour` comment for the same internal-rewrite
+   mechanism) was being built against `AUTH_URL`'s origin instead of the
+   request's real one.
+3. **Exact production redirect chain.** A rewrite to a different origin
+   is treated by Next.js/Vercel as an edge proxy fetch to that origin. If
+   `AUTH_URL`'s origin happens to be a live deployment of this same app
+   (a very easy misconfiguration to have — a different `*.vercel.app`
+   alias, a preview domain, a custom domain mismatch), the proxied `/en`
+   request gets a genuine, correct 307 back to `/` from THAT origin's own
+   middleware; that response gets relayed to the ORIGINAL browser as the
+   answer to ITS original `/` request, carrying a relative `Location: /`
+   that resolves back against the REAL domain the visitor is on. The
+   browser re-requests `/`, and the cycle repeats indefinitely — matching
+   the reported Vercel runtime-log pattern (`/ -> /en -> / -> /en -> ...`)
+   exactly, with `/en` never appearing in the browser's own address bar
+   or history (it's an edge-internal proxy hop, only visible server-side).
+   This also explains why round 1's `isRedirectToEnglishPrefix()` guard
+   didn't catch it: that guard only inspects 3xx responses, and the
+   response `intlMiddleware` produces for `/` in this scenario is a
+   REWRITE (not a redirect) to a foreign origin — a different response
+   shape entirely.
+4. **Why this was unreproducible before round 2, no matter how
+   thoroughly the routing logic itself was tested.** This repo's
+   `.env.local` sets `AUTH_URL="http://localhost:3000"`, which
+   coincidentally always equals `next start`'s own real origin, making
+   `reqWithEnvURL` a silent no-op for every local run — masking the bug
+   completely regardless of cookie state, headers, or any other variable
+   under the tester's control, since the ONE variable that actually
+   matters (whether `AUTH_URL`'s origin matches the real serving origin)
+   was never varied until this round's deliberate mismatch test.
+5. **Fix: stop routing guest/locale requests through `auth()` at all.**
+   `src/middleware.ts` is now a plain, unwrapped function operating on
+   the pristine `NextRequest` Next.js itself provides. `auth()` is
+   invoked ONLY for `/management/*` — scoped to exactly the routes that
+   need session awareness, exactly as before — via a small
+   `managementAuthGate` constant. `/tour` and every guest route now never
+   touch `reqWithEnvURL`'s origin substitution, regardless of what
+   `AUTH_URL` is or isn't set to in any environment. This is root-cause-
+   eliminating, not defensive: the mechanism this bug depends on can no
+   longer reach the locale-routing code path, full stop. Round 1's
+   `Cache-Control: no-store` and `isRedirectToEnglishPrefix()` guard stay
+   in place as legitimate, independent hardening, no longer the sole
+   line of defense.
+6. **No change to auth/RBAC/tenant/database/business logic, or to the
+   approved locale routing contract.** `/management/*` still goes
+   through the identical `authConfig.authorized()` check, with the
+   identical `reqWithEnvURL` behavior NextAuth applies to its own
+   routes/cookies (which is fine and expected there) — this fix only
+   stops that behavior from reaching routes that have nothing to do with
+   auth. English stays unprefixed at `/`; `/en` still canonicalizes away,
+   one-directionally; `/am`/`/zh`/`/es`/`/ar` remain locale-prefixed;
+   `localeDetection` stays `false`; the `NEXT_LOCALE` cookie still
+   preserves an explicit choice.
+**Rationale:** Eliminates the actual mechanism the incident depended on,
+verified by directly reproducing and then directly resolving the exact
+failure condition (not by inference alone), while keeping the
+`/management` auth gate's real security behavior completely untouched.
+
+---
+
+## 2026-09-05 — Production hotfix round 1: `/` <-> `/en` redirect loop, initial diagnosis and defensive fix (superseded by round 2 above — the caching theory below was disproven by a fresh Vercel deployment still looping; the hardening itself was kept)
 **Status:** Approved and implemented (local commit only — not pushed)
 **Decision:** Vercel production served a deterministic 307 loop between
 the unprefixed English homepage and `/en`. Root-caused via static

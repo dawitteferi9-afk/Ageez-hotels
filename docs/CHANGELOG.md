@@ -1,5 +1,75 @@
 # Changelog
 
+## Production hotfix round 2 — actual root cause of the `/` <-> `/en` redirect loop (2026-09-05)
+Round 1 (`af9078b`, below) was real, valid hardening but did not fix the
+loop — a brand-new Vercel deployment (ruling out stale cache) still
+looped. Full root-cause writeup, with exact evidence, in
+`src/middleware.ts`'s module comment and `docs/DECISIONS.md`'s matching
+entry.
+
+**Root cause, confirmed at the `next-auth` source level**
+(`node_modules/next-auth/lib/env.js`'s `reqWithEnvURL()` +
+`lib/index.js`'s `handleAuth()`): whenever `AUTH_URL` (or `NEXTAUTH_URL`)
+is set, `auth()`'s middleware wrapper unconditionally rebuilds the
+incoming request with its origin replaced by `AUTH_URL`'s origin, THEN
+invokes the wrapped callback with that rewritten request — completely
+independent of `authConfig.trustHost`. This app's old `middleware.ts`
+wrapped ALL guest/locale routing inside `auth((request) => {...})`, so
+`intlMiddleware` (and therefore next-intl's internal same-origin rewrite
+for the unprefixed default locale) ran against an origin that doesn't
+match the real domain whenever `AUTH_URL` doesn't exactly match the
+production domain being visited.
+
+**Exact redirect chain, reproduced directly (not just inferred):**
+running this app locally with `AUTH_URL` pointed at an unreachable host,
+and a request `Host` header different from the server's real address,
+reproduced the identical failure mode: `Failed to proxy http://<AUTH_URL
+host>/en [Error: getaddrinfo ENOTFOUND ...]` — proof that next-intl's
+internal rewrite of `/` to its internal `/en` representation was being
+built against `AUTH_URL`'s origin instead of the request's real one. On
+Vercel, a rewrite to a different origin becomes an edge proxy fetch to
+that origin; if `AUTH_URL`'s origin happens to be a live deployment of
+this same app, the proxied `/en` request gets a real 307 back to `/` from
+that origin's own middleware, which gets relayed to the original browser
+as the response to ITS original `/` request — with a relative `Location:
+/` that the browser re-resolves against the REAL domain it's on. The
+browser re-requests `/`, and the cycle repeats: `/ -> /en (edge-internal,
+never a browser URL) -> / -> /en -> ...`, matching the reported Vercel
+runtime-log pattern exactly, while never appearing as `/en` in the
+browser's own address bar or history.
+
+- **`src/middleware.ts`**: guest/locale routing (and `/tour`) is now
+  handled by a plain, unwrapped middleware function that operates on the
+  pristine `NextRequest` Next.js itself invokes this file with. `auth()`
+  is now invoked ONLY for `/management/*` requests (`managementAuthGate`),
+  scoped to exactly the routes that need session awareness — never
+  touching `reqWithEnvURL`'s origin substitution for any other route,
+  regardless of what `AUTH_URL` is (or isn't) set to. Root-cause-
+  eliminating, not defensive: the origin-swap this bug depends on can no
+  longer reach the locale-routing code path at all. Round 1's `Cache-
+  Control: no-store` and `isRedirectToEnglishPrefix()` guard remain in
+  place as legitimate, independent hardening.
+- No auth/RBAC/tenant/database code changed: `/management/*` still goes
+  through the exact same `authConfig.authorized()` check, with the exact
+  same `reqWithEnvURL` behavior NextAuth applies to its own routes/cookies
+  — this fix only stops that behavior from reaching routes that have
+  nothing to do with auth.
+- Verified: `typecheck`/`lint`/`build` clean. Directly reproduced the
+  exact failure condition (mismatched `AUTH_URL` + `Host` header) against
+  a local production build BEFORE the fix (confirmed the "Failed to
+  proxy" error) and confirmed it resolves to a clean 200 (and correct,
+  one-way `/en -> /` / `/ -> /am` redirects) AFTER the fix, with no code
+  or environment change other than this file. `npm run test` 503/503
+  (unchanged — the pure routing-guard functions this fix reuses were not
+  modified). Full multilingual + auth + management + managementAssistant
+  Playwright suite (66 tests, production build, `--workers=1`): one
+  transient timing flake on first run (`auth.spec.ts`'s sign-out test,
+  15/15 in isolation with 3 repeats, 66/66 on a clean re-run of the exact
+  same combined suite — consistent with this project's documented long-
+  single-worker-run flakiness pattern, not a regression from this change,
+  which does not touch the `authorized()` redirect logic at all). DB
+  baseline restored after every run.
+
 ## Production hotfix — `/` <-> `/en` redirect loop (2026-09-05)
 Vercel production reported a deterministic 307 loop (`/ -> /en -> / -> /en
 -> ...`, `ERR_TOO_MANY_REDIRECTS`) not reproducible against a local
