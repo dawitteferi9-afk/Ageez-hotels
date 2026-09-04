@@ -1,7 +1,19 @@
 import type { Metadata } from "next";
 
+/**
+ * Multilingual Support Phase 5 — `/tour` is a "SPECIAL BOUNDARY ROUTE"
+ * (Phase 5's route audit): public, real guest content, but deliberately
+ * outside `[locale]` (M11 — see `middleware.ts`'s comment for why) and so
+ * has no localized variant to alternate to. It gets a plain self-
+ * `canonical` and no `languages`/`x-default` map — a single-locale
+ * `alternates` block would be a no-op that misleadingly implies this
+ * route participates in the multilingual routing contract when it does
+ * not. Still indexable (included once, English-only, in
+ * `src/app/sitemap.ts`) — no reason to hide a real public feature page.
+ */
 export const metadata: Metadata = {
   title: "Virtual Tour",
+  alternates: { canonical: "/tour" },
 };
 
 /**

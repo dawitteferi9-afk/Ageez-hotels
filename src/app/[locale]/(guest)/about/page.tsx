@@ -3,10 +3,26 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
 import { KnowledgeSection } from "@/components/guest/knowledge-section";
+import { buildGuestPageMetadata } from "@/lib/seo/metadata";
+import type { AppLocale } from "@/i18n/routing";
 
+/**
+ * Multilingual Support Phase 5 — description reuses the same live
+ * `overview` `AiKnowledgeDocument` content the page body renders (same
+ * fallback the homepage already uses when no `overview` document exists).
+ */
 export async function generateMetadata(): Promise<Metadata> {
+  const locale = (await getLocale()) as AppLocale;
   const t = await getTranslations("Navigation");
-  return { title: t("about") };
+  const hotel = await getCurrentTenantHotel();
+  const overview = await withTenant(hotel.id).aiKnowledgeDocuments.findByCategoryLocalized("overview", locale);
+  return buildGuestPageMetadata({
+    path: "/about",
+    locale,
+    enabledLocales: hotel.enabledLocales,
+    title: t("about"),
+    description: overview?.content ?? `${hotel.name} — ${hotel.city}, ${hotel.country}`,
+  });
 }
 
 export default async function AboutPage() {

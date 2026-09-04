@@ -9,19 +9,34 @@ import { Card, CardContent } from "@/components/ui/card";
 import { BookingForm } from "@/components/guest/booking-form";
 import { formatCurrency } from "@/lib/utils";
 import { createBookingAction } from "./actions";
+import { buildGuestPageMetadata } from "@/lib/seo/metadata";
+import type { AppLocale } from "@/i18n/routing";
 
 interface BookRoomPageProps {
   params: Promise<{ id: string }>;
 }
 
+/**
+ * Multilingual Support Phase 5 — public but transactional (Phase 5 §2):
+ * a booking form has no standalone search value and must never be
+ * indexed. `indexable: false` still gives this page its own self-
+ * `canonical` (avoiding any accidental inherited canonical — see
+ * `src/lib/seo/metadata.ts`) plus an explicit `robots: {index:false}`.
+ */
 export async function generateMetadata({ params }: BookRoomPageProps): Promise<Metadata> {
   const { id } = await params;
-  const locale = await getLocale();
+  const locale = (await getLocale()) as AppLocale;
   const hotel = await getCurrentTenantHotel();
   const roomType = await withTenant(hotel.id).roomTypes.findUniqueLocalized(id, locale);
   if (!roomType) return {};
   const t = await getTranslations("Booking");
-  return { title: t("bookRoomTitle", { roomName: roomType.name }) };
+  return buildGuestPageMetadata({
+    path: `/rooms/${roomType.id}/book`,
+    locale,
+    enabledLocales: hotel.enabledLocales,
+    title: t("bookRoomTitle", { roomName: roomType.name }),
+    indexable: false,
+  });
 }
 
 /**

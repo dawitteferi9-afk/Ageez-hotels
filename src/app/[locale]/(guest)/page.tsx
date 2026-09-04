@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { getLocale, getTranslations } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { Sparkles, UtensilsCrossed } from "lucide-react";
@@ -9,6 +10,33 @@ import { RoomTypeCard } from "@/components/guest/room-type-card";
 import { CinematicHero } from "@/components/guest/cinematic/CinematicHero";
 import { Reveal } from "@/components/guest/cinematic/Reveal";
 import { cn } from "@/lib/utils";
+import { buildGuestPageMetadata } from "@/lib/seo/metadata";
+import { buildHotelJsonLd } from "@/lib/seo/structuredData";
+import type { AppLocale } from "@/i18n/routing";
+
+/**
+ * Multilingual Support Phase 5 — the homepage's own canonical/hreflang/OG
+ * metadata (title/description content itself is unchanged from before
+ * this phase — `(guest)/layout.tsx`'s `generateMetadata()` already
+ * computed the same `hotel.name`/`overview` fallback as the layout-wide
+ * default; this duplicates that one small read here so the homepage can
+ * set its own `alternates`/`openGraph`, which a layout's metadata cannot
+ * correctly do for every other route beneath it — see
+ * `src/lib/seo/metadata.ts`'s comment on why every guest page sets its
+ * own `alternates.canonical` rather than inheriting one).
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = (await getLocale()) as AppLocale;
+  const hotel = await getCurrentTenantHotel();
+  const overview = await withTenant(hotel.id).aiKnowledgeDocuments.findByCategoryLocalized("overview", locale);
+  return buildGuestPageMetadata({
+    path: "/",
+    locale,
+    enabledLocales: hotel.enabledLocales,
+    title: hotel.name,
+    description: overview?.content ?? `${hotel.name} — ${hotel.city}, ${hotel.country}`,
+  });
+}
 
 /**
  * M12 Phase 2B — cinematic guest experience. Same queries as before this
@@ -65,8 +93,21 @@ export default async function GuestHomePage() {
     roomTypes.map((rt) => tenant.rooms.count({ roomTypeId: rt.id }))
   );
 
+  // Multilingual Support Phase 5 — minimal `schema.org/Hotel` structured
+  // data, homepage only (see `src/lib/seo/structuredData.ts` for exactly
+  // which approved facts this asserts, and which speculative properties
+  // were deliberately left out). `dangerouslySetInnerHTML` is the
+  // standard, Next.js-documented way to emit a JSON-LD `<script>` tag;
+  // the content is server-generated from trusted DB fields only, never
+  // guest input.
+  const hotelJsonLd = buildHotelJsonLd(hotel, locale as AppLocale);
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(hotelJsonLd) }}
+      />
       <CinematicHero
         heroOverlay={
           <div className="relative flex h-full flex-col justify-end">

@@ -13,6 +13,8 @@ import { ROOM_HIGHLIGHT_ICONS, DEFAULT_ROOM_ICON } from "@/components/guest/room
 import { RoomVisual } from "@/components/guest/room-visual";
 import { RoomGallery } from "@/components/guest/room-gallery";
 import { FactChip } from "@/components/guest/fact-chip";
+import { buildGuestPageMetadata } from "@/lib/seo/metadata";
+import type { AppLocale } from "@/i18n/routing";
 
 interface RoomDetailPageProps {
   params: Promise<{ id: string }>;
@@ -27,12 +29,32 @@ async function getRoomType(id: string, locale: string) {
   return { hotel, roomType, roomCount };
 }
 
+/**
+ * Multilingual Support Phase 5 — canonical/hreflang/OG for the one guest
+ * page keyed by a live DB id rather than a static path. `path` is built
+ * from `roomType.id`, the same canonical identifier `/rooms` links to and
+ * `/rooms/[id]/book` books against (Phase 5 §9 — no translated slug is
+ * introduced). Description reuses `roomType.description` (already
+ * locale-resolved by `findUniqueLocalized()`), the exact text the page
+ * body renders. `imagePath` uses this room type's own photography when
+ * available (`getRoomPhotography()`, keyed by the canonical English
+ * `sourceName` exactly like the page body already does), falling back to
+ * the site's default exterior shot otherwise — never a generated image.
+ */
 export async function generateMetadata({ params }: RoomDetailPageProps): Promise<Metadata> {
   const { id } = await params;
-  const locale = await getLocale();
+  const locale = (await getLocale()) as AppLocale;
   const result = await getRoomType(id, locale);
   if (!result) return {};
-  return { title: result.roomType.name };
+  const { hotel, roomType } = result;
+  return buildGuestPageMetadata({
+    path: `/rooms/${roomType.id}`,
+    locale,
+    enabledLocales: hotel.enabledLocales,
+    title: roomType.name,
+    description: roomType.description,
+    imagePath: getRoomPhotography(roomType.sourceName).hero,
+  });
 }
 
 /**

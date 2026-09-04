@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { getPublicAppUrl } from "@/lib/seo/config";
 
 /**
  * Review-deployment preparation — environment-aware `/robots.txt`.
@@ -18,6 +19,16 @@ import type { MetadataRoute } from "next";
  * `<meta name="robots">` tag as a second, independent signal. Neither
  * changes any route's actual behavior or accessibility — search-engine
  * signals only.
+ *
+ * Multilingual Support Phase 5 — the production branch now also
+ * disallows `/management` and `/api` explicitly (defense in depth
+ * alongside `src/app/management/layout.tsx`'s per-page `noindex` meta
+ * tag and both routes' absence from `src/app/sitemap.ts`; `/api` never
+ * had a page-level `robots` meta tag option in the first place, since it
+ * serves no HTML), and points crawlers at the sitemap. The review branch
+ * is UNCHANGED — a blanket disallow already covers everything underneath
+ * it, and `/management`/`/api` add nothing to a rule that already
+ * disallows `/`.
  */
 export default function robots(): MetadataRoute.Robots {
   const isReviewDeployment = process.env.DEPLOYMENT_STAGE === "review";
@@ -35,6 +46,8 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: "*",
       allow: "/",
+      disallow: ["/management", "/api"],
     },
+    sitemap: `${getPublicAppUrl()}/sitemap.xml`,
   };
 }

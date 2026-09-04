@@ -8,10 +8,30 @@ import { deriveDiningVenues } from "@/lib/guest/knowledgeHighlights";
 import { getVenuePhotography } from "@/lib/guest/venuePhotography";
 import { CinematicScene } from "@/components/guest/cinematic/CinematicScene";
 import { CINEMATIC_SCENES } from "@/lib/guest/cinematicConfig";
+import { buildGuestPageMetadata } from "@/lib/seo/metadata";
+import type { AppLocale } from "@/i18n/routing";
 
+/**
+ * Multilingual Support Phase 5 — description reuses the same live
+ * `dining` `AiKnowledgeDocument` content the page body renders (falls
+ * back to a generic, purely factual hotel-identity sentence — never an
+ * invented cuisine/menu/hours claim — when no `dining` document exists).
+ * OG image uses the same Axum Restaurant scene photograph the page's own
+ * cinematic banner already uses.
+ */
 export async function generateMetadata(): Promise<Metadata> {
+  const locale = (await getLocale()) as AppLocale;
   const t = await getTranslations("Navigation");
-  return { title: t("restaurant") };
+  const hotel = await getCurrentTenantHotel();
+  const dining = await withTenant(hotel.id).aiKnowledgeDocuments.findByCategoryLocalized("dining", locale);
+  return buildGuestPageMetadata({
+    path: "/restaurant",
+    locale,
+    enabledLocales: hotel.enabledLocales,
+    title: t("restaurant"),
+    description: dining?.content ?? `${hotel.name} — ${hotel.city}, ${hotel.country}`,
+    imagePath: CINEMATIC_SCENES["restaurant-shot-2"].posterSrc,
+  });
 }
 
 const DINING_VENUE_ICONS: Record<string, LucideIcon> = {

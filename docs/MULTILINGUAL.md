@@ -490,6 +490,143 @@ same file. That layer was built specifically so a later phase could wire
 multilingual AI grounding cleanly; Phase 4 is that phase, and the AI tools
 now use the locale-aware reads as described above.
 
+## Phase 5 — SEO, hreflang, and final multilingual closeout
+
+Phase 5 is the milestone's closeout: it adds no new locale, no new
+message-catalog namespace, no schema, and no navigation/business-logic
+change — it makes the four locale-aware experiences already built
+(Phases 1–4) discoverable and correctly signaled to search engines,
+without weakening any existing security/tenant boundary.
+
+### Route indexability policy (locked)
+
+Every guest route was classified once, centrally, rather than decided
+ad hoc per page:
+
+| Class | Routes | Indexable? |
+|---|---|---|
+| A — public indexable guest content | `/`, `/rooms`, `/rooms/[id]`, `/restaurant`, `/services`, `/contact`, `/about` | Yes |
+| B — public but transactional/session-specific | `/rooms/[id]/book`, `/booking/confirmation/[reservationId]`, `/concierge` | No — explicit `robots: {index:false, follow:true}` |
+| C — private/management | `/management/*` (including the public but staff-only `/management/login`) | No — `robots: {index:false, follow:false}`, plus `robots.ts` disallow |
+| D — API/internal | `/api/*` | No — `robots.ts` disallow only (serves no HTML, no page-level meta tag applies) |
+| E — special boundary | `/tour` (M11, deliberately outside `[locale]` — see `middleware.ts`) | Yes — English-only, self-canonical, no hreflang alternates (nothing to alternate to) |
+
+Class B pages are excluded from `src/app/sitemap.ts` even though they
+carry their own `noindex` meta tag — the milestone brief's rule (never
+rely on exactly one signal) is applied literally here.
+`booking/confirmation/[reservationId]`'s metadata deliberately builds its
+self-canonical from the path `/booking/confirmation` (no
+`reservationId`), since that canonical is never surfaced to anything
+(no sitemap entry, no hreflang alternate) — it exists only so the page
+has *a* well-formed `alternates.canonical` rather than none.
+
+### Canonical URL contract, hreflang, and x-default
+
+One helper module, `src/lib/seo/`, is the only place this logic lives:
+
+- `src/lib/seo/config.ts` — `getPublicAppUrl()` (reads
+  `NEXT_PUBLIC_APP_URL`, already in `.env.example` since M0 but unused by
+  any runtime code before this phase; never `AUTH_URL` — see that
+  file's comment for why those two are deliberately kept separate),
+  `HREFLANG_LOCALE_MAP` (`zh` → `zh-CN`; every other locale's hreflang
+  code equals its internal code), and `OG_LOCALE_MAP`
+  (`en_US`/`am_ET`/`zh_CN`/`es_ES`/`ar_AR` — documented, unremarkable
+  defaults, not a claim about any guest's actual region).
+- `src/lib/seo/alternates.ts` — `localePath()` (the same
+  `locale === defaultLocale ? "" : "/"+locale` contract
+  `rooms/[id]/book/actions.ts` already hand-wrote for its own redirect,
+  now available as one shared, tested function), `buildLocaleAlternates()`
+  (the hreflang `languages` map plus `x-default`), and
+  `getOrderedEnabledLocales()` (platform-order-filtered by
+  `Hotel.enabledLocales` — trusted, server-resolved data only, exactly
+  like `isLocaleEnabledForHotel()` already requires).
+- `src/lib/seo/metadata.ts` — `buildGuestPageMetadata()`, the one call
+  every indexable-or-not guest page's `generateMetadata()` makes. Every
+  page sets its OWN `alternates.canonical` — even a `noindex` one —
+  rather than ever leaving it unset and relying on
+  `(guest)/layout.tsx`'s metadata to fill it in (Next's metadata merging
+  is per-top-level-key replacement, not deep merge; an unset `alternates`
+  on a child page would silently inherit whatever the layout last set).
+- `src/lib/seo/structuredData.ts` — `buildHotelJsonLd()` (see below).
+
+**x-default policy:** the English unprefixed URL, unless a (currently
+hypothetical) tenant has disabled English itself, in which case it falls
+back to that tenant's first platform-order enabled locale. Every
+alternates map is built from `Hotel.enabledLocales`, so a tenant that
+enables fewer than five locales gets a proportionally narrower hreflang
+set and sitemap — nothing is hardcoded to the current demo tenant's
+all-five configuration. `/en`, `/en/rooms`, etc. are structurally
+impossible to emit: every locale variant is built through `localePath()`,
+the one function that already encodes "the default locale is never
+prefixed."
+
+### Sitemap and robots
+
+`src/app/sitemap.ts` (new, `force-dynamic` like the guest layout, since
+sitemap content is entirely DB-driven) enumerates exactly the Class-A
+paths above, times each tenant-enabled locale, plus one English-only
+`/tour` entry — see the route-classification table for what's
+deliberately excluded and why. `src/app/robots.ts` (extended, not
+redesigned) now also disallows `/management` and `/api` in its normal
+(non-review) branch and points crawlers at `/sitemap.xml`; the
+`DEPLOYMENT_STAGE=review` blanket-disallow branch is untouched — a
+temporary review deployment stays fully `noindex`/`nofollow` regardless
+of any Phase 5 addition, exactly as before.
+
+### Structured data
+
+A minimal `schema.org/Hotel` JSON-LD block renders once, on the homepage
+only, built exclusively from live `Hotel` row fields already read by
+every guest page (`name`, `city`/`country`, `checkInTime`/`checkOutTime`,
+`currency`, `contactPhone`/`contactEmail` if present). Deliberately
+omitted, per the audit: `starRating`, `aggregateRating`/`reviewCount`,
+`geo`, `priceRange`, `award`, and any `amenityFeature` — none of these
+have an approved data source, and inventing one would violate the same
+fact-grounding discipline the guest site and AI Concierge already follow.
+
+### Open Graph and images
+
+Every indexable page's Open Graph block reuses an EXISTING, already-
+approved photograph (the homepage/listing default is the hotel exterior
+shot; a room detail page uses that room type's own hero photograph via
+the existing `getRoomPhotography()` mapping; the restaurant page reuses
+its own cinematic banner's poster image) — no new image asset was
+generated for this phase.
+
+### Fact-consistency-by-construction
+
+Every indexable page's meta `description` is either real, already
+locale-resolved DB content (`overview`/`dining`/`services`
+`AiKnowledgeDocument.content`, `RoomType.description`) or the EXACT SAME
+translated string the page body itself renders (`/rooms`'s description
+is the same `t("summary", {...})` call with the same params the page
+uses for its own subtitle, `/contact`'s reuses `Contact.subtitle`). This
+was a deliberate implementation choice, not just a description-writing
+convenience: with only one string per fact, the description and the
+visible page can never drift out of sync across five languages.
+
+### Security review (Phase 5 §21)
+
+- `/management/*` gained a second `noindex`/`nofollow` signal
+  (`src/app/management/layout.tsx`, metadata-only, no auth/RBAC code
+  touched) on top of the pre-existing `middleware.ts` auth gate and
+  `requireStaffAccess()` — defense in depth, same principle already
+  documented for that gate.
+- No reservation id, guest name, email, phone, or confirmation/
+  verification token ever appears in any title, description, canonical
+  URL, Open Graph field, or JSON-LD block — verified by inspection of
+  every `generateMetadata()` in the guest tree and by the confirmation
+  page's own comment explaining why its canonical path omits the id.
+- `locale` remains presentation-only everywhere it's used in this phase
+  (hreflang/OG-locale selection) — never a tenant/authorization signal;
+  `Hotel.enabledLocales` remains the one trusted, server-resolved source
+  for which locale variants get advertised at all.
+- Verified live (production build, `next start`, real seeded DB): `/en`
+  and `/en/rooms` still 307-redirect to their unprefixed equivalents; an
+  unrecognized locale (`/fr/rooms`) still 404s; `/management/login`
+  serves `noindex, nofollow`; `/sitemap.xml` contains zero `/management`,
+  `/api`, or `/en`-prefixed entries.
+
 ## Management scope
 
 `/management/*` is entirely outside the `[locale]` segment, untouched,

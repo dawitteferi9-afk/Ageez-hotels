@@ -1,5 +1,98 @@
 # Changelog
 
+## Multilingual Support Phase 5 — SEO, hreflang, and final multilingual closeout (2026-09-04)
+The milestone's closeout phase: made the four locale-aware guest
+experiences already built (Phases 1–4) correctly discoverable and
+signaled to search engines — canonical URLs, hreflang alternates,
+localized Open Graph metadata, a tenant-aware sitemap, and a minimal
+`schema.org/Hotel` JSON-LD block — with no new locale, no schema
+migration, no navigation/business-logic change, and no weakening of any
+existing security/tenant boundary. See the new Phase 5 section of
+`docs/MULTILINGUAL.md` for the full route-classification audit and
+architecture.
+
+- **New `src/lib/seo/` module** — the one place canonical/hreflang/OG
+  construction lives, so it's never hand-copied per page:
+  - `config.ts`: `getPublicAppUrl()` (reads `NEXT_PUBLIC_APP_URL`, already
+    in `.env.example` since M0 but unused by any runtime code before this
+    phase; deliberately never `AUTH_URL`), `HREFLANG_LOCALE_MAP` (`zh` →
+    `zh-CN`), `OG_LOCALE_MAP`.
+  - `alternates.ts`: `localePath()` (the same "default locale is never
+    prefixed" contract `rooms/[id]/book/actions.ts` already hand-wrote
+    for its own redirect, now shared/tested), `buildLocaleAlternates()`
+    (hreflang `languages` map + `x-default`, filtered by
+    `Hotel.enabledLocales`), `getOrderedEnabledLocales()`.
+  - `metadata.ts`: `buildGuestPageMetadata()` — every guest page's
+    `generateMetadata()` calls this once; sets its own self-`canonical`
+    always (even a `noindex` page), a `languages` hreflang map only when
+    indexable, and an explicit `robots` directive when not.
+  - `structuredData.ts`: `buildHotelJsonLd()` — minimal `schema.org/Hotel`
+    JSON-LD built exclusively from live `Hotel` row fields; no
+    `starRating`/`aggregateRating`/`geo`/`priceRange`/`award`/invented
+    `amenityFeature` (no approved data source for any of them).
+- **Route indexability policy (locked):** `/`, `/rooms`, `/rooms/[id]`,
+  `/restaurant`, `/services`, `/contact`, `/about` are indexable;
+  `/rooms/[id]/book`, `/booking/confirmation/[reservationId]`,
+  `/concierge` are `noindex,follow` (public but transactional/session-
+  specific, zero search value); `/management/*` and `/api/*` are
+  private/internal; `/tour` is indexable, English-only (lives outside
+  `[locale]`, no localized variant to alternate to).
+- **`src/app/[locale]/(guest)/*/page.tsx`** (home, rooms, rooms/[id],
+  restaurant, services, contact, about, rooms/[id]/book, concierge,
+  booking/confirmation/[reservationId]): every one's `generateMetadata()`
+  now calls `buildGuestPageMetadata()`. Every description reuses either
+  real, already locale-resolved DB content or the EXACT translated string
+  the page body itself renders (e.g. `/rooms`'s description is the same
+  `Rooms.summary` call, same params, the page uses for its own subtitle)
+  — one string per fact, so description and visible page can never drift
+  out of sync across five languages. OG images reuse existing, approved
+  photography only (room detail uses that room type's own hero photo via
+  the existing `getRoomPhotography()` mapping; no new asset generated).
+- **`src/app/[locale]/(guest)/page.tsx`** additionally renders one
+  `schema.org/Hotel` JSON-LD `<script>` (homepage only).
+- **New `src/app/sitemap.ts`** (`force-dynamic`, DB-driven like the guest
+  layout): enumerates every indexable Class-A path × each tenant-enabled
+  locale, plus one English-only `/tour` entry. Verified live (real seeded
+  DB): 56 URLs for the current 5-locale demo tenant (11 paths × 5 locales
+  + 1), zero `/management`, `/api`, or `/en`-prefixed entries.
+- **`src/app/robots.ts`** (extended, not redesigned): production branch
+  now also disallows `/management` and `/api` and points crawlers at
+  `/sitemap.xml`; the `DEPLOYMENT_STAGE=review` blanket-disallow branch is
+  UNCHANGED — review deployments stay fully `noindex`/`nofollow`
+  regardless.
+- **New `src/app/management/layout.tsx`** — metadata-only
+  (`robots: {index:false, follow:false}`) for every `/management/*`
+  route including the public `login` page; a second, independent
+  `noindex` signal alongside the pre-existing `middleware.ts` auth gate
+  and `requireStaffAccess()`. No auth/RBAC code touched.
+- **`src/app/layout.tsx`**: added `metadataBase` (via `getPublicAppUrl()`)
+  so every relative URL any page's metadata returns resolves correctly.
+- **`src/app/tour/layout.tsx`**: added a plain self-`canonical` (`/tour`)
+  — no hreflang/`languages` map, since this route has no localized
+  variant (see route-classification note above).
+- Verified live against a production build (`next build && next start`)
+  with the real seeded DB: `/en` and `/en/rooms` still 307-redirect to
+  their unprefixed equivalents; `/fr/rooms` still 404s; `/management/login`
+  serves `noindex, nofollow`; Arabic pages serve `lang="ar" dir="rtl"`
+  with `og:locale=ar_AR`; a room detail page's canonical/OG-image use its
+  own id/photo.
+- **Tests:** 3 new unit files, `tests/unit/seo/{config,alternates,
+  metadata}.test.ts` (43 new tests: localePath default-locale/prefix
+  behavior, hreflang zh→zh-CN mapping, x-default policy including the
+  English-disabled edge case, `enabledLocales` filtering/malformed-input
+  safety, `getPublicAppUrl()` fallback safety, `buildGuestPageMetadata()`
+  canonical/robots/OG behavior).
+- **Full regression, this phase:** `npm run typecheck`/`lint`/`build` all
+  clean; `npm run test` 473/473 (unit, +43); `npm run test:integration`
+  235/235; full Playwright suite (`--workers=1`, production build)
+  166 passed / 1 skipped (pre-existing intentional skip, unrelated) / 1
+  failed — the failure (`conciergeMultilingual.spec.ts`'s verified-
+  service-request test) reproduced the already-documented cross-spec-file
+  in-memory rate-limiter budget leak (see this file's M6-era gotcha and
+  `docs/DECISIONS.md`): confirmed by restarting the server fresh and
+  re-running that one test alone, which passed in 4.8s. Not a Phase 5
+  regression. DB baseline restored after every run.
+
 ## Multilingual Support Phase 4 — multilingual AI Concierge conversation (2026-09-03)
 Made the Guest AI Concierge genuinely multilingual across all 5 platform
 locales — one Concierge, one tenant, one knowledge base, one security

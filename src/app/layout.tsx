@@ -3,6 +3,7 @@ import { Fraunces, Inter, Noto_Sans_Arabic, Noto_Sans_Ethiopic } from "next/font
 import { getLocale } from "next-intl/server";
 import { cn } from "@/lib/utils";
 import { isRtlLocale } from "@/i18n/routing";
+import { getPublicAppUrl } from "@/lib/seo/config";
 import "@/styles/globals.css";
 
 /**
@@ -18,6 +19,17 @@ import "@/styles/globals.css";
 const isReviewDeployment = process.env.DEPLOYMENT_STAGE === "review";
 
 export const metadata: Metadata = {
+  /**
+   * Multilingual Support Phase 5 — resolves every relative URL any
+   * page's `generateMetadata()` returns (canonical, hreflang alternates,
+   * Open Graph images) against the app's real public origin
+   * (`NEXT_PUBLIC_APP_URL`, via `getPublicAppUrl()` — see that file for
+   * why this isn't `AUTH_URL`). Set here, once, at the true root layout,
+   * since `metadataBase` is inherited by every nested route's metadata,
+   * including `/management/*` and `/tour` which don't live under
+   * `[locale]`.
+   */
+  metadataBase: new URL(getPublicAppUrl()),
   title: "Ageez Hotels",
   description: "Ageez Hotels platform (M0 scaffold — no product pages implemented yet).",
   ...(isReviewDeployment && { robots: { index: false, follow: false } }),

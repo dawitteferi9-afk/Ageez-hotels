@@ -3,16 +3,38 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { getCurrentTenantHotel, withTenant } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
 import { RoomTypeCard } from "@/components/guest/room-type-card";
+import { buildGuestPageMetadata } from "@/lib/seo/metadata";
+import type { AppLocale } from "@/i18n/routing";
 
 /**
- * Multilingual Support Phase 2 — the tab title now comes from the
- * `Rooms` catalog namespace via `getTranslations()`, so it's correct per
- * locale rather than always English. Not a Phase 5 hreflang/SEO build-out
- * — just avoiding an obviously wrong (always-English) `<title>`.
+ * Multilingual Support Phase 2 — the tab title comes from the `Rooms`
+ * catalog namespace via `getTranslations()`, so it's correct per locale.
+ *
+ * Multilingual Support Phase 5 — description reuses the EXACT same
+ * `summary` string the page body renders (same params, same translation
+ * call) rather than a second, separately-maintained SEO copy — the
+ * fact-consistency requirement (Phase 5 §23) is trivially true by
+ * construction when there's only one string, not two that could drift.
  */
 export async function generateMetadata(): Promise<Metadata> {
+  const locale = (await getLocale()) as AppLocale;
   const t = await getTranslations("Rooms");
-  return { title: t("heading") };
+  const hotel = await getCurrentTenantHotel();
+  const tenant = withTenant(hotel.id);
+  const roomTypes = await tenant.roomTypes.findMany({});
+  const roomCounts = await Promise.all(roomTypes.map((rt) => tenant.rooms.count({ roomTypeId: rt.id })));
+  return buildGuestPageMetadata({
+    path: "/rooms",
+    locale,
+    enabledLocales: hotel.enabledLocales,
+    title: t("heading"),
+    description: t("summary", {
+      hotelName: hotel.name,
+      roomTypeCount: roomTypes.length,
+      roomCount: roomCounts.reduce((sum, n) => sum + n, 0),
+      currency: hotel.currency,
+    }),
+  });
 }
 
 /** M9b — visual/UX polish only; same queries as before this pass. */

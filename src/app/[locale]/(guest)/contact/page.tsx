@@ -7,10 +7,27 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { buttonVariants } from "@/components/ui/button";
 import { KnowledgeSection } from "@/components/guest/knowledge-section";
 import { cn } from "@/lib/utils";
+import { buildGuestPageMetadata } from "@/lib/seo/metadata";
+import type { AppLocale } from "@/i18n/routing";
 
+/**
+ * Multilingual Support Phase 5 — description reuses the page body's own
+ * `Contact.subtitle` string (generic, hotel-identity-only marketing
+ * copy — no address/phone/email is ever placed in metadata, per Phase 5
+ * §21/§19).
+ */
 export async function generateMetadata(): Promise<Metadata> {
+  const locale = (await getLocale()) as AppLocale;
   const t = await getTranslations("Navigation");
-  return { title: t("contact") };
+  const tContact = await getTranslations("Contact");
+  const hotel = await getCurrentTenantHotel();
+  return buildGuestPageMetadata({
+    path: "/contact",
+    locale,
+    enabledLocales: hotel.enabledLocales,
+    title: t("contact"),
+    description: tContact("subtitle"),
+  });
 }
 
 /**

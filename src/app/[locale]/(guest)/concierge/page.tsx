@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { Info, BedDouble, ShieldCheck, ClipboardList } from "lucide-react";
 import { getCurrentTenantHotel } from "@/lib/tenant";
 import { Container } from "@/components/ui/container";
@@ -7,10 +7,28 @@ import { Badge } from "@/components/ui/badge";
 import { AiBadge } from "@/components/ui/ai-badge";
 import { ConciergeChat } from "@/components/guest/concierge-chat";
 import { sendConciergeMessageAction, verifyReservationContextAction, confirmServiceRequestAction } from "./actions";
+import { buildGuestPageMetadata } from "@/lib/seo/metadata";
+import type { AppLocale } from "@/i18n/routing";
 
+/**
+ * Multilingual Support Phase 5 — public but session-specific (Phase 5
+ * §2/§20): the Concierge entry point itself carries only generic page
+ * metadata (title, self-canonical), never any conversation content, and
+ * is explicitly `noindex` — no chat history/session state is or could
+ * ever be reachable via a crawlable URL (the conversation lives in
+ * client-side React state plus Server Actions, never a GET route).
+ */
 export async function generateMetadata(): Promise<Metadata> {
+  const locale = (await getLocale()) as AppLocale;
   const t = await getTranslations("Concierge");
-  return { title: t("pageTitle") };
+  const hotel = await getCurrentTenantHotel();
+  return buildGuestPageMetadata({
+    path: "/concierge",
+    locale,
+    enabledLocales: hotel.enabledLocales,
+    title: t("pageTitle"),
+    indexable: false,
+  });
 }
 
 /**

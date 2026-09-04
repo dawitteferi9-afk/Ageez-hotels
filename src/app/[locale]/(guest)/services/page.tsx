@@ -25,10 +25,26 @@ import {
   deriveConferenceHallCount,
 } from "@/lib/guest/knowledgeHighlights";
 import { getVenuePhotography } from "@/lib/guest/venuePhotography";
+import { buildGuestPageMetadata } from "@/lib/seo/metadata";
+import type { AppLocale } from "@/i18n/routing";
 
+/**
+ * Multilingual Support Phase 5 — description reuses the live `services`
+ * `AiKnowledgeDocument` content the page body renders (generic
+ * hotel-identity fallback if absent — never an invented amenity).
+ */
 export async function generateMetadata(): Promise<Metadata> {
+  const locale = (await getLocale()) as AppLocale;
   const t = await getTranslations("Navigation");
-  return { title: t("services") };
+  const hotel = await getCurrentTenantHotel();
+  const services = await withTenant(hotel.id).aiKnowledgeDocuments.findByCategoryLocalized("services", locale);
+  return buildGuestPageMetadata({
+    path: "/services",
+    locale,
+    enabledLocales: hotel.enabledLocales,
+    title: t("services"),
+    description: services?.content ?? `${hotel.name} — ${hotel.city}, ${hotel.country}`,
+  });
 }
 
 const SERVICE_ICONS: Record<string, LucideIcon> = {

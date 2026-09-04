@@ -4,6 +4,82 @@ Format: date, decision, status, rationale. Newest first.
 
 ---
 
+## 2026-09-04 — Multilingual Support Phase 5: SEO/hreflang closeout, one central helper, locked indexability policy
+**Status:** Approved and implemented (local commit only — not pushed)
+**Decision:** Closed the multilingual milestone by making Phases 1–4's
+routing/content already correctly signaled to search engines, via one
+new `src/lib/seo/` module rather than per-page logic. Full architecture
+in `docs/MULTILINGUAL.md`'s new Phase 5 section; this entry records the
+decisions worth flagging specifically.
+
+1. **Every route was classified once, centrally, into five classes
+   (public indexable / public transactional / private / API / special
+   boundary) before any metadata was written**, rather than deciding
+   indexability ad hoc per page. `/rooms/[id]/book`,
+   `/booking/confirmation/[reservationId]`, and `/concierge` are public
+   but explicitly `noindex` — real URLs a guest can reach, but zero
+   search value and (for confirmation) a URL-embedded reservation id
+   that must never be advertised to a crawler.
+2. **Every guest page sets its OWN `alternates.canonical` — even a
+   `noindex` one — never relying on inheritance from `(guest)/layout.tsx`'s
+   metadata.** Next's metadata merging is per-top-level-key replacement,
+   not deep merge; leaving `alternates` unset on a child page would
+   silently inherit whatever the layout last set (today, nothing — but a
+   latent trap for a future layout change). Cheap insurance, applied
+   uniformly rather than reasoned about per page.
+3. **hreflang `x-default` is the English unprefixed URL, unless a tenant
+   has disabled English itself, in which case it falls back to that
+   tenant's first platform-order enabled locale** — never a hardcoded
+   locale, never a URL that could 404. No real tenant hits the fallback
+   branch today (the demo tenant enables all five, and
+   `Hotel.enabledLocales` defaults to `["en"]`), but the function is
+   written to be correct for the case anyway rather than assuming it away.
+4. **`zh` (internal locale code, used throughout routing/DB/catalogs) maps
+   to `zh-CN` ONLY for hreflang** (`HREFLANG_LOCALE_MAP`) — a
+   presentation-only SEO signal, never propagated back into routing,
+   `Hotel.enabledLocales`, message catalogs, or DB translation rows. The
+   internal locale code stays `zh` everywhere else, unchanged.
+5. **Minimal `schema.org/Hotel` JSON-LD, homepage only, built exclusively
+   from live `Hotel` row fields already read by every guest page.**
+   `starRating`, `aggregateRating`/`reviewCount`, `geo`, `priceRange`,
+   `award`, and any `amenityFeature` beyond what a guest page already
+   states were explicitly evaluated and excluded — no approved data
+   source exists for any of them, and structured data is held to the
+   same fact-grounding discipline as the visible site and the AI
+   Concierge (never assert something the page doesn't already say).
+6. **`/management/*` gained a second, independent `noindex`/`nofollow`
+   signal** (`src/app/management/layout.tsx`, metadata-only) on top of
+   the pre-existing `middleware.ts` auth gate and `requireStaffAccess()`
+   — defense in depth, the same principle already applied to that gate's
+   own history (see Phase 1's entry on the root- vs. `src/`-level
+   `middleware.ts` discovery). No auth/RBAC code was touched.
+7. **`NEXT_PUBLIC_APP_URL` (documented in `.env.example` since M0, unused
+   by any runtime code until now) is the sole source for every absolute
+   SEO URL (`metadataBase`, sitemap, JSON-LD) — deliberately never
+   `AUTH_URL`.** They happen to hold the same value in this single-
+   deployment app today, but are a different concern (public content
+   origin vs. Auth.js's callback/cookie security boundary); conflating
+   them would make a future divergence (e.g. a CDN/marketing domain in
+   front of the app origin) silently break one concern while "fixing"
+   the other.
+8. **No translated room-type slug was introduced.** `/rooms/[id]` keeps
+   using the canonical DB `RoomType.id` in every locale — Phase 5 was
+   evaluated against introducing a localized slug for URL aesthetics and
+   explicitly rejected it: it would create a second identity concept for
+   the same room type with no functional benefit, and risk exactly the
+   kind of booking/link-identity confusion Phase 3 was careful to avoid
+   when it kept canonical English source fields (`sourceName`,
+   `sourceDescription`) separate from locale-resolved display fields.
+9. **No new dependency.** Built entirely on Next.js's existing Metadata/
+   sitemap/robots APIs (`generateMetadata`, `MetadataRoute.Sitemap`,
+   `MetadataRoute.Robots`) — no SEO package was evaluated as necessary.
+**Rationale:** Makes the multilingual guest experience actually
+discoverable per locale (the point of building five locales in the first
+place) without inventing any new fact, weakening any existing boundary,
+or expanding scope beyond what Phases 1–4 already built.
+
+---
+
 ## 2026-09-03 — Multilingual Support Phase 4: multilingual AI Concierge conversation, locale as presentation context only
 **Status:** Approved and implemented (local commit only — not pushed)
 **Decision:** Wired locale into the existing single Concierge pipeline —

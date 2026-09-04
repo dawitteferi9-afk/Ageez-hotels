@@ -10,14 +10,37 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import { nightsBetween, formatBookingReference } from "@/lib/domain/booking";
+import { buildGuestPageMetadata } from "@/lib/seo/metadata";
+import type { AppLocale } from "@/i18n/routing";
 
 interface ConfirmationPageProps {
   params: Promise<{ reservationId: string }>;
 }
 
+/**
+ * Multilingual Support Phase 5 — the highest-priority non-indexable
+ * route (Phase 5 §19): the URL itself embeds a live `reservationId`, and
+ * the page renders guest-specific booking details. `path` here
+ * deliberately does NOT include the `reservationId` — a `noindex` page's
+ * "self-canonical" only needs to be A valid, well-formed URL for this
+ * page (it is never surfaced anywhere; no crawler alternate/sitemap
+ * entry ever points at it), and building one from guest-identifying data
+ * would risk exactly what this page's `robots` tag and its total
+ * absence from `src/app/sitemap.ts` already guard against. Title/
+ * description here stay hotel-generic — no reservation id, guest name,
+ * or booking reference is ever placed in metadata.
+ */
 export async function generateMetadata(): Promise<Metadata> {
+  const locale = (await getLocale()) as AppLocale;
   const t = await getTranslations("BookingConfirmation");
-  return { title: t("pageTitle") };
+  const hotel = await getCurrentTenantHotel();
+  return buildGuestPageMetadata({
+    path: "/booking/confirmation",
+    locale,
+    enabledLocales: hotel.enabledLocales,
+    title: t("pageTitle"),
+    indexable: false,
+  });
 }
 
 /**
